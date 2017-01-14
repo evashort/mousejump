@@ -20,10 +20,10 @@ Then look up the error code here:
 https://msdn.microsoft.com/en-us/library/windows/desktop/ms681381.aspx
 */
 
-
 #include <windows.h>
 #include <tchar.h>
 #include <gdiplus.h>
+#include <math.h>
 
 #pragma comment(linker, "/subsystem:windows")
 #pragma comment(lib, "user32")
@@ -58,6 +58,35 @@ HDC getInfoContext(HMONITOR monitor) {
   return CreateIC(_T("DISPLAY"), monitorInfo.szDevice, NULL, NULL);
 }
 
+Color getSystemColor(int colorConstant) {
+  COLORREF colorBytes = GetSysColor(colorConstant);
+  return Color(
+    GetRValue(colorBytes),
+    GetGValue(colorBytes),
+    GetBValue(colorBytes)
+  );
+}
+
+LOGFONT getSystemTooltipFont() {
+  NONCLIENTMETRICS metrics;
+  metrics.cbSize = sizeof(NONCLIENTMETRICS);
+  SystemParametersInfo(SPI_GETNONCLIENTMETRICS, 0, &metrics, 0);
+  return metrics.lfStatusFont;
+}
+
+int getPixelsPerLogicalInch(HMONITOR monitor) {
+  HDC infoContext = getInfoContext(monitor);
+  int pixelsPerLogicalInch = GetDeviceCaps(infoContext, LOGPIXELSY);
+  DeleteDC(infoContext);
+
+  return pixelsPerLogicalInch;
+}
+
+double logicalHeightToPointSize(int logicalHeight, HMONITOR monitor) {
+  double pixelsPerLogicalInch = getPixelsPerLogicalInch(monitor);
+  return abs(logicalHeight) * 72 / pixelsPerLogicalInch;
+}
+
 RECT getMonitorBounds(HMONITOR monitor) {
   MONITORINFOEX monitorInfo;
   monitorInfo.cbSize = sizeof(MONITORINFOEX);
@@ -80,6 +109,20 @@ SIZE getRectSize(RECT rect) {
   return size;
 }
 
+Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
+  RectF bounds;
+  graphics.MeasureString(text, -1, font, PointF(0.0f, 0.0f), &bounds);
+  return Size((int)round(bounds.Width), (int)round(bounds.Height));
+}
+
+StringFormat *getCenteredFormat() {
+  static StringFormat format(StringFormatFlagsNoWrap, LANG_NEUTRAL);
+  format.SetAlignment(StringAlignmentCenter);
+  format.SetLineAlignment(StringAlignmentCenter);
+  format.SetTrimming(StringTrimmingNone);
+  return &format;
+}
+
 SIZE getBitmapSize(HBITMAP bitmap) {
   BITMAP bitmapInfo;
   GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
@@ -92,8 +135,100 @@ SIZE getBitmapSize(HBITMAP bitmap) {
 }
 
 typedef struct {
+  LPTSTR fontFamily;
+  double fontPointSize;
+  Color textColor;
+  Color fillColor;
+  Color borderColor;
+  double borderRadius;
+  int borderWidth;
+  int earHeight;
+  int marginTop;
+  int marginLeft;
+  int marginBottom;
+  int marginRight;
+} Style;
+
+typedef struct {
+  Font *font;
+  SolidBrush *textBrush;
+  SolidBrush *fillBrush;
+  Pen *borderPen;
+} ArtSupplies;
+
+ArtSupplies getArtSupplies(Style style) {
+  ArtSupplies artSupplies;
+  artSupplies.font = new Font(style.fontFamily, style.fontPointSize);
+  artSupplies.textBrush = new SolidBrush(style.textColor);
+  artSupplies.fillBrush = new SolidBrush(style.fillColor);
+  artSupplies.borderPen = new Pen(style.borderColor, style.borderWidth);
+  return artSupplies;
+}
+
+void destroyArtSupplies(ArtSupplies artSupplies) {
+  delete artSupplies.font;
+  delete artSupplies.textBrush;
+  delete artSupplies.fillBrush;
+  delete artSupplies.borderPen;
+}
+
+void drawBubble(
+  Graphics &graphics,
+  Style style,
+  ArtSupplies artSupplies,
+  Point point,
+  LPTSTR text,
+  LPTSTR chosenText
+) {
+  Size textSize = getTextSize(graphics, artSupplies.font, text);
+
+  float borderRadius = (float)style.borderRadius;
+  GraphicsPath border;
+  border.AddArc(
+    point.X + textSize.Width - 2 * borderRadius,
+    point.Y + textSize.Height - 2 * borderRadius,
+    2 * borderRadius,
+    2 * borderRadius,
+    0, 90
+  );
+  border.AddArc(
+    point.X - 1.0f,
+    point.Y + textSize.Height - 2 * borderRadius,
+    2 * borderRadius,
+    2 * borderRadius,
+    90, 90
+  );
+  border.AddArc(
+    point.X - 1.0f,
+    point.Y - 1.0f,
+    2 * borderRadius,
+    2 * borderRadius,
+    180, 90
+  );
+  border.AddArc(
+    point.X + textSize.Width - 2 * borderRadius,
+    point.Y - 1.0f,
+    2 * borderRadius,
+    2 * borderRadius,
+    270, 90
+  );
+  border.CloseFigure();
+  graphics.FillPath(artSupplies.fillBrush, &border);
+  graphics.DrawPath(artSupplies.borderPen, &border);
+
+  graphics.DrawString(
+    text, -1,
+    artSupplies.font,
+    RectF(point.X, point.Y, textSize.Width, textSize.Height),
+    getCenteredFormat(),
+    artSupplies.textBrush
+  );
+}
+
+typedef struct {
   HMONITOR monitor;
   HDC deviceContext;
+  Style style;
 } Model;
 
 Model getModel(HMONITOR monitor) {
@@ -104,11 +239,32 @@ Model getModel(HMONITOR monitor) {
   model.deviceContext = CreateCompatibleDC(infoContext);
   DeleteDC(infoContext);
 
+  LOGFONT fontInfo = getSystemTooltipFont();
+  model.style.fontFamily = new TCHAR[_tcslen(fontInfo.lfFaceName) + 1];
+  _tcscpy(model.style.fontFamily, fontInfo.lfFaceName);
+  model.style.fontPointSize = logicalHeightToPointSize(
+    fontInfo.lfHeight,
+    monitor
+  );
+
+  model.style.textColor = getSystemColor(COLOR_INFOTEXT);
+  model.style.fillColor = getSystemColor(COLOR_INFOBK);
+  model.style.borderColor = Color(118, 118, 118);
+
+  model.style.borderRadius = 2;
+  model.style.borderWidth = 1;
+  model.style.earHeight = 4;
+  model.style.marginTop = 0;
+  model.style.marginLeft = 0;
+  model.style.marginBottom = 0;
+  model.style.marginRight = 0;
+
   return model;
 }
 
 void destroyModel(Model model) {
   DeleteDC(model.deviceContext);
+  delete[] model.style.fontFamily;
 }
 
 typedef struct {
@@ -131,13 +287,29 @@ View getView(Model model) {
     monitorSize.cy
   );
 
+  ArtSupplies artSupplies = getArtSupplies(model.style);
+
   HGDIOBJ oldBitmap = SelectObject(model.deviceContext, view.bitmap);
 
   Graphics graphics(model.deviceContext);
-  Pen      pen(Color(255, 0, 0, 255));
-  graphics.DrawLine(&pen, 0, 0, 200, 100);
+  graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+
+  for (int y = 0; y < 26; y++) {
+    for (int x = 0; x < 26; x++) {
+      drawBubble(
+        graphics,
+        model.style,
+        artSupplies,
+        Point(10 + 70 * x, 10 + 40 * y),
+        _T("label"),
+        _T("")
+      );
+    }
+  }
 
   SelectObject(model.deviceContext, oldBitmap);
+
+  destroyArtSupplies(artSupplies);
 
   return view;
 }
