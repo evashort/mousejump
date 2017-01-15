@@ -23,7 +23,9 @@ https://msdn.microsoft.com/en-us/library/windows/desktop/ms681381.aspx
 #include <windows.h>
 #include <tchar.h>
 #include <gdiplus.h>
-#include <math.h>
+#include <cmath>
+#include <vector>
+#include <algorithm>
 
 #pragma comment(linker, "/subsystem:windows")
 #pragma comment(lib, "user32")
@@ -31,6 +33,7 @@ https://msdn.microsoft.com/en-us/library/windows/desktop/ms681381.aspx
 #pragma comment(lib, "gdiplus")
 
 using namespace Gdiplus;
+using namespace std;
 
 BOOL CALLBACK MonitorEnumProc(
   HMONITOR monitor,
@@ -106,7 +109,10 @@ Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
 }
 
 StringFormat *getCenteredFormat() {
-  static StringFormat format(StringFormatFlagsNoWrap, LANG_NEUTRAL);
+  static StringFormat format(
+    StringFormatFlagsNoWrap | StringFormatFlagsNoClip,
+    LANG_NEUTRAL
+  );
   format.SetAlignment(StringAlignmentCenter);
   format.SetLineAlignment(StringAlignmentCenter);
   format.SetTrimming(StringTrimmingNone);
@@ -122,6 +128,155 @@ SIZE getBitmapSize(HBITMAP bitmap) {
   bitmapSize.cy = bitmapInfo.bmHeight;
 
   return bitmapSize;
+}
+
+PointF getNormal(PointF v) {
+  return PointF(v.Y, -v.X);
+}
+
+REAL dot(PointF v1, PointF v2) {
+  return v1.X * v2.X + v1.Y * v2.Y;
+}
+
+PointF getCorner(RectF rect, int corner) {
+  REAL x = rect.X;
+  REAL y = rect.Y;
+  if (corner == 1 || corner == 2) {
+    x = rect.GetRight();
+  }
+  if (corner == 2 || corner == 3) {
+    y = rect.GetBottom();
+  }
+  return PointF(x, y);
+}
+
+int getMinMultiplierInBounds(RectF bounds, PointF scaled, PointF other) {
+  PointF otherN = getNormal(other);
+  REAL under = dot(scaled, otherN);
+  REAL a = dot(getCorner(bounds, 0), otherN) / under;
+  REAL b = dot(getCorner(bounds, 1), otherN) / under;
+  REAL c = dot(getCorner(bounds, 2), otherN) / under;
+  REAL d = dot(getCorner(bounds, 3), otherN) / under;
+  return (int)ceil(min(a, min(b, min(c, d))));
+}
+
+int getMaxMultiplierInBounds(RectF bounds, PointF scaled, PointF other) {
+  PointF otherN = getNormal(other);
+  REAL under = dot(scaled, otherN);
+  REAL a = dot(getCorner(bounds, 0), otherN) / under;
+  REAL b = dot(getCorner(bounds, 1), otherN) / under;
+  REAL c = dot(getCorner(bounds, 2), otherN) / under;
+  REAL d = dot(getCorner(bounds, 3), otherN) / under;
+  return (int)floor(max(a, max(b, max(c, d))));
+}
+
+float getBoundsDistance(RectF bounds, PointF v) {
+  return max(
+    max(bounds.GetLeft() - v.X, v.X - bounds.GetRight()),
+    max(bounds.GetTop() - v.Y, v.Y - bounds.GetBottom())
+  );
+}
+
+struct BoundsDistanceComparator {
+  RectF bounds;
+  bool operator() (PointF v1, PointF v2) {
+    return getBoundsDistance(bounds, v1) < getBoundsDistance(bounds, v2);
+  }
+} myobject;
+
+#define degrees(x) (x * (3.1415926535897932384626433832795 / 180))
+vector<PointF> getHoneycomb(RectF bounds, int maxPoints) {
+  PointF v1(cos(degrees(15)), sin(degrees(15)));
+  PointF v2(cos(degrees(75)), sin(degrees(75)));
+
+  int v1Start = getMinMultiplierInBounds(bounds, v1, v2);
+  int v1Stop = getMaxMultiplierInBounds(bounds, v1, v2) + 1;
+
+  int v2Start = getMinMultiplierInBounds(bounds, v2, v1);
+  int v2Stop = getMaxMultiplierInBounds(bounds, v2, v1) + 1;
+
+  vector<PointF> honeycomb;
+  honeycomb.reserve((v1Stop - v1Start) * (v2Stop - v2Start));
+  for (int i = v1Start; i < v1Stop; i++) {
+    for (int j = v2Start; j < v2Stop; j++) {
+      honeycomb.push_back(PointF(v1.X * i + v2.X * j, v1.Y * i + v2.Y * j));
+    }
+  }
+
+  sort(honeycomb.begin(), honeycomb.end(), BoundsDistanceComparator{bounds});
+
+  maxPoints = min(maxPoints, honeycomb.size());
+  while (
+    maxPoints > 0 && getBoundsDistance(bounds, honeycomb[maxPoints - 1]) > 0
+  ) {
+    maxPoints--;
+  }
+  honeycomb.resize(maxPoints);
+
+  return honeycomb;
+}
+
+void scaleHoneycomb(vector<PointF> &honeycomb, REAL xScale, REAL yScale) {
+  for (int i = 0; i < honeycomb.size(); i++) {
+    honeycomb[i].X *= xScale;
+    honeycomb[i].Y *= yScale;
+  }
+}
+
+void translateHoneycomb(
+  vector<PointF> &honeycomb, REAL xOffset, REAL yOffset
+) {
+  for (int i = 0; i < honeycomb.size(); i++) {
+    honeycomb[i].X += xOffset;
+    honeycomb[i].Y += yOffset;
+  }
+}
+
+typedef struct {
+  double cellWidth;
+  double cellHeight;
+  double pixelsPastEdge;
+} GridSettings;
+
+Point clampToRect(Rect rect, Point point) {
+  return Point(
+    max(rect.X, min(rect.X + rect.Width - 1, point.X)),
+    max(rect.Y, min(rect.Y + rect.Height - 1, point.Y))
+  );
+}
+
+vector<Point> getJumpPoints(
+  Rect bounds,
+  GridSettings gridSettings,
+  PointF origin
+) {
+  RectF newBounds(
+    (bounds.X - origin.X - gridSettings.pixelsPastEdge) /
+      gridSettings.cellWidth,
+    (bounds.Y - origin.Y - gridSettings.pixelsPastEdge) /
+      gridSettings.cellHeight,
+    (bounds.Width + 2 * gridSettings.pixelsPastEdge) /
+      gridSettings.cellWidth,
+    (bounds.Height + 2 * gridSettings.pixelsPastEdge) /
+      gridSettings.cellHeight
+  );
+
+  vector<PointF> honeycomb = getHoneycomb(newBounds, 676);
+  scaleHoneycomb(honeycomb, gridSettings.cellWidth, gridSettings.cellHeight);
+  translateHoneycomb(honeycomb, origin.X, origin.Y);
+
+  vector<Point> jumpPoints;
+  jumpPoints.reserve(honeycomb.size());
+  for (int i = 0; i < honeycomb.size(); i++) {
+    jumpPoints.push_back(
+      clampToRect(
+        bounds,
+        Point((int)floor(honeycomb[i].X), (int)floor(honeycomb[i].Y))
+      )
+    );
+  }
+
+  return jumpPoints;
 }
 
 typedef struct {
@@ -304,15 +459,18 @@ void drawBubble(
   Rect screenBounds;
   graphics.GetClipBounds(&screenBounds);
 
-  int earCorner = 0;
+  int corners[] = {0, 1, 3, 2};
+  int earCorner = corners[0];
   Rect borderBounds = getBorderBounds(style, point, textSize, earCorner);
 
   if (!screenBounds.Contains(borderBounds)) {
     for (int i = 1; i < 4; i++) {
-      Rect newBorderBounds = getBorderBounds(style, point, textSize, i);
+      Rect newBorderBounds = getBorderBounds(
+        style, point, textSize, corners[i]
+      );
 
       if (screenBounds.Contains(newBorderBounds)) {
-        earCorner = i;
+        earCorner = corners[i];
         borderBounds = newBorderBounds;
         break;
       }
@@ -348,6 +506,7 @@ void drawBubble(
 typedef struct {
   HMONITOR monitor;
   HDC deviceContext;
+  GridSettings gridSettings;
   Style style;
 } Model;
 
@@ -358,6 +517,10 @@ Model getModel(HMONITOR monitor) {
   HDC infoContext = getInfoContext(monitor);
   model.deviceContext = CreateCompatibleDC(infoContext);
   DeleteDC(infoContext);
+
+  model.gridSettings.cellWidth = 97;
+  model.gridSettings.cellHeight = 39;
+  model.gridSettings.pixelsPastEdge = 12;
 
   LOGFONT fontInfo = getSystemTooltipFont();
   model.style.fontFamily = new TCHAR[_tcslen(fontInfo.lfFaceName) + 1];
@@ -374,10 +537,10 @@ Model getModel(HMONITOR monitor) {
   model.style.borderRadius = 2;
   model.style.borderWidth = 1;
   model.style.earHeight = 4;
-  model.style.paddingTop = 0;
-  model.style.paddingRight = 0;
+  model.style.paddingTop = -2;
+  model.style.paddingRight = -1;
   model.style.paddingBottom = 0;
-  model.style.paddingLeft = 0;
+  model.style.paddingLeft = -1;
 
   return model;
 }
@@ -414,17 +577,21 @@ View getView(Model model) {
   graphics.SetClip(Rect(0, 0, monitorBounds.Width, monitorBounds.Height));
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
 
-  for (int y = 0; y < 26; y++) {
-    for (int x = 0; x < 26; x++) {
-      drawBubble(
-        graphics,
-        model.style,
-        artSupplies,
-        Point(70 * x, 40 * y),
-        _T("label"),
-        _T("")
-      );
-    }
+  vector<Point> jumpPoints = getJumpPoints(
+    Rect(0, 0, monitorBounds.Width, monitorBounds.Height),
+    model.gridSettings,
+    PointF(monitorBounds.Width * 0.5, monitorBounds.Height * 0.5)
+  );
+
+  for (int i = 0; i < jumpPoints.size(); i++) {
+    drawBubble(
+      graphics,
+      model.style,
+      artSupplies,
+      jumpPoints[i],
+      _T("wf"),
+      _T("")
+    );
   }
 
   SelectObject(model.deviceContext, oldBitmap);
