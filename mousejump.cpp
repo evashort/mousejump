@@ -87,26 +87,16 @@ double logicalHeightToPointSize(int logicalHeight, HMONITOR monitor) {
   return abs(logicalHeight) * 72 / pixelsPerLogicalInch;
 }
 
-RECT getMonitorBounds(HMONITOR monitor) {
+Rect getMonitorBounds(HMONITOR monitor) {
   MONITORINFOEX monitorInfo;
   monitorInfo.cbSize = sizeof(MONITORINFOEX);
   GetMonitorInfo(monitor, &monitorInfo);
 
-  return monitorInfo.rcMonitor;
-}
-
-POINT getRectStart(RECT rect) {
-  POINT start;
-  start.x = rect.left;
-  start.y = rect.top;
-  return start;
-}
-
-SIZE getRectSize(RECT rect) {
-  SIZE size;
-  size.cx = rect.right - rect.left;
-  size.cy = rect.bottom - rect.top;
-  return size;
+  int x = monitorInfo.rcMonitor.left;
+  int y = monitorInfo.rcMonitor.top;
+  int width = monitorInfo.rcMonitor.right - y;
+  int height = monitorInfo.rcMonitor.bottom - x;
+  return Rect(x, y, width, height);
 }
 
 Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
@@ -143,10 +133,10 @@ typedef struct {
   double borderRadius;
   int borderWidth;
   int earHeight;
-  int marginTop;
-  int marginLeft;
-  int marginBottom;
-  int marginRight;
+  int paddingTop;
+  int paddingRight;
+  int paddingBottom;
+  int paddingLeft;
 } Style;
 
 typedef struct {
@@ -172,6 +162,135 @@ void destroyArtSupplies(ArtSupplies artSupplies) {
   delete artSupplies.borderPen;
 }
 
+Rect getBorderBounds(Style style, Point point, Size textSize, int earCorner) {
+  int width = textSize.Width + style.paddingLeft + style.paddingRight +
+    2 * style.borderWidth;
+  int height = textSize.Height + style.paddingTop + style.paddingBottom +
+    2 * style.borderWidth;
+
+  int top = point.Y + style.earHeight;
+  if (earCorner == 2 || earCorner == 3) {
+    top = point.Y - style.earHeight - height + 1;
+  }
+
+  int left = point.X;
+  if (earCorner == 1 || earCorner == 2) {
+    left = point.X - width + 1;
+  }
+
+  return Rect(left, top, width, height);
+}
+
+void addTopLeftCorner(
+  GraphicsPath &border,
+  Style style,
+  Rect borderBounds,
+  bool ear
+) {
+  REAL extraWidth = 0;
+  if (style.borderWidth >= 1) {
+    extraWidth = 0.5 * (style.borderWidth - 1);
+  }
+  REAL top = borderBounds.Y + extraWidth;
+  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
+  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
+  REAL left = borderBounds.X + extraWidth;
+
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+
+  REAL diameter = (REAL)(2 * style.borderRadius);
+  if (ear) {
+    border.AddLine(left, top - earHeight, left + earHeight, top);
+  } else if (diameter == 0) {
+    border.AddLine(left, top, left, top);
+  } else {
+    border.AddArc(left, top, diameter, diameter, 180, 90);
+  }
+}
+
+void addTopRightCorner(
+  GraphicsPath &border,
+  Style style,
+  Rect borderBounds,
+  bool ear
+) {
+  REAL extraWidth = 0;
+  if (style.borderWidth >= 1) {
+    extraWidth = 0.5 * (style.borderWidth - 1);
+  }
+  REAL top = borderBounds.Y + extraWidth;
+  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
+  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
+  REAL left = borderBounds.X + extraWidth;
+
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+
+  REAL diameter = (REAL)(2 * style.borderRadius);
+  if (ear) {
+    border.AddLine(right - earHeight, top, right, top - earHeight);
+  } else if (diameter == 0) {
+    border.AddLine(right, top, right, top);
+  } else {
+    border.AddArc(right - diameter, top, diameter, diameter, 270, 90);
+  }
+}
+
+void addBottomRightCorner(
+  GraphicsPath &border,
+  Style style,
+  Rect borderBounds,
+  bool ear
+) {
+  REAL extraWidth = 0;
+  if (style.borderWidth >= 1) {
+    extraWidth = 0.5 * (style.borderWidth - 1);
+  }
+  REAL top = borderBounds.Y + extraWidth;
+  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
+  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
+  REAL left = borderBounds.X + extraWidth;
+
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+
+  REAL diameter = (REAL)(2 * style.borderRadius);
+  if (ear) {
+    border.AddLine(right, bottom + earHeight, right - earHeight, bottom);
+  } else if (diameter == 0) {
+    border.AddLine(right, bottom, right, bottom);
+  } else {
+    border.AddArc(
+      right - diameter, bottom - diameter, diameter, diameter, 0, 90
+    );
+  }
+}
+
+void addBottomLeftCorner(
+  GraphicsPath &border,
+  Style style,
+  Rect borderBounds,
+  bool ear
+) {
+  REAL extraWidth = 0;
+  if (style.borderWidth >= 1) {
+    extraWidth = 0.5 * (style.borderWidth - 1);
+  }
+  REAL top = borderBounds.Y + extraWidth;
+  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
+  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
+  REAL left = borderBounds.X + extraWidth;
+
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+
+  REAL diameter = (REAL)(2 * style.borderRadius);
+  if (ear) {
+    border.AddLine(left + earHeight, bottom, left, bottom + earHeight);
+  } else if (diameter == 0) {
+    border.AddLine(left, bottom, left, bottom);
+  } else {
+    border.AddArc(left, bottom - diameter, diameter, diameter, 90, 90);
+  }
+}
+
 void drawBubble(
   Graphics &graphics,
   Style style,
@@ -182,44 +301,45 @@ void drawBubble(
 ) {
   Size textSize = getTextSize(graphics, artSupplies.font, text);
 
-  float borderRadius = (float)style.borderRadius;
+  Rect screenBounds;
+  graphics.GetClipBounds(&screenBounds);
+
+  int earCorner = 0;
+  Rect borderBounds = getBorderBounds(style, point, textSize, earCorner);
+
+  if (!screenBounds.Contains(borderBounds)) {
+    for (int i = 1; i < 4; i++) {
+      Rect newBorderBounds = getBorderBounds(style, point, textSize, i);
+
+      if (screenBounds.Contains(newBorderBounds)) {
+        earCorner = i;
+        borderBounds = newBorderBounds;
+        break;
+      }
+    }
+  }
+
   GraphicsPath border;
-  border.AddArc(
-    point.X + textSize.Width - 2 * borderRadius,
-    point.Y + textSize.Height - 2 * borderRadius,
-    2 * borderRadius,
-    2 * borderRadius,
-    0, 90
-  );
-  border.AddArc(
-    point.X - 1.0f,
-    point.Y + textSize.Height - 2 * borderRadius,
-    2 * borderRadius,
-    2 * borderRadius,
-    90, 90
-  );
-  border.AddArc(
-    point.X - 1.0f,
-    point.Y - 1.0f,
-    2 * borderRadius,
-    2 * borderRadius,
-    180, 90
-  );
-  border.AddArc(
-    point.X + textSize.Width - 2 * borderRadius,
-    point.Y - 1.0f,
-    2 * borderRadius,
-    2 * borderRadius,
-    270, 90
-  );
+  addTopLeftCorner(border, style, borderBounds, earCorner == 0);
+  addTopRightCorner(border, style, borderBounds, earCorner == 1);
+  addBottomRightCorner(border, style, borderBounds, earCorner == 2);
+  addBottomLeftCorner(border, style, borderBounds, earCorner == 3);
+  border.CloseFigure();
   border.CloseFigure();
   graphics.FillPath(artSupplies.fillBrush, &border);
   graphics.DrawPath(artSupplies.borderPen, &border);
 
+  RectF textBounds(
+    borderBounds.X + style.borderWidth + style.paddingLeft,
+    borderBounds.Y + style.borderWidth + style.paddingTop,
+    textSize.Width,
+    textSize.Height
+  );
+
   graphics.DrawString(
     text, -1,
     artSupplies.font,
-    RectF(point.X, point.Y, textSize.Width, textSize.Height),
+    textBounds,
     getCenteredFormat(),
     artSupplies.textBrush
   );
@@ -254,10 +374,10 @@ Model getModel(HMONITOR monitor) {
   model.style.borderRadius = 2;
   model.style.borderWidth = 1;
   model.style.earHeight = 4;
-  model.style.marginTop = 0;
-  model.style.marginLeft = 0;
-  model.style.marginBottom = 0;
-  model.style.marginRight = 0;
+  model.style.paddingTop = 0;
+  model.style.paddingRight = 0;
+  model.style.paddingBottom = 0;
+  model.style.paddingLeft = 0;
 
   return model;
 }
@@ -277,14 +397,13 @@ View getView(Model model) {
   View view;
   view.deviceContext = model.deviceContext;
 
-  RECT monitorBounds = getMonitorBounds(model.monitor);
-  view.start = getRectStart(monitorBounds);
+  Rect monitorBounds = getMonitorBounds(model.monitor);
+  view.start = {monitorBounds.X, monitorBounds.Y};
 
-  SIZE monitorSize = getRectSize(monitorBounds);
   view.bitmap = CreateCompatibleBitmap(
     getInfoContext(model.monitor),
-    monitorSize.cx,
-    monitorSize.cy
+    monitorBounds.Width,
+    monitorBounds.Height
   );
 
   ArtSupplies artSupplies = getArtSupplies(model.style);
@@ -292,6 +411,7 @@ View getView(Model model) {
   HGDIOBJ oldBitmap = SelectObject(model.deviceContext, view.bitmap);
 
   Graphics graphics(model.deviceContext);
+  graphics.SetClip(Rect(0, 0, monitorBounds.Width, monitorBounds.Height));
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
 
   for (int y = 0; y < 26; y++) {
@@ -300,7 +420,7 @@ View getView(Model model) {
         graphics,
         model.style,
         artSupplies,
-        Point(10 + 70 * x, 10 + 40 * y),
+        Point(70 * x, 40 * y),
         _T("label"),
         _T("")
       );
