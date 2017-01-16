@@ -42,7 +42,33 @@ typedef struct {
   HGDIOBJ originalBitmap;
 } View;
 
-bool getView(HMONITOR monitor, View& view) {
+View getView() {
+  View view;
+  view.deviceContext = NULL;
+  view.bitmap = NULL;
+  view.start = {0, 0};
+  view.originalBitmap = NULL;
+  return view;
+}
+
+void destroyView(View view) {
+  if (view.deviceContext) {
+    SelectObject(view.deviceContext, view.originalBitmap);
+    view.originalBitmap = NULL;
+
+    DeleteDC(view.deviceContext);
+    view.deviceContext = NULL;
+  }
+
+  if (view.bitmap) {
+    DeleteObject(view.bitmap);
+    view.bitmap = NULL;
+  }
+
+  view.start = {0, 0};
+}
+
+bool updateView(HMONITOR monitor, View& view) {
   MONITORINFOEX monitorInfo;
   monitorInfo.cbSize = sizeof(MONITORINFOEX);
   if (!GetMonitorInfo(monitor, &monitorInfo)) {
@@ -53,6 +79,8 @@ bool getView(HMONITOR monitor, View& view) {
   if (!infoContext) {
     return false;
   }
+
+  destroyView(view);
 
   view.deviceContext = CreateCompatibleDC(infoContext);
   view.bitmap = CreateCompatibleBitmap(
@@ -67,12 +95,6 @@ bool getView(HMONITOR monitor, View& view) {
   view.originalBitmap = SelectObject(view.deviceContext, view.bitmap);
 
   return true;
-}
-
-void destroyView(View view) {
-  SelectObject(view.deviceContext, view.originalBitmap);
-  DeleteDC(view.deviceContext);
-  DeleteObject(view.bitmap);
 }
 
 Color getSystemColor(int colorConstant) {
@@ -801,8 +823,7 @@ LRESULT CALLBACK WndProc(
     }
     break;
   case WM_DISPLAYCHANGE:
-    destroyView(view);
-    if (!getView(model.monitor, view)) {
+    if (!updateView(model.monitor, view)) {
       PostQuitMessage(0);
     }
 
@@ -856,7 +877,8 @@ int CALLBACK WinMain(
   HMONITOR monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
 
   model = getModel(monitor);
-  getView(model.monitor, view);
+  view = getView();
+  updateView(model.monitor, view);
   drawModel(model, view);
 
   HWND window = CreateWindowEx(
