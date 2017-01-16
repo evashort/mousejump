@@ -6,7 +6,7 @@ Open "Developer Command Prompt for VS 2017 RC" under "Visual Studio 2017 RC"
 in the start menu
 
 cd /Users/Evan/Documents/GitHub/mousejump
-cl /D_UNICODE /DUNICODE /DWIN32 /D_WINDOWS mousejump.cpp && mousejump.exe
+cl /EHsc /D_UNICODE /DUNICODE /DWIN32 /D_WINDOWS mousejump.cpp && mousejump.exe
 
 To debug, insert this snippet after the thing that probably went wrong:
 
@@ -35,30 +35,44 @@ https://msdn.microsoft.com/en-us/library/windows/desktop/ms681381.aspx
 using namespace Gdiplus;
 using namespace std;
 
-BOOL CALLBACK MonitorEnumProc(
-  HMONITOR monitor,
-  HDC deviceContext,
-  LPRECT intersectionBounds,
-  LPARAM customData
-) {
-  *(HMONITOR*)customData = monitor;
-  return false;
-}
+typedef struct {
+  HDC deviceContext;
+  HBITMAP bitmap;
+  POINT start;
+  HGDIOBJ originalBitmap;
+} View;
 
-HMONITOR getMonitorAtPoint(POINT point) {
-  RECT pointRect = {point.x, point.y, point.x + 1, point.y + 1};
-
-  HMONITOR monitor = NULL;
-  EnumDisplayMonitors(NULL, &pointRect, MonitorEnumProc, (LPARAM)(&monitor));
-
-  return monitor;
-}
-
-HDC getInfoContext(HMONITOR monitor) {
+bool getView(HMONITOR monitor, View& view) {
   MONITORINFOEX monitorInfo;
   monitorInfo.cbSize = sizeof(MONITORINFOEX);
-  GetMonitorInfo(monitor, &monitorInfo);
-  return CreateIC(_T("DISPLAY"), monitorInfo.szDevice, NULL, NULL);
+  if (!GetMonitorInfo(monitor, &monitorInfo)) {
+    return false;
+  }
+
+  HDC infoContext = CreateIC(_T("DISPLAY"), monitorInfo.szDevice, NULL, NULL);
+  if (!infoContext) {
+    return false;
+  }
+
+  view.deviceContext = CreateCompatibleDC(infoContext);
+  view.bitmap = CreateCompatibleBitmap(
+    infoContext,
+    monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left,
+    monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top
+  );
+
+  DeleteDC(infoContext);
+
+  view.start = {monitorInfo.rcMonitor.left, monitorInfo.rcMonitor.top};
+  view.originalBitmap = SelectObject(view.deviceContext, view.bitmap);
+
+  return true;
+}
+
+void destroyView(View view) {
+  SelectObject(view.deviceContext, view.originalBitmap);
+  DeleteDC(view.deviceContext);
+  DeleteObject(view.bitmap);
 }
 
 Color getSystemColor(int colorConstant) {
@@ -78,7 +92,10 @@ LOGFONT getSystemTooltipFont() {
 }
 
 int getPixelsPerLogicalInch(HMONITOR monitor) {
-  HDC infoContext = getInfoContext(monitor);
+  MONITORINFOEX monitorInfo;
+  monitorInfo.cbSize = sizeof(MONITORINFOEX);
+  GetMonitorInfo(monitor, &monitorInfo);
+  HDC infoContext = CreateIC(_T("DISPLAY"), monitorInfo.szDevice, NULL, NULL);
   int pixelsPerLogicalInch = GetDeviceCaps(infoContext, LOGPIXELSY);
   DeleteDC(infoContext);
 
@@ -88,18 +105,6 @@ int getPixelsPerLogicalInch(HMONITOR monitor) {
 double logicalHeightToPointSize(int logicalHeight, HMONITOR monitor) {
   double pixelsPerLogicalInch = getPixelsPerLogicalInch(monitor);
   return abs(logicalHeight) * 72 / pixelsPerLogicalInch;
-}
-
-Rect getMonitorBounds(HMONITOR monitor) {
-  MONITORINFOEX monitorInfo;
-  monitorInfo.cbSize = sizeof(MONITORINFOEX);
-  GetMonitorInfo(monitor, &monitorInfo);
-
-  int x = monitorInfo.rcMonitor.left;
-  int y = monitorInfo.rcMonitor.top;
-  int width = monitorInfo.rcMonitor.right - y;
-  int height = monitorInfo.rcMonitor.bottom - x;
-  return Rect(x, y, width, height);
 }
 
 Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
@@ -119,15 +124,16 @@ StringFormat *getCenteredFormat() {
   return &format;
 }
 
-SIZE getBitmapSize(HBITMAP bitmap) {
+int getBitmapWidth(HBITMAP bitmap) {
   BITMAP bitmapInfo;
   GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
+  return bitmapInfo.bmWidth;
+}
 
-  SIZE bitmapSize;
-  bitmapSize.cx = bitmapInfo.bmWidth;
-  bitmapSize.cy = bitmapInfo.bmHeight;
-
-  return bitmapSize;
+int getBitmapHeight(HBITMAP bitmap) {
+  BITMAP bitmapInfo;
+  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
+  return bitmapInfo.bmHeight;
 }
 
 PointF getNormal(PointF v) {
@@ -504,8 +510,33 @@ void drawBubble(
 }
 
 typedef struct {
+  // Keycode reference:
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd375731.aspx
+  LPTSTR spelling;
+  int keycode;
+} Symbol;
+
+typedef struct {
+  vector<vector<Symbol> > levels;
+  int primaryClick;
+  int secondaryClick;
+  int middleClick;
+  int primaryHold;
+  int secondaryHold;
+  int middleHold;
+  int exit;
+  int clear;
+  int left;
+  int up;
+  int right;
+  int down;
+  int hStride;
+  int vStride;
+} Keymap;
+
+typedef struct {
   HMONITOR monitor;
-  HDC deviceContext;
+  Keymap keymap;
   GridSettings gridSettings;
   Style style;
 } Model;
@@ -514,9 +545,76 @@ Model getModel(HMONITOR monitor) {
   Model model;
   model.monitor = monitor;
 
-  HDC infoContext = getInfoContext(monitor);
-  model.deviceContext = CreateCompatibleDC(infoContext);
-  DeleteDC(infoContext);
+  model.keymap.levels =
+    { { {_T("a"), 0x41},
+        {_T("b"), 0x42},
+        {_T("c"), 0x43},
+        {_T("d"), 0x44},
+        {_T("e"), 0x45},
+        {_T("f"), 0x46},
+        {_T("g"), 0x47},
+        {_T("h"), 0x48},
+        {_T("i"), 0x49},
+        {_T("j"), 0x4a},
+        {_T("k"), 0x4b},
+        {_T("l"), 0x4c},
+        {_T("m"), 0x4d},
+        {_T("n"), 0x4e},
+        {_T("o"), 0x4f},
+        {_T("p"), 0x50},
+        {_T("q"), 0x51},
+        {_T("r"), 0x52},
+        {_T("s"), 0x53},
+        {_T("t"), 0x54},
+        {_T("u"), 0x55},
+        {_T("v"), 0x56},
+        {_T("w"), 0x57},
+        {_T("x"), 0x58},
+        {_T("y"), 0x59},
+        {_T("z"), 0x5a},
+      },
+      { {_T("a"), 0x41},
+        {_T("b"), 0x42},
+        {_T("c"), 0x43},
+        {_T("d"), 0x44},
+        {_T("e"), 0x45},
+        {_T("f"), 0x46},
+        {_T("g"), 0x47},
+        {_T("h"), 0x48},
+        {_T("i"), 0x49},
+        {_T("j"), 0x4a},
+        {_T("k"), 0x4b},
+        {_T("l"), 0x4c},
+        {_T("m"), 0x4d},
+        {_T("n"), 0x4e},
+        {_T("o"), 0x4f},
+        {_T("p"), 0x50},
+        {_T("q"), 0x51},
+        {_T("r"), 0x52},
+        {_T("s"), 0x53},
+        {_T("t"), 0x54},
+        {_T("u"), 0x55},
+        {_T("v"), 0x56},
+        {_T("w"), 0x57},
+        {_T("x"), 0x58},
+        {_T("y"), 0x59},
+        {_T("z"), 0x5a},
+      }
+    };
+  model.keymap.primaryClick = 0x0d; // VK_RETURN
+  model.keymap.secondaryClick = 0x5d; // VK_APPS
+  model.keymap.middleClick = 0x09; // VK_TAB
+  model.keymap.primaryHold = 0x2e; // VK_DELETE
+  model.keymap.secondaryHold = 0;
+  model.keymap.middleHold = 0;
+  model.keymap.exit = 0x1b; // VK_ESCAPE
+  model.keymap.clear = 0x08; // VK_BACK
+  model.keymap.left = 0x25; // VK_LEFT
+  model.keymap.up = 0x26; // VK_UP
+  model.keymap.right = 0x27; // VK_RIGHT
+  model.keymap.down = 0x28; // VK_DOWN
+  model.keymap.hStride = 10;
+  model.keymap.vStride = 10;
 
   model.gridSettings.cellWidth = 97;
   model.gridSettings.cellHeight = 39;
@@ -546,41 +644,24 @@ Model getModel(HMONITOR monitor) {
 }
 
 void destroyModel(Model model) {
-  DeleteDC(model.deviceContext);
   delete[] model.style.fontFamily;
 }
 
-typedef struct {
-  HDC deviceContext;
-  POINT start;
-  HBITMAP bitmap;
-} View;
-
-View getView(Model model) {
-  View view;
-  view.deviceContext = model.deviceContext;
-
-  Rect monitorBounds = getMonitorBounds(model.monitor);
-  view.start = {monitorBounds.X, monitorBounds.Y};
-
-  view.bitmap = CreateCompatibleBitmap(
-    getInfoContext(model.monitor),
-    monitorBounds.Width,
-    monitorBounds.Height
+void drawModel(Model model, View& view) {
+  ArtSupplies artSupplies = getArtSupplies(model.style);
+  Rect bitmapBounds(
+    0, 0, getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
   );
 
-  ArtSupplies artSupplies = getArtSupplies(model.style);
-
-  HGDIOBJ oldBitmap = SelectObject(model.deviceContext, view.bitmap);
-
-  Graphics graphics(model.deviceContext);
-  graphics.SetClip(Rect(0, 0, monitorBounds.Width, monitorBounds.Height));
+  Graphics graphics(view.deviceContext);
+  graphics.SetClip(bitmapBounds);
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+  graphics.Clear(Color(0, 0, 0, 0));
 
   vector<Point> jumpPoints = getJumpPoints(
-    Rect(0, 0, monitorBounds.Width, monitorBounds.Height),
+    bitmapBounds,
     model.gridSettings,
-    PointF(monitorBounds.Width * 0.5, monitorBounds.Height * 0.5)
+    PointF(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
   );
 
   for (int i = 0; i < jumpPoints.size(); i++) {
@@ -594,27 +675,20 @@ View getView(Model model) {
     );
   }
 
-  SelectObject(model.deviceContext, oldBitmap);
-
   destroyArtSupplies(artSupplies);
-
-  return view;
 }
 
 void showView(View view, HWND window) {
-  POINT origin;
-  origin.x = 0;
-  origin.y = 0;
-
-  SIZE bitmapSize = getBitmapSize(view.bitmap);
+  POINT origin = {0, 0};
+  SIZE bitmapSize = {
+    getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
+  };
 
   BLENDFUNCTION blendFunction;
   blendFunction.BlendOp = AC_SRC_OVER;
   blendFunction.BlendFlags = 0;
   blendFunction.SourceConstantAlpha = 255;
   blendFunction.AlphaFormat = AC_SRC_ALPHA;
-
-  HGDIOBJ oldBitmap = SelectObject(view.deviceContext, view.bitmap);
 
   // Draw the layered (meaning partially transparent) window.
   // This is extremely finicky and would be almost impossible without a
@@ -633,12 +707,51 @@ void showView(View view, HWND window) {
     &blendFunction, // extreme boilerplate
     ULW_ALPHA // per-pixel alpha instead of chromakey
   );
-
-  SelectObject(view.deviceContext, oldBitmap);
 }
 
-void destroyView(View view) {
-  DeleteObject(view.bitmap);
+Model model;
+View view;
+
+void moveCursorBy(int xOffset, int yOffset) {
+  INPUT inputs[1];
+  inputs[0].type = INPUT_MOUSE;
+  inputs[0].mi.dx = xOffset;
+  inputs[0].mi.dy = yOffset;
+  inputs[0].mi.mouseData = 0;
+  inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE;
+  inputs[0].mi.time = 0;
+  inputs[0].mi.dwExtraInfo = 0;
+  SendInput(1, inputs, sizeof(INPUT));
+}
+
+INPUT getClick(DWORD dwFlags) {
+  INPUT click;
+  click.type = INPUT_MOUSE;
+  click.mi.dx = 0;
+  click.mi.dy = 0;
+  click.mi.mouseData = 0;
+  click.mi.dwFlags = dwFlags;
+  click.mi.time = 0;
+  click.mi.dwExtraInfo = 0;
+  return click;
+}
+
+void click(int button, bool goalState) {
+  int keycodes[3] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON};
+  int actions[2][3] = {
+    {MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_MIDDLEUP},
+    {MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_MIDDLEDOWN}
+  };
+  if ((GetKeyState(keycodes[button]) < 0) == goalState) {
+    INPUT inputs[2] = {
+      getClick(actions[!goalState][button]),
+      getClick(actions[goalState][button])
+    };
+    SendInput(2, inputs, sizeof(INPUT));
+  } else {
+    INPUT inputs[1] = {getClick(actions[goalState][button])};
+    SendInput(1, inputs, sizeof(INPUT));
+  }
 }
 
 LRESULT CALLBACK WndProc(
@@ -650,6 +763,52 @@ LRESULT CALLBACK WndProc(
   LRESULT result = 0;
 
   switch (message) {
+  case WM_KEYDOWN:
+    if (wParam == model.keymap.exit) {
+      PostQuitMessage(0);
+    } else if (wParam == model.keymap.left) {
+      moveCursorBy(-model.keymap.hStride, 0);
+    } else if (wParam == model.keymap.up) {
+      moveCursorBy(0, -model.keymap.vStride);
+    } else if (wParam == model.keymap.right) {
+      moveCursorBy(model.keymap.hStride, 0);
+    } else if (wParam == model.keymap.down) {
+      moveCursorBy(0, model.keymap.vStride);
+    } else if (wParam == model.keymap.primaryClick) {
+      click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 0);
+      PostQuitMessage(0);
+    } else if (wParam == model.keymap.secondaryClick) {
+      click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 0);
+      PostQuitMessage(0);
+    } else if (wParam == model.keymap.middleClick) {
+      click(2, 0);
+      PostQuitMessage(0);
+    } else if (wParam == model.keymap.primaryHold) {
+      click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
+      if (!SetForegroundWindow(window)) {
+        PostQuitMessage(0);
+      }
+    } else if (wParam == model.keymap.secondaryHold) {
+      click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
+      if (!SetForegroundWindow(window)) {
+        PostQuitMessage(0);
+      }
+    } else if (wParam == model.keymap.middleHold) {
+      click(2, 1);
+      if (!SetForegroundWindow(window)) {
+        PostQuitMessage(0);
+      }
+    }
+    break;
+  case WM_DISPLAYCHANGE:
+    destroyView(view);
+    if (!getView(model.monitor, view)) {
+      PostQuitMessage(0);
+    }
+
+    drawModel(model, view);
+    showView(view, window);
+    break;
   case WM_DESTROY:
     PostQuitMessage(0);
     break;
@@ -694,10 +853,11 @@ int CALLBACK WinMain(
 
   POINT cursorPos;
   GetCursorPos(&cursorPos);
-  HMONITOR monitor = getMonitorAtPoint(cursorPos);
+  HMONITOR monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
 
-  Model model = getModel(monitor);
-  View view = getView(model);
+  model = getModel(monitor);
+  getView(model.monitor, view);
+  drawModel(model, view);
 
   HWND window = CreateWindowEx(
     WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT,
@@ -713,7 +873,6 @@ int CALLBACK WinMain(
   );
 
   showView(view, window);
-  destroyView(view);
 
   ShowWindow(window, showWindowFlags);
 
@@ -723,6 +882,7 @@ int CALLBACK WinMain(
     DispatchMessage(&message);
   }
 
+  destroyView(view);
   destroyModel(model);
 
   GdiplusShutdown(gdiplusToken);
