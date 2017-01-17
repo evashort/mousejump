@@ -840,7 +840,7 @@ LRESULT CALLBACK WndProc(
   switch (message) {
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
-      PostQuitMessage(0);
+      PostMessage(window, WM_CLOSE, 0, 0);
     } else if (wParam == model.keymap.left) {
       moveCursorBy(-model.keymap.hStride, 0);
     } else if (wParam == model.keymap.up) {
@@ -851,33 +851,33 @@ LRESULT CALLBACK WndProc(
       moveCursorBy(0, model.keymap.vStride);
     } else if (wParam == model.keymap.primaryClick) {
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 0);
-      PostQuitMessage(0);
+      PostMessage(window, WM_CLOSE, 0, 0);
     } else if (wParam == model.keymap.secondaryClick) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 0);
-      PostQuitMessage(0);
+      PostMessage(window, WM_CLOSE, 0, 0);
     } else if (wParam == model.keymap.middleClick) {
       click(2, 0);
-      PostQuitMessage(0);
+      PostMessage(window, WM_CLOSE, 0, 0);
     } else if (wParam == model.keymap.primaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
       if (!SetForegroundWindow(window)) {
-        PostQuitMessage(0);
+        PostMessage(window, WM_CLOSE, 0, 0);
       }
     } else if (wParam == model.keymap.secondaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
       if (!SetForegroundWindow(window)) {
-        PostQuitMessage(0);
+        PostMessage(window, WM_CLOSE, 0, 0);
       }
     } else if (wParam == model.keymap.middleHold) {
       click(2, 1);
       if (!SetForegroundWindow(window)) {
-        PostQuitMessage(0);
+        PostMessage(window, WM_CLOSE, 0, 0);
       }
     }
     break;
   case WM_DISPLAYCHANGE:
     if (!updateView(model.monitor, view)) {
-      PostQuitMessage(0);
+      PostMessage(window, WM_CLOSE, 0, 0);
     }
 
     drawModel(model, view);
