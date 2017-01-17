@@ -158,6 +158,59 @@ int getBitmapHeight(HBITMAP bitmap) {
   return bitmapInfo.bmHeight;
 }
 
+typedef struct {
+  // Keycode reference:
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd375731.aspx
+  LPTSTR spelling;
+  int keycode;
+} Symbol;
+
+typedef struct {
+  double cellWidth;
+  double cellHeight;
+  double pixelsPastEdge;
+} GridSettings;
+
+double inflatedArea(double width, double height, double border) {
+  return (width + 2 * border) * (height + 2 * border);
+}
+
+int getBubbleCount(
+  vector<vector<Symbol> > levels,
+  GridSettings gridSettings,
+  int width, int height
+) {
+  int symbolLimit = 1;
+  for (int i = 0; i < levels.size(); i++) {
+    symbolLimit *= levels[i].size();
+  }
+
+  double cellArea =
+    gridSettings.cellWidth * gridSettings.cellHeight * sqrt(0.75);
+  double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
+  int areaLimit = (int)round(gridArea / cellArea);
+
+  return min(symbolLimit, areaLimit);
+}
+
+GridSettings adjustGridSettings(
+  GridSettings gridSettings,
+  int width, int height,
+  int bubbleCount
+) {
+  double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
+  double bubbleCover =
+    gridSettings.cellWidth * gridSettings.cellHeight * sqrt(0.75) * \
+    bubbleCount;
+  double scale = max(sqrt(gridArea / bubbleCover), 1);
+
+  GridSettings result;
+  result.pixelsPastEdge = gridSettings.pixelsPastEdge;
+  result.cellWidth = gridSettings.cellWidth * scale;
+  result.cellHeight = gridSettings.cellHeight * scale;
+  return result;
+}
+
 PointF getNormal(PointF v) {
   return PointF(v.Y, -v.X);
 }
@@ -213,7 +266,7 @@ struct BoundsDistanceComparator {
 } myobject;
 
 #define degrees(x) (x * (3.1415926535897932384626433832795 / 180))
-vector<PointF> getHoneycomb(RectF bounds, int maxPoints) {
+vector<PointF> getHoneycomb(RectF bounds, int points) {
   PointF v1(cos(degrees(15)), sin(degrees(15)));
   PointF v2(cos(degrees(75)), sin(degrees(75)));
 
@@ -222,6 +275,10 @@ vector<PointF> getHoneycomb(RectF bounds, int maxPoints) {
 
   int v2Start = getMinMultiplierInBounds(bounds, v2, v1);
   int v2Stop = getMaxMultiplierInBounds(bounds, v2, v1) + 1;
+
+  while ((v1Stop - v1Start) * (v2Stop - v2Start) < points) {
+    v1Start--; v1Stop++; v2Start--; v2Stop++;
+  }
 
   vector<PointF> honeycomb;
   honeycomb.reserve((v1Stop - v1Start) * (v2Stop - v2Start));
@@ -232,14 +289,7 @@ vector<PointF> getHoneycomb(RectF bounds, int maxPoints) {
   }
 
   sort(honeycomb.begin(), honeycomb.end(), BoundsDistanceComparator{bounds});
-
-  maxPoints = min(maxPoints, honeycomb.size());
-  while (
-    maxPoints > 0 && getBoundsDistance(bounds, honeycomb[maxPoints - 1]) > 0
-  ) {
-    maxPoints--;
-  }
-  honeycomb.resize(maxPoints);
+  honeycomb.resize(points);
 
   return honeycomb;
 }
@@ -260,12 +310,6 @@ void translateHoneycomb(
   }
 }
 
-typedef struct {
-  double cellWidth;
-  double cellHeight;
-  double pixelsPastEdge;
-} GridSettings;
-
 Point clampToRect(Rect rect, Point point) {
   return Point(
     max(rect.X, min(rect.X + rect.Width - 1, point.X)),
@@ -274,8 +318,9 @@ Point clampToRect(Rect rect, Point point) {
 }
 
 vector<Point> getJumpPoints(
-  Rect bounds,
   GridSettings gridSettings,
+  Rect bounds,
+  int bubbleCount,
   PointF origin
 ) {
   RectF newBounds(
@@ -289,7 +334,7 @@ vector<Point> getJumpPoints(
       gridSettings.cellHeight
   );
 
-  vector<PointF> honeycomb = getHoneycomb(newBounds, 676);
+  vector<PointF> honeycomb = getHoneycomb(newBounds, bubbleCount);
   scaleHoneycomb(honeycomb, gridSettings.cellWidth, gridSettings.cellHeight);
   translateHoneycomb(honeycomb, origin.X, origin.Y);
 
@@ -513,7 +558,9 @@ void drawBubble(
   border.CloseFigure();
   border.CloseFigure();
   graphics.FillPath(artSupplies.fillBrush, &border);
-  graphics.DrawPath(artSupplies.borderPen, &border);
+  if (style.borderWidth > 0) {
+    graphics.DrawPath(artSupplies.borderPen, &border);
+  }
 
   RectF textBounds(
     borderBounds.X + style.borderWidth + style.paddingLeft,
@@ -530,13 +577,6 @@ void drawBubble(
     artSupplies.textBrush
   );
 }
-
-typedef struct {
-  // Keycode reference:
-  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd375731.aspx
-  LPTSTR spelling;
-  int keycode;
-} Symbol;
 
 typedef struct {
   vector<vector<Symbol> > levels;
@@ -593,7 +633,7 @@ Model getModel(HMONITOR monitor) {
         {_T("w"), 0x57},
         {_T("x"), 0x58},
         {_T("y"), 0x59},
-        {_T("z"), 0x5a},
+        {_T("z"), 0x5a}
       },
       { {_T("a"), 0x41},
         {_T("b"), 0x42},
@@ -620,7 +660,7 @@ Model getModel(HMONITOR monitor) {
         {_T("w"), 0x57},
         {_T("x"), 0x58},
         {_T("y"), 0x59},
-        {_T("z"), 0x5a},
+        {_T("z"), 0x5a}
       }
     };
   model.keymap.primaryClick = 0x0d; // VK_RETURN
@@ -635,8 +675,8 @@ Model getModel(HMONITOR monitor) {
   model.keymap.up = 0x26; // VK_UP
   model.keymap.right = 0x27; // VK_RIGHT
   model.keymap.down = 0x28; // VK_DOWN
-  model.keymap.hStride = 10;
-  model.keymap.vStride = 10;
+  model.keymap.hStride = 9;
+  model.keymap.vStride = 9;
 
   model.gridSettings.cellWidth = 97;
   model.gridSettings.cellHeight = 39;
@@ -680,9 +720,22 @@ void drawModel(Model model, View& view) {
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
   graphics.Clear(Color(0, 0, 0, 0));
 
-  vector<Point> jumpPoints = getJumpPoints(
-    bitmapBounds,
+  int bubbleCount = getBubbleCount(
+    model.keymap.levels,
     model.gridSettings,
+    bitmapBounds.Width, bitmapBounds.Height
+  );
+
+  GridSettings adjusted = adjustGridSettings(
+    model.gridSettings,
+    bitmapBounds.Width, bitmapBounds.Height,
+    bubbleCount
+  );
+
+  vector<Point> jumpPoints = getJumpPoints(
+    adjusted,
+    bitmapBounds,
+    bubbleCount,
     PointF(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
   );
 
