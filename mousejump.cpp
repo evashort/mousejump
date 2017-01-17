@@ -766,9 +766,9 @@ void showView(View view, HWND window) {
   blendFunction.AlphaFormat = AC_SRC_ALPHA;
 
   // Draw the layered (meaning partially transparent) window.
-  // This is extremely finicky and would be almost impossible without a
-  // working example to copy from.
-  // Thankfully Marc Gregoire has me covered:
+  // If you mess up any of these parameters, you'll probably end up with an
+  // invisible window and no way figure out what went wrong. In that case, you
+  // should start from this working example and work backwards:
   // http://www.nuonsoft.com/blog/2009/05/27/how-to-use-updatelayeredwindow/
 
   UpdateLayeredWindow(
@@ -779,7 +779,7 @@ void showView(View view, HWND window) {
     view.deviceContext, // copies the active bitmap from this device context
     &origin, // copy bits starting from this location on the bitmap
     0, // no chromakey color
-    &blendFunction, // extreme boilerplate
+    &blendFunction, // boilerplate
     ULW_ALPHA // per-pixel alpha instead of chromakey
   );
 }
