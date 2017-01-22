@@ -477,6 +477,18 @@ vector<Point> getJumpPoints(
   return jumpPoints;
 }
 
+int pixelateSize(double size) {
+  if (size > 0) {
+    return max((int)round(size), 1);
+  }
+
+  return 0;
+}
+
+int pixelate(double offset) {
+  return offset < 0 ? -pixelateSize(-offset) : pixelateSize(offset);
+}
+
 typedef struct {
   LPTSTR fontFamily;
   double fontPointSize;
@@ -485,12 +497,12 @@ typedef struct {
   Color fillColor;
   Color borderColor;
   double borderRadius;
-  int borderWidth;
-  int earHeight;
-  int paddingTop;
-  int paddingRight;
-  int paddingBottom;
-  int paddingLeft;
+  double borderWidth;
+  double earHeight;
+  double paddingTop;
+  double paddingRight;
+  double paddingBottom;
+  double paddingLeft;
 } Style;
 
 typedef struct {
@@ -507,7 +519,11 @@ ArtSupplies getArtSupplies(Style style) {
   artSupplies.textBrush = new SolidBrush(style.textColor);
   artSupplies.chosenTextBrush = new SolidBrush(style.chosenTextColor);
   artSupplies.fillBrush = new SolidBrush(style.fillColor);
-  artSupplies.borderPen = new Pen(style.borderColor, style.borderWidth);
+  artSupplies.borderPen = new Pen(
+    style.borderColor,
+    pixelateSize(style.borderWidth)
+  );
+
   return artSupplies;
 }
 
@@ -520,14 +536,16 @@ void destroyArtSupplies(ArtSupplies artSupplies) {
 }
 
 Rect getBorderBounds(Style style, Point point, Size textSize, int earCorner) {
-  int width = textSize.Width + style.paddingLeft + style.paddingRight +
-    2 * style.borderWidth;
-  int height = textSize.Height + style.paddingTop + style.paddingBottom +
-    2 * style.borderWidth;
+  int width = textSize.Width +
+    pixelate(style.paddingLeft) + pixelate(style.paddingRight) +
+    2 * pixelateSize(style.borderWidth);
+  int height = textSize.Height +
+    pixelate(style.paddingTop) + pixelate(style.paddingBottom) +
+    2 * pixelateSize(style.borderWidth);
 
-  int top = point.Y + style.earHeight;
+  int top = point.Y + pixelateSize(style.earHeight);
   if (earCorner == 2 || earCorner == 3) {
-    top = point.Y - style.earHeight - height + 1;
+    top = point.Y - pixelateSize(style.earHeight) - height + 1;
   }
 
   int left = point.X;
@@ -538,121 +556,74 @@ Rect getBorderBounds(Style style, Point point, Size textSize, int earCorner) {
   return Rect(left, top, width, height);
 }
 
-void addTopLeftCorner(
-  GraphicsPath &border,
-  Style style,
-  Rect borderBounds,
-  bool ear
-) {
-  REAL extraWidth = -0.5;
-  REAL fudge = -0.1;
-  if (style.borderWidth > 0) {
-    extraWidth = 0.5 * (style.borderWidth - 1);
-    fudge = 0.2;
+typedef struct {
+  REAL h;
+  REAL top;
+  REAL right;
+  REAL bottom;
+  REAL left;
+  REAL d;
+} PathInfo;
+
+PathInfo getPathInfo(Style style, Rect borderBounds) {
+  int borderWidth = pixelateSize(style.borderWidth);
+  REAL deflation = 0.5 * borderWidth - 0.5;
+  REAL fudge = borderWidth > 0 ? 0.2 : -0.1;
+  int earHeight = pixelateSize(style.earHeight);
+
+  PathInfo pathInfo;
+  pathInfo.h = 0;
+  if (earHeight > 0) {
+    pathInfo.h = max(earHeight - sqrt(2) * deflation + fudge, 0);
   }
-  REAL top = borderBounds.Y + extraWidth;
-  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
-  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
-  REAL left = borderBounds.X + extraWidth;
 
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
+  pathInfo.top = borderBounds.Y + deflation;
+  pathInfo.right = borderBounds.X + borderBounds.Width - 1 - deflation;
+  pathInfo.bottom = borderBounds.Y + borderBounds.Height - 1 - deflation;
+  pathInfo.left = borderBounds.X + deflation;
 
-  REAL diameter = (REAL)(2 * style.borderRadius);
+  pathInfo.d = 2 * style.borderRadius;
+
+  return pathInfo;
+}
+
+void addTopLeftCorner(GraphicsPath &border, PathInfo p, bool ear) {
   if (ear) {
-    border.AddLine(left, top - earHeight, left + earHeight, top);
-  } else if (diameter == 0) {
-    border.AddLine(left, top, left, top);
+    border.AddLine(p.left, p.top - p.h, p.left + p.h, p.top);
+  } else if (p.d == 0) {
+    border.AddLine(p.left, p.top, p.left, p.top);
   } else {
-    border.AddArc(left, top, diameter, diameter, 180, 90);
+    border.AddArc(p.left, p.top, p.d, p.d, 180, 90);
   }
 }
 
-void addTopRightCorner(
-  GraphicsPath &border,
-  Style style,
-  Rect borderBounds,
-  bool ear
-) {
-  REAL extraWidth = -0.5;
-  REAL fudge = -0.1;
-  if (style.borderWidth > 0) {
-    extraWidth = 0.5 * (style.borderWidth - 1);
-    fudge = 0.2;
-  }
-  REAL top = borderBounds.Y + extraWidth;
-  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
-  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
-  REAL left = borderBounds.X + extraWidth;
-
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
-
-  REAL diameter = (REAL)(2 * style.borderRadius);
+void addTopRightCorner(GraphicsPath &border, PathInfo p, bool ear) {
   if (ear) {
-    border.AddLine(right - earHeight, top, right, top - earHeight);
-  } else if (diameter == 0) {
-    border.AddLine(right, top, right, top);
+    border.AddLine(p.right - p.h, p.top, p.right, p.top - p.h);
+  } else if (p.d == 0) {
+    border.AddLine(p.right, p.top, p.right, p.top);
   } else {
-    border.AddArc(right - diameter, top, diameter, diameter, 270, 90);
+    border.AddArc(p.right - p.d, p.top, p.d, p.d, 270, 90);
   }
 }
 
-void addBottomRightCorner(
-  GraphicsPath &border,
-  Style style,
-  Rect borderBounds,
-  bool ear
-) {
-  REAL extraWidth = -0.5;
-  REAL fudge = -0.1;
-  if (style.borderWidth > 0) {
-    extraWidth = 0.5 * (style.borderWidth - 1);
-    fudge = 0.2;
-  }
-  REAL top = borderBounds.Y + extraWidth;
-  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
-  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
-  REAL left = borderBounds.X + extraWidth;
-
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
-
-  REAL diameter = (REAL)(2 * style.borderRadius);
+void addBottomRightCorner(GraphicsPath &border, PathInfo p, bool ear) {
   if (ear) {
-    border.AddLine(right, bottom + earHeight, right - earHeight, bottom);
-  } else if (diameter == 0) {
-    border.AddLine(right, bottom, right, bottom);
+    border.AddLine(p.right, p.bottom + p.h, p.right - p.h, p.bottom);
+  } else if (p.d == 0) {
+    border.AddLine(p.right, p.bottom, p.right, p.bottom);
   } else {
-    border.AddArc(
-      right - diameter, bottom - diameter, diameter, diameter, 0, 90
-    );
+    border.AddArc(p.right - p.d, p.bottom - p.d, p.d, p.d, 0, 90);
   }
 }
 
-void addBottomLeftCorner(
-  GraphicsPath &border,
-  Style style,
-  Rect borderBounds,
-  bool ear
-) {
-  REAL extraWidth = -0.5;
-  REAL fudge = -0.1;
-  if (style.borderWidth > 0) {
-    extraWidth = 0.5 * (style.borderWidth - 1);
-    fudge = 0.2;
-  }
-  REAL top = borderBounds.Y + extraWidth;
-  REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
-  REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
-  REAL left = borderBounds.X + extraWidth;
-
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
-
-  REAL diameter = (REAL)(2 * style.borderRadius);
+void addBottomLeftCorner(GraphicsPath &border, PathInfo p, bool ear) {
   if (ear) {
-    border.AddLine(left + earHeight, bottom, left, bottom + earHeight);
-  } else if (diameter == 0) {
-    border.AddLine(left, bottom, left, bottom);
+    border.AddLine(p.left + p.h, p.bottom, p.left, p.bottom + p.h);
+  } else if (p.d == 0) {
+    border.AddLine(p.left, p.bottom, p.left, p.bottom);
   } else {
-    border.AddArc(left, bottom - diameter, diameter, diameter, 90, 90);
+    border.AddArc(p.left, p.bottom - p.d, p.d, p.d, 90, 90);
   }
 }
 
@@ -688,13 +659,15 @@ void drawBubble(
   }
 
   GraphicsPath border;
-  addTopLeftCorner(border, style, borderBounds, earCorner == 0);
-  addTopRightCorner(border, style, borderBounds, earCorner == 1);
-  addBottomRightCorner(border, style, borderBounds, earCorner == 2);
-  addBottomLeftCorner(border, style, borderBounds, earCorner == 3);
+  PathInfo pathInfo = getPathInfo(style, borderBounds);
+  addTopLeftCorner(border, pathInfo, earCorner == 0);
+  addTopRightCorner(border, pathInfo, earCorner == 1);
+  addBottomRightCorner(border, pathInfo, earCorner == 2);
+  addBottomLeftCorner(border, pathInfo, earCorner == 3);
   border.CloseFigure();
-  border.CloseFigure();
+
   graphics.FillPath(artSupplies.fillBrush, &border);
+
   if (style.borderWidth > 0) {
     graphics.DrawPath(artSupplies.borderPen, &border);
   }
