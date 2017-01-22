@@ -18,6 +18,10 @@ if (GetLastError()) {
 
 Then look up the error code here:
 https://msdn.microsoft.com/en-us/library/windows/desktop/ms681381.aspx
+
+For some reason, calling the Font constructor always causes Error 122,
+ERROR_INSUFFICIENT_BUFFER, so if you see that error, you can probably ignore
+it.
 */
 
 #include <windows.h>
@@ -540,16 +544,18 @@ void addTopLeftCorner(
   Rect borderBounds,
   bool ear
 ) {
-  REAL extraWidth = 0;
-  if (style.borderWidth >= 1) {
+  REAL extraWidth = -0.5;
+  REAL fudge = -0.1;
+  if (style.borderWidth > 0) {
     extraWidth = 0.5 * (style.borderWidth - 1);
+    fudge = 0.2;
   }
   REAL top = borderBounds.Y + extraWidth;
   REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
   REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
   REAL left = borderBounds.X + extraWidth;
 
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
 
   REAL diameter = (REAL)(2 * style.borderRadius);
   if (ear) {
@@ -567,16 +573,18 @@ void addTopRightCorner(
   Rect borderBounds,
   bool ear
 ) {
-  REAL extraWidth = 0;
-  if (style.borderWidth >= 1) {
+  REAL extraWidth = -0.5;
+  REAL fudge = -0.1;
+  if (style.borderWidth > 0) {
     extraWidth = 0.5 * (style.borderWidth - 1);
+    fudge = 0.2;
   }
   REAL top = borderBounds.Y + extraWidth;
   REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
   REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
   REAL left = borderBounds.X + extraWidth;
 
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
 
   REAL diameter = (REAL)(2 * style.borderRadius);
   if (ear) {
@@ -594,16 +602,18 @@ void addBottomRightCorner(
   Rect borderBounds,
   bool ear
 ) {
-  REAL extraWidth = 0;
-  if (style.borderWidth >= 1) {
+  REAL extraWidth = -0.5;
+  REAL fudge = -0.1;
+  if (style.borderWidth > 0) {
     extraWidth = 0.5 * (style.borderWidth - 1);
+    fudge = 0.2;
   }
   REAL top = borderBounds.Y + extraWidth;
   REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
   REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
   REAL left = borderBounds.X + extraWidth;
 
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
 
   REAL diameter = (REAL)(2 * style.borderRadius);
   if (ear) {
@@ -623,16 +633,18 @@ void addBottomLeftCorner(
   Rect borderBounds,
   bool ear
 ) {
-  REAL extraWidth = 0;
-  if (style.borderWidth >= 1) {
+  REAL extraWidth = -0.5;
+  REAL fudge = -0.1;
+  if (style.borderWidth > 0) {
     extraWidth = 0.5 * (style.borderWidth - 1);
+    fudge = 0.2;
   }
   REAL top = borderBounds.Y + extraWidth;
   REAL right = borderBounds.X + borderBounds.Width - 1 - extraWidth;
   REAL bottom = borderBounds.Y + borderBounds.Height - 1 - extraWidth;
   REAL left = borderBounds.X + extraWidth;
 
-  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + 0.2;
+  REAL earHeight = style.earHeight - sqrt(2) * extraWidth + fudge;
 
   REAL diameter = (REAL)(2 * style.borderRadius);
   if (ear) {
