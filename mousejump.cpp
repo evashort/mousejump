@@ -26,6 +26,7 @@ https://msdn.microsoft.com/en-us/library/windows/desktop/ms681381.aspx
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <string>
 
 #pragma comment(linker, "/subsystem:windows")
 #pragma comment(lib, "user32")
@@ -135,6 +136,26 @@ Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
   return Size((int)round(bounds.Width), (int)round(bounds.Height));
 }
 
+int getChosenWidth(
+  const Graphics &graphics, const Font *font, LPTSTR text, int chosenChars
+) {
+  RectF bounds;
+  graphics.MeasureString(text, -1, font, PointF(0.0f, 0.0f), &bounds);
+  REAL fullWidth = bounds.Width;
+
+  graphics.MeasureString(
+    text, chosenChars, font, PointF(0.0f, 0.0f), &bounds
+  );
+  REAL chosenWidth = bounds.Width;
+
+  graphics.MeasureString(
+    &text[chosenChars], -1, font, PointF(0.0f, 0.0f), &bounds
+  );
+  REAL unchosenWidth = bounds.Width;
+
+  return (int)round(0.5 * (chosenWidth + fullWidth - unchosenWidth));
+}
+
 StringFormat *getCenteredFormat() {
   static StringFormat format(
     StringFormatFlagsNoWrap | StringFormatFlagsNoClip,
@@ -191,6 +212,106 @@ int getBubbleCount(
   int areaLimit = (int)round(gridArea / cellArea);
 
   return min(symbolLimit, areaLimit);
+}
+
+int digitsToNumber(vector<int> bases, vector<int> digits) {
+  int number = 0;
+  if (digits.size() > 0 && bases.size() > 0) {
+    number = digits[0];
+  }
+
+  for (int i = 1; i < bases.size(); i++) {
+    number *= bases[i - 1];
+    if (i < digits.size()) {
+      number += digits[i];
+    }
+  }
+
+  return number;
+}
+
+vector<int> numberToDigits(vector<int> bases, int number) {
+  vector<int> digits(bases.size());
+  for (int i = bases.size() - 1; i > 0; i--) {
+    digits[i] = number % bases[i - 1];
+    number /= bases[i - 1];
+  }
+  digits[0] = number;
+  return digits;
+}
+
+int getProduct(vector<int> factors) {
+  int product = 1;
+  for (int i = 0; i < factors.size(); i++) {
+    product *= factors[i];
+  }
+  return product;
+}
+
+int getShorterWords(vector<int> bases, int wordCount) {
+  int extraWords = getProduct(bases) - wordCount;
+  int shorteningCost = bases[bases.size() - 1] - 1;
+  return extraWords / shorteningCost;
+}
+
+int getFullWords(vector<int> bases, int wordCount) {
+  return wordCount - getShorterWords(bases, wordCount);
+}
+
+int ceilDivide(int x, int y) {
+  return (x + y - 1) / y;
+}
+
+int getWordIndexStart(vector<int> bases, int wordCount, vector<int> word) {
+  int fullWords = getFullWords(bases, wordCount);
+  int fullWordIndex = digitsToNumber(bases, word);
+  if (fullWordIndex < fullWords) {
+    return fullWordIndex;
+  }
+
+  vector<int> shorterBases(bases.begin(), --bases.end());
+  int skippedShorterWords = ceilDivide(fullWords, bases[bases.size() - 1]);
+  int shorterWordIndex = digitsToNumber(shorterBases, word);
+  return shorterWordIndex + fullWords - skippedShorterWords;
+}
+
+int getWordIndexStop(vector<int> bases, int wordCount, vector<int> word) {
+  if (word.size() <= 0) {
+    return wordCount;
+  }
+
+  vector<int> highWord(word);
+  highWord[highWord.size() - 1]++;
+  return getWordIndexStart(bases, wordCount, highWord);
+}
+
+int getWordChoices(vector<int> bases, int wordCount, vector<int> word) {
+  int start = getWordIndexStart(bases, wordCount, word);
+  int stop = getWordIndexStop(bases, wordCount, word);
+  return stop - start;
+}
+
+vector<int> getWord(vector<int> bases, int wordCount, int wordIndex) {
+  int fullWords = getFullWords(bases, wordCount);
+  if (wordIndex < fullWords) {
+    return numberToDigits(bases, wordIndex);
+  }
+
+  vector<int> shorterBases(bases.begin(), --bases.end());
+  int skippedShorterWords = ceilDivide(fullWords, bases[bases.size() - 1]);
+  int shorterWordIndex = wordIndex - fullWords + skippedShorterWords;
+  return numberToDigits(shorterBases, shorterWordIndex);
+}
+
+vector<int> getBases(vector<vector<Symbol> > levels, int wordCount) {
+  vector<int> bases;
+  int possibleWords = 1;
+  for (int i = 0; i < levels.size() && possibleWords < wordCount; i++) {
+    bases.push_back(levels[i].size());
+    possibleWords *= levels[i].size();
+  }
+
+  return bases;
 }
 
 GridSettings adjustGridSettings(
@@ -356,6 +477,7 @@ typedef struct {
   LPTSTR fontFamily;
   double fontPointSize;
   Color textColor;
+  Color chosenTextColor;
   Color fillColor;
   Color borderColor;
   double borderRadius;
@@ -370,6 +492,7 @@ typedef struct {
 typedef struct {
   Font *font;
   SolidBrush *textBrush;
+  SolidBrush *chosenTextBrush;
   SolidBrush *fillBrush;
   Pen *borderPen;
 } ArtSupplies;
@@ -378,6 +501,7 @@ ArtSupplies getArtSupplies(Style style) {
   ArtSupplies artSupplies;
   artSupplies.font = new Font(style.fontFamily, style.fontPointSize);
   artSupplies.textBrush = new SolidBrush(style.textColor);
+  artSupplies.chosenTextBrush = new SolidBrush(style.chosenTextColor);
   artSupplies.fillBrush = new SolidBrush(style.fillColor);
   artSupplies.borderPen = new Pen(style.borderColor, style.borderWidth);
   return artSupplies;
@@ -386,6 +510,7 @@ ArtSupplies getArtSupplies(Style style) {
 void destroyArtSupplies(ArtSupplies artSupplies) {
   delete artSupplies.font;
   delete artSupplies.textBrush;
+  delete artSupplies.chosenTextBrush;
   delete artSupplies.fillBrush;
   delete artSupplies.borderPen;
 }
@@ -525,7 +650,7 @@ void drawBubble(
   ArtSupplies artSupplies,
   Point point,
   LPTSTR text,
-  LPTSTR chosenText
+  int chosenChars
 ) {
   Size textSize = getTextSize(graphics, artSupplies.font, text);
 
@@ -569,6 +694,20 @@ void drawBubble(
     textSize.Height
   );
 
+  int chosenWidth = getChosenWidth(
+    graphics, artSupplies.font, text, chosenChars
+  );
+
+  Rect chosenHalf(screenBounds);
+  chosenHalf.Width = textBounds.X + chosenWidth - chosenHalf.X;
+
+  Rect unchosenHalf(screenBounds);
+  unchosenHalf.Width -= chosenHalf.Width;
+  unchosenHalf.X = chosenHalf.GetRight();
+
+  GraphicsContainer maskingTape = graphics.BeginContainer();
+
+  graphics.SetClip(unchosenHalf);
   graphics.DrawString(
     text, -1,
     artSupplies.font,
@@ -576,6 +715,17 @@ void drawBubble(
     getCenteredFormat(),
     artSupplies.textBrush
   );
+
+  graphics.SetClip(chosenHalf);
+  graphics.DrawString(
+    text, -1,
+    artSupplies.font,
+    textBounds,
+    getCenteredFormat(),
+    artSupplies.chosenTextBrush
+  );
+
+  graphics.EndContainer(maskingTape);
 }
 
 typedef struct {
@@ -601,6 +751,7 @@ typedef struct {
   Keymap keymap;
   GridSettings gridSettings;
   Style style;
+  vector<int> word;
 } Model;
 
 Model getModel(HMONITOR monitor) {
@@ -691,6 +842,7 @@ Model getModel(HMONITOR monitor) {
   );
 
   model.style.textColor = getSystemColor(COLOR_INFOTEXT);
+  model.style.chosenTextColor = getSystemColor(COLOR_GRAYTEXT);
   model.style.fillColor = getSystemColor(COLOR_INFOBK);
   model.style.borderColor = Color(118, 118, 118);
 
@@ -739,14 +891,27 @@ void drawModel(Model model, View& view) {
     PointF(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
   );
 
+  vector<int> bases = getBases(model.keymap.levels, bubbleCount);
+  int wordIndexStart = getWordIndexStart(bases, bubbleCount, model.word);
+  int wordIndexStop = getWordIndexStop(bases, bubbleCount, model.word);
   for (int i = 0; i < jumpPoints.size(); i++) {
+    if (i < wordIndexStart || i >= wordIndexStop) {
+      continue;
+    }
+    wstring label;
+    vector<int> sequence = getWord(bases, bubbleCount, i);
+    for (int j = 0; j < sequence.size(); j++) {
+      label += model.keymap.levels[j][sequence[j]].spelling;
+    }
+    vector<WCHAR> labelVector(label.begin(), label.end());
+    labelVector.push_back(0);
     drawBubble(
       graphics,
       model.style,
       artSupplies,
       jumpPoints[i],
-      _T("wf"),
-      _T("")
+      &labelVector[0],
+      model.word.size()
     );
   }
 
@@ -841,6 +1006,12 @@ LRESULT CALLBACK WndProc(
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
       PostMessage(window, WM_CLOSE, 0, 0);
+    } else if (wParam == model.keymap.clear) {
+      if (model.word.size() > 0) {
+        model.word.clear();
+        drawModel(model, view);
+        showView(view, window);
+      }
     } else if (wParam == model.keymap.left) {
       moveCursorBy(-model.keymap.hStride, 0);
     } else if (wParam == model.keymap.up) {
@@ -872,6 +1043,30 @@ LRESULT CALLBACK WndProc(
       click(2, 1);
       if (!SetForegroundWindow(window)) {
         PostMessage(window, WM_CLOSE, 0, 0);
+      }
+    } else {
+      int wordCount = getBubbleCount(
+        model.keymap.levels,
+        model.gridSettings,
+        getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
+      );
+      vector<int> bases = getBases(model.keymap.levels, wordCount);
+      int wordChoices = getWordChoices(bases, wordCount, model.word);
+      if (model.word.size() < model.keymap.levels.size()) {
+        wordChoices = min(
+          wordChoices,
+          model.keymap.levels[model.word.size()].size()
+        );
+      }
+      if (wordChoices > 1) {
+        for (int i = 0; i < wordChoices; i++) {
+          if (wParam == model.keymap.levels[model.word.size()][i].keycode) {
+            model.word.push_back(i);
+            drawModel(model, view);
+            showView(view, window);
+            break;
+          }
+        }
       }
     }
     break;
