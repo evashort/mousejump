@@ -879,6 +879,10 @@ void drawModel(Model model, View& view) {
   vector<int> bases = getBases(model.keymap.levels, bubbleCount);
   int wordIndexStart = getWordIndexStart(bases, bubbleCount, model.word);
   int wordIndexStop = getWordIndexStop(bases, bubbleCount, model.word);
+  if (wordIndexStop - wordIndexStart <= 1) {
+    jumpPoints.clear();
+  }
+
   for (int i = 0; i < jumpPoints.size(); i++) {
     if (i < wordIndexStart || i >= wordIndexStop) {
       continue;
@@ -1018,6 +1022,10 @@ LRESULT CALLBACK WndProc(
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
       if (!SetForegroundWindow(window)) {
         PostMessage(window, WM_CLOSE, 0, 0);
+      } else {
+        model.word.clear();
+        drawModel(model, view);
+        showView(view, window);
       }
     } else if (wParam == model.keymap.secondaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
@@ -1030,10 +1038,14 @@ LRESULT CALLBACK WndProc(
         PostMessage(window, WM_CLOSE, 0, 0);
       }
     } else {
+      Rect bitmapBounds(
+        0, 0, getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
+      );
+
       int wordCount = getBubbleCount(
         model.keymap.levels,
         model.gridSettings,
-        getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
+        bitmapBounds.Width, bitmapBounds.Height
       );
       vector<int> bases = getBases(model.keymap.levels, wordCount);
       int wordChoices = getWordChoices(bases, wordCount, model.word);
@@ -1047,6 +1059,31 @@ LRESULT CALLBACK WndProc(
         for (int i = 0; i < wordChoices; i++) {
           if (wParam == model.keymap.levels[model.word.size()][i].keycode) {
             model.word.push_back(i);
+            if (getWordChoices(bases, wordCount, model.word) <= 1) {
+              int chosenWord = getWordIndexStart(
+                bases, wordCount, model.word
+              );
+
+              GridSettings adjusted = adjustGridSettings(
+                model.gridSettings,
+                bitmapBounds.Width, bitmapBounds.Height,
+                wordCount
+              );
+
+              vector<Point> jumpPoints = getJumpPoints(
+                adjusted,
+                bitmapBounds,
+                wordCount,
+                PointF(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
+              );
+
+              Point chosenPoint = jumpPoints[chosenWord];
+
+              SetCursorPos(
+                view.start.x + chosenPoint.X, view.start.y + chosenPoint.Y
+              );
+            }
+
             drawModel(model, view);
             showView(view, window);
             break;
