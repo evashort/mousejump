@@ -2,6 +2,7 @@ module.exports = {
   cmd: "cl",
   name: "x86",
   args: [
+    "/EHsc",
     "/D_UNICODE",
     "/DUNICODE",
     "/DWIN32",
@@ -17,7 +18,7 @@ module.exports = {
     "(?<file>.+)\\((?<line>\\d+)\\): (?<message>error.*)"
   ],
   warningMatch: [
-    "^regexp1$"
+    "(?<file>.+)\\((?<line>\\d+)\\): (?<message>warning.*)"
   ],
   keymap: "f5",
   atomCommandName: "visualstudio:win32",
