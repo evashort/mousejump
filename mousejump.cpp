@@ -941,16 +941,117 @@ void showView(View view, HWND window) {
 Model model;
 View view;
 
+class IdleAction {
+public:
+  virtual bool operator() () =0;
+};
+
+class IdleSendInput: public IdleAction {
+private:
+  INPUT input;
+public:
+  IdleSendInput(INPUT input) {
+    this->input = input;
+  }
+  bool operator() () {
+    SendInput(1, &input, sizeof(INPUT));
+    return true;
+  }
+};
+
+class IdleSetCursorPos: public IdleAction {
+private:
+  int x;
+  int y;
+public:
+  IdleSetCursorPos(int x, int y) {
+    this->x = x;
+    this->y = y;
+  }
+  bool operator() () {
+    SetCursorPos(x, y);
+    return true;
+  }
+};
+
+class IdleReactivate: public IdleAction {
+private:
+  HWND window;
+public:
+  IdleReactivate(HWND window) {
+    this->window = window;
+  }
+  bool operator() () {
+    bool result = SetForegroundWindow(window);
+    if (!result) {
+      PostMessage(window, WM_CLOSE, 0, 0);
+    }
+
+    return result;
+  }
+};
+
+class IdleClose: public IdleAction {
+private:
+  HWND window;
+public:
+  IdleClose(HWND window) {
+    this->window = window;
+  }
+  bool operator() () {
+    PostMessage(window, WM_CLOSE, 0, 0);
+    return false;
+  }
+};
+
+// Dragon's API has a function called PlayString for simulating keystrokes,
+// which seems to block other programs from sending mouse input while it's
+// running. I get around this problem by waiting until a timer has elapsed
+// before sending mouse input. Even though the timer has an interval of 0 ms,
+// the timer tick message won't be created until all other pending messages
+// have been processed, as explained here:
+// https://blogs.msdn.microsoft.com/oldnewthing/20141204-00/?p=43473
+vector<IdleAction*> idleActions;
+
+VOID CALLBACK doIdleActions(
+  HWND window,
+  UINT message,
+  UINT_PTR timerID,
+  DWORD currentTime
+) {
+  KillTimer(window, timerID);
+
+  for (int i = 0; i < idleActions.size(); i++) {
+    if (!(*idleActions[i])()) {
+      break;
+    }
+  }
+
+  for (int i = 0; i < idleActions.size(); i++) {
+    delete idleActions[i];
+  }
+
+  idleActions.clear();
+}
+
+void whenIdle(IdleAction *action) {
+  if (idleActions.empty()) {
+    SetTimer(NULL, 0, 0, (TIMERPROC)doIdleActions);
+  }
+
+  idleActions.push_back(action);
+}
+
 void moveCursorBy(int xOffset, int yOffset) {
-  INPUT inputs[1];
-  inputs[0].type = INPUT_MOUSE;
-  inputs[0].mi.dx = xOffset;
-  inputs[0].mi.dy = yOffset;
-  inputs[0].mi.mouseData = 0;
-  inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE;
-  inputs[0].mi.time = 0;
-  inputs[0].mi.dwExtraInfo = 0;
-  SendInput(1, inputs, sizeof(INPUT));
+  INPUT input;
+  input.type = INPUT_MOUSE;
+  input.mi.dx = xOffset;
+  input.mi.dy = yOffset;
+  input.mi.mouseData = 0;
+  input.mi.dwFlags = MOUSEEVENTF_MOVE;
+  input.mi.time = 0;
+  input.mi.dwExtraInfo = 0;
+  whenIdle(new IdleSendInput(input));
 }
 
 INPUT getClick(DWORD dwFlags) {
@@ -971,16 +1072,12 @@ void click(int button, bool goalState) {
     {MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_MIDDLEUP},
     {MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_MIDDLEDOWN}
   };
+
   if ((GetKeyState(keycodes[button]) < 0) == goalState) {
-    INPUT inputs[2] = {
-      getClick(actions[!goalState][button]),
-      getClick(actions[goalState][button])
-    };
-    SendInput(2, inputs, sizeof(INPUT));
-  } else {
-    INPUT inputs[1] = {getClick(actions[goalState][button])};
-    SendInput(1, inputs, sizeof(INPUT));
+    whenIdle(new IdleSendInput(getClick(actions[!goalState][button])));
   }
+
+  whenIdle(new IdleSendInput(getClick(actions[goalState][button])));
 }
 
 LRESULT CALLBACK WndProc(
@@ -994,7 +1091,7 @@ LRESULT CALLBACK WndProc(
   switch (message) {
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
-      PostMessage(window, WM_CLOSE, 0, 0);
+      whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.clear) {
       if (model.word.size() > 0) {
         model.word.clear();
@@ -1011,32 +1108,31 @@ LRESULT CALLBACK WndProc(
       moveCursorBy(0, model.keymap.vStride);
     } else if (wParam == model.keymap.primaryClick) {
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 0);
-      PostMessage(window, WM_CLOSE, 0, 0);
+      whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.secondaryClick) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 0);
-      PostMessage(window, WM_CLOSE, 0, 0);
+      whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.middleClick) {
       click(2, 0);
-      PostMessage(window, WM_CLOSE, 0, 0);
+      whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.primaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
-      if (!SetForegroundWindow(window)) {
-        PostMessage(window, WM_CLOSE, 0, 0);
-      } else {
-        model.word.clear();
-        drawModel(model, view);
-        showView(view, window);
-      }
+      whenIdle(new IdleReactivate(window));
+      model.word.clear();
+      drawModel(model, view);
+      showView(view, window);
     } else if (wParam == model.keymap.secondaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
-      if (!SetForegroundWindow(window)) {
-        PostMessage(window, WM_CLOSE, 0, 0);
-      }
+      whenIdle(new IdleReactivate(window));
+      model.word.clear();
+      drawModel(model, view);
+      showView(view, window);
     } else if (wParam == model.keymap.middleHold) {
       click(2, 1);
-      if (!SetForegroundWindow(window)) {
-        PostMessage(window, WM_CLOSE, 0, 0);
-      }
+      whenIdle(new IdleReactivate(window));
+      model.word.clear();
+      drawModel(model, view);
+      showView(view, window);
     } else {
       Rect bitmapBounds(
         0, 0, getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
@@ -1079,8 +1175,10 @@ LRESULT CALLBACK WndProc(
 
               Point chosenPoint = jumpPoints[chosenWord];
 
-              SetCursorPos(
-                view.start.x + chosenPoint.X, view.start.y + chosenPoint.Y
+              whenIdle(
+                new IdleSetCursorPos(
+                  view.start.x + chosenPoint.X, view.start.y + chosenPoint.Y
+                )
               );
             }
 
