@@ -3,10 +3,7 @@ module.exports = {
   name: "x86",
   args: [
     "/EHsc",
-    "/D_UNICODE",
-    "/DUNICODE",
-    "/DWIN32",
-    "/D_WINDOWS",
+    "/W3",
     "mousejump.cpp"
   ],
   sh: true,
