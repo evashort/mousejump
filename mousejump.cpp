@@ -1,12 +1,21 @@
 /*
-To run, download and install Build Tools for Visual Studio 2017 RC
+To run:
+1. Download and install Build Tools for Visual Studio 2017 RC
 https://www.visualstudio.com/downloads/#build-tools-for-visual-studio-2017-rc
-
-Open "Developer Command Prompt for VS 2017 RC" under "Visual Studio 2017 RC"
-in the start menu
-
+2. Open "Developer Command Prompt for VS 2017 RC" under
+   "Visual Studio 2017 RC" in the start menu
+3.
 cd /Users/Evan/Documents/GitHub/mousejump
-cl /EHsc /D_UNICODE /DUNICODE /DWIN32 /D_WINDOWS mousejump.cpp && mousejump.exe
+cl /EHsc /W3 mousejump.cpp && mousejump.exe
+
+Can also be compiled with MinGW, but the executable will be about 5x larger.
+1. Download and install MinGW from http://www.mingw.org/
+2. In the MinGW Installation Manager, choose Basic Setup and mark mingw32-base
+   and mingw32-gcc-g++ for installation.
+3. Add C:\MinGW\bin\ to the PATH system environment variable.
+4.
+cd /Users/Evan/Documents/GitHub/mousejump
+g++ -O3 -Wall mousejump.cpp -o mousejump.exe -luser32 -lgdi32 -lgdiplus -Wl,--subsystem,windows -s -static-libstdc++ && mousejump.exe
 
 To debug, insert this snippet after the thing that probably went wrong:
 
@@ -23,6 +32,9 @@ For some reason, calling the Font constructor always causes Error 122,
 ERROR_INSUFFICIENT_BUFFER, so if you see that error, you can probably ignore
 it.
 */
+
+#define UNICODE
+#define _UNICODE
 
 #include <windows.h>
 #include <tchar.h>
@@ -51,7 +63,8 @@ View getView() {
   View view;
   view.deviceContext = NULL;
   view.bitmap = NULL;
-  view.start = {0, 0};
+  view.start.x = 0;
+  view.start.y = 0;
   view.originalBitmap = NULL;
   return view;
 }
@@ -70,7 +83,8 @@ void destroyView(View view) {
     view.bitmap = NULL;
   }
 
-  view.start = {0, 0};
+  view.start.x = 0;
+  view.start.y = 0;
 }
 
 bool updateView(HMONITOR monitor, View& view) {
@@ -96,7 +110,8 @@ bool updateView(HMONITOR monitor, View& view) {
 
   DeleteDC(infoContext);
 
-  view.start = {monitorInfo.rcMonitor.left, monitorInfo.rcMonitor.top};
+  view.start.x = monitorInfo.rcMonitor.left;
+  view.start.y = monitorInfo.rcMonitor.top;
   view.originalBitmap = SelectObject(view.deviceContext, view.bitmap);
 
   return true;
@@ -186,8 +201,8 @@ int getBitmapHeight(HBITMAP bitmap) {
 typedef struct {
   // Keycode reference:
   // https://msdn.microsoft.com/en-us/library/windows/desktop/dd375731.aspx
-  LPTSTR spelling;
-  int keycode;
+  wstring spelling;
+  UINT keycode;
 } Symbol;
 
 typedef struct {
@@ -206,7 +221,7 @@ int getBubbleCount(
   int width, int height
 ) {
   int symbolLimit = 1;
-  for (int i = 0; i < levels.size(); i++) {
+  for (size_t i = 0; i < levels.size(); i++) {
     symbolLimit *= levels[i].size();
   }
 
@@ -224,7 +239,7 @@ int digitsToNumber(vector<int> bases, vector<int> digits) {
     number = digits[0];
   }
 
-  for (int i = 1; i < bases.size(); i++) {
+  for (size_t i = 1; i < bases.size(); i++) {
     number *= bases[i - 1];
     if (i < digits.size()) {
       number += digits[i];
@@ -236,7 +251,7 @@ int digitsToNumber(vector<int> bases, vector<int> digits) {
 
 vector<int> numberToDigits(vector<int> bases, int number) {
   vector<int> digits(bases.size());
-  for (int i = bases.size() - 1; i > 0; i--) {
+  for (size_t i = bases.size() - 1; i > 0; i--) {
     digits[i] = number % bases[i - 1];
     number /= bases[i - 1];
   }
@@ -246,7 +261,7 @@ vector<int> numberToDigits(vector<int> bases, int number) {
 
 int getProduct(vector<int> factors) {
   int product = 1;
-  for (int i = 0; i < factors.size(); i++) {
+  for (size_t i = 0; i < factors.size(); i++) {
     product *= factors[i];
   }
   return product;
@@ -266,7 +281,7 @@ int ceilDivide(int x, int y) {
   return (x + y - 1) / y;
 }
 
-int getWordIndexStart(vector<int> bases, int wordCount, vector<int> word) {
+size_t getWordIndexStart(vector<int> bases, int wordCount, vector<int> word) {
   int fullWords = getFullWords(bases, wordCount);
   int fullWordIndex = digitsToNumber(bases, word);
   if (fullWordIndex < fullWords) {
@@ -276,10 +291,11 @@ int getWordIndexStart(vector<int> bases, int wordCount, vector<int> word) {
   vector<int> shorterBases(bases.begin(), --bases.end());
   int skippedShorterWords = ceilDivide(fullWords, bases[bases.size() - 1]);
   int shorterWordIndex = digitsToNumber(shorterBases, word);
-  return shorterWordIndex + fullWords - skippedShorterWords;
+  int result = shorterWordIndex + fullWords - skippedShorterWords;
+  return result < 0 ? 0 : (size_t)result;
 }
 
-int getWordIndexStop(vector<int> bases, int wordCount, vector<int> word) {
+size_t getWordIndexStop(vector<int> bases, int wordCount, vector<int> word) {
   if (word.size() <= 0) {
     return wordCount;
   }
@@ -310,7 +326,7 @@ vector<int> getWord(vector<int> bases, int wordCount, int wordIndex) {
 vector<int> getBases(vector<vector<Symbol> > levels, int wordCount) {
   vector<int> bases;
   int possibleWords = 1;
-  for (int i = 0; i < levels.size() && possibleWords < wordCount; i++) {
+  for (size_t i = 0; i < levels.size() && possibleWords < wordCount; i++) {
     bases.push_back(levels[i].size());
     possibleWords *= levels[i].size();
   }
@@ -327,7 +343,7 @@ GridSettings adjustGridSettings(
   double bubbleCover =
     gridSettings.cellWidth * gridSettings.cellHeight * sqrt(0.75) * \
     bubbleCount;
-  double scale = max(sqrt(gridArea / bubbleCover), 1);
+  double scale = fmax(sqrt(gridArea / bubbleCover), 1);
 
   GridSettings result;
   result.pixelsPastEdge = gridSettings.pixelsPastEdge;
@@ -363,7 +379,7 @@ int getMinMultiplierInBounds(RectF bounds, PointF scaled, PointF other) {
   REAL b = dot(getCorner(bounds, 1), otherN) / under;
   REAL c = dot(getCorner(bounds, 2), otherN) / under;
   REAL d = dot(getCorner(bounds, 3), otherN) / under;
-  return (int)ceil(min(a, min(b, min(c, d))));
+  return (int)ceil(fmin(a, fmin(b, fmin(c, d))));
 }
 
 int getMaxMultiplierInBounds(RectF bounds, PointF scaled, PointF other) {
@@ -373,27 +389,33 @@ int getMaxMultiplierInBounds(RectF bounds, PointF scaled, PointF other) {
   REAL b = dot(getCorner(bounds, 1), otherN) / under;
   REAL c = dot(getCorner(bounds, 2), otherN) / under;
   REAL d = dot(getCorner(bounds, 3), otherN) / under;
-  return (int)floor(max(a, max(b, max(c, d))));
+  return (int)floor(fmax(a, fmax(b, fmax(c, d))));
 }
 
-float getBoundsDistance(RectF bounds, PointF v) {
-  return max(
-    max(bounds.GetLeft() - v.X, v.X - bounds.GetRight()),
-    max(bounds.GetTop() - v.Y, v.Y - bounds.GetBottom())
+REAL getBoundsDistance(RectF bounds, PointF v) {
+  return fmax(
+    fmax(bounds.GetLeft() - v.X, v.X - bounds.GetRight()),
+    fmax(bounds.GetTop() - v.Y, v.Y - bounds.GetBottom())
   );
 }
 
-struct BoundsDistanceComparator {
+class BoundsDistanceComparator {
+private:
   RectF bounds;
+public:
+  BoundsDistanceComparator(const RectF &bounds) {
+    this->bounds = bounds;
+  }
+
   bool operator() (PointF v1, PointF v2) {
     return getBoundsDistance(bounds, v1) < getBoundsDistance(bounds, v2);
   }
-} myobject;
+};
 
 #define degrees(x) (x * (3.1415926535897932384626433832795 / 180))
 vector<PointF> getHoneycomb(RectF bounds, int points) {
-  PointF v1(cos(degrees(15)), sin(degrees(15)));
-  PointF v2(cos(degrees(75)), sin(degrees(75)));
+  PointF v1((REAL)cos(degrees(15)), (REAL)sin(degrees(15)));
+  PointF v2((REAL)cos(degrees(75)), (REAL)sin(degrees(75)));
 
   int v1Start = getMinMultiplierInBounds(bounds, v1, v2);
   int v1Stop = getMaxMultiplierInBounds(bounds, v1, v2) + 1;
@@ -413,14 +435,14 @@ vector<PointF> getHoneycomb(RectF bounds, int points) {
     }
   }
 
-  sort(honeycomb.begin(), honeycomb.end(), BoundsDistanceComparator{bounds});
+  sort(honeycomb.begin(), honeycomb.end(), BoundsDistanceComparator(bounds));
   honeycomb.resize(points);
 
   return honeycomb;
 }
 
 void scaleHoneycomb(vector<PointF> &honeycomb, REAL xScale, REAL yScale) {
-  for (int i = 0; i < honeycomb.size(); i++) {
+  for (size_t i = 0; i < honeycomb.size(); i++) {
     honeycomb[i].X *= xScale;
     honeycomb[i].Y *= yScale;
   }
@@ -429,7 +451,7 @@ void scaleHoneycomb(vector<PointF> &honeycomb, REAL xScale, REAL yScale) {
 void translateHoneycomb(
   vector<PointF> &honeycomb, REAL xOffset, REAL yOffset
 ) {
-  for (int i = 0; i < honeycomb.size(); i++) {
+  for (size_t i = 0; i < honeycomb.size(); i++) {
     honeycomb[i].X += xOffset;
     honeycomb[i].Y += yOffset;
   }
@@ -449,23 +471,33 @@ vector<Point> getJumpPoints(
   PointF origin
 ) {
   RectF newBounds(
-    (bounds.X - origin.X - gridSettings.pixelsPastEdge) /
-      gridSettings.cellWidth,
-    (bounds.Y - origin.Y - gridSettings.pixelsPastEdge) /
-      gridSettings.cellHeight,
-    (bounds.Width + 2 * gridSettings.pixelsPastEdge) /
-      gridSettings.cellWidth,
-    (bounds.Height + 2 * gridSettings.pixelsPastEdge) /
-      gridSettings.cellHeight
+    (REAL)(
+      (bounds.X - origin.X - gridSettings.pixelsPastEdge) /
+      gridSettings.cellWidth
+    ),
+    (REAL)(
+      (bounds.Y - origin.Y - gridSettings.pixelsPastEdge) /
+        gridSettings.cellHeight
+    ),
+    (REAL)(
+      (bounds.Width + 2 * gridSettings.pixelsPastEdge) /
+        gridSettings.cellWidth
+    ),
+    (REAL)(
+      (bounds.Height + 2 * gridSettings.pixelsPastEdge) /
+        gridSettings.cellHeight
+    )
   );
 
   vector<PointF> honeycomb = getHoneycomb(newBounds, bubbleCount);
-  scaleHoneycomb(honeycomb, gridSettings.cellWidth, gridSettings.cellHeight);
+  scaleHoneycomb(
+    honeycomb, (REAL)gridSettings.cellWidth, (REAL)gridSettings.cellHeight
+  );
   translateHoneycomb(honeycomb, origin.X, origin.Y);
 
   vector<Point> jumpPoints;
   jumpPoints.reserve(honeycomb.size());
-  for (int i = 0; i < honeycomb.size(); i++) {
+  for (size_t i = 0; i < honeycomb.size(); i++) {
     jumpPoints.push_back(
       clampToRect(
         bounds,
@@ -490,7 +522,7 @@ int pixelate(double offset) {
 }
 
 typedef struct {
-  LPTSTR fontFamily;
+  wstring fontFamily;
   double fontPointSize;
   Color textColor;
   Color chosenTextColor;
@@ -515,13 +547,15 @@ typedef struct {
 
 ArtSupplies getArtSupplies(Style style) {
   ArtSupplies artSupplies;
-  artSupplies.font = new Font(style.fontFamily, style.fontPointSize);
+  artSupplies.font = new Font(
+    style.fontFamily.c_str(), (REAL)style.fontPointSize
+  );
   artSupplies.textBrush = new SolidBrush(style.textColor);
   artSupplies.chosenTextBrush = new SolidBrush(style.chosenTextColor);
   artSupplies.fillBrush = new SolidBrush(style.fillColor);
   artSupplies.borderPen = new Pen(
     style.borderColor,
-    pixelateSize(style.borderWidth)
+    (REAL)pixelateSize(style.borderWidth)
   );
 
   return artSupplies;
@@ -567,22 +601,24 @@ typedef struct {
 
 PathInfo getPathInfo(Style style, Rect borderBounds) {
   int borderWidth = pixelateSize(style.borderWidth);
-  REAL deflation = 0.5 * borderWidth - 0.5;
-  REAL fudge = borderWidth > 0 ? 0.2 : -0.1;
+  double deflation = 0.5 * borderWidth - 0.5;
+  double fudge = borderWidth > 0 ? 0.2 : -0.1;
   int earHeight = pixelateSize(style.earHeight);
 
   PathInfo pathInfo;
   pathInfo.h = 0;
   if (earHeight > 0) {
-    pathInfo.h = max(earHeight - sqrt(2) * deflation + fudge, 0);
+    pathInfo.h = (REAL)fmax(earHeight - sqrt(2) * deflation + fudge, 0);
   }
 
-  pathInfo.top = borderBounds.Y + deflation;
-  pathInfo.right = borderBounds.X + borderBounds.Width - 1 - deflation;
-  pathInfo.bottom = borderBounds.Y + borderBounds.Height - 1 - deflation;
-  pathInfo.left = borderBounds.X + deflation;
+  pathInfo.top = (REAL)(borderBounds.Y + deflation);
+  pathInfo.right =
+    (REAL)(borderBounds.X + borderBounds.Width - 1 - deflation);
+  pathInfo.bottom =
+    (REAL)(borderBounds.Y + borderBounds.Height - 1 - deflation);
+  pathInfo.left = (REAL)(borderBounds.X + deflation);
 
-  pathInfo.d = 2 * style.borderRadius;
+  pathInfo.d = (REAL)(2 * style.borderRadius);
 
   return pathInfo;
 }
@@ -645,7 +681,7 @@ void drawBubble(
   Rect borderBounds = getBorderBounds(style, point, textSize, earCorner);
 
   if (!screenBounds.Contains(borderBounds)) {
-    for (int i = 1; i < 4; i++) {
+    for (size_t i = 1; i < 4; i++) {
       Rect newBorderBounds = getBorderBounds(
         style, point, textSize, corners[i]
       );
@@ -673,10 +709,16 @@ void drawBubble(
   }
 
   RectF textBounds(
-    borderBounds.X + style.borderWidth + style.paddingLeft,
-    borderBounds.Y + style.borderWidth + style.paddingTop,
-    textSize.Width,
-    textSize.Height
+    (REAL)(
+      borderBounds.X + pixelateSize(style.borderWidth) +
+        pixelate(style.paddingLeft)
+    ),
+    (REAL)(
+      borderBounds.Y + pixelateSize(style.borderWidth) +
+        pixelate(style.paddingTop)
+    ),
+    (REAL)textSize.Width,
+    (REAL)textSize.Height
   );
 
   int chosenWidth = getChosenWidth(
@@ -684,7 +726,7 @@ void drawBubble(
   );
 
   Rect chosenHalf(screenBounds);
-  chosenHalf.Width = textBounds.X + chosenWidth - chosenHalf.X;
+  chosenHalf.Width = (int)textBounds.X + chosenWidth - chosenHalf.X;
 
   Rect unchosenHalf(screenBounds);
   unchosenHalf.Width -= chosenHalf.Width;
@@ -715,18 +757,18 @@ void drawBubble(
 
 typedef struct {
   vector<vector<Symbol> > levels;
-  int primaryClick;
-  int secondaryClick;
-  int middleClick;
-  int primaryHold;
-  int secondaryHold;
-  int middleHold;
-  int exit;
-  int clear;
-  int left;
-  int up;
-  int right;
-  int down;
+  UINT primaryClick;
+  UINT secondaryClick;
+  UINT middleClick;
+  UINT primaryHold;
+  UINT secondaryHold;
+  UINT middleHold;
+  UINT exit;
+  UINT clear;
+  UINT left;
+  UINT up;
+  UINT right;
+  UINT down;
   int hStride;
   int vStride;
 } Keymap;
@@ -743,62 +785,44 @@ Model getModel(HMONITOR monitor) {
   Model model;
   model.monitor = monitor;
 
-  model.keymap.levels =
-    { { {_T("a"), 0x41},
-        {_T("b"), 0x42},
-        {_T("c"), 0x43},
-        {_T("d"), 0x44},
-        {_T("e"), 0x45},
-        {_T("f"), 0x46},
-        {_T("g"), 0x47},
-        {_T("h"), 0x48},
-        {_T("i"), 0x49},
-        {_T("j"), 0x4a},
-        {_T("k"), 0x4b},
-        {_T("l"), 0x4c},
-        {_T("m"), 0x4d},
-        {_T("n"), 0x4e},
-        {_T("o"), 0x4f},
-        {_T("p"), 0x50},
-        {_T("q"), 0x51},
-        {_T("r"), 0x52},
-        {_T("s"), 0x53},
-        {_T("t"), 0x54},
-        {_T("u"), 0x55},
-        {_T("v"), 0x56},
-        {_T("w"), 0x57},
-        {_T("x"), 0x58},
-        {_T("y"), 0x59},
-        {_T("z"), 0x5a}
-      },
-      { {_T("a"), 0x41},
-        {_T("b"), 0x42},
-        {_T("c"), 0x43},
-        {_T("d"), 0x44},
-        {_T("e"), 0x45},
-        {_T("f"), 0x46},
-        {_T("g"), 0x47},
-        {_T("h"), 0x48},
-        {_T("i"), 0x49},
-        {_T("j"), 0x4a},
-        {_T("k"), 0x4b},
-        {_T("l"), 0x4c},
-        {_T("m"), 0x4d},
-        {_T("n"), 0x4e},
-        {_T("o"), 0x4f},
-        {_T("p"), 0x50},
-        {_T("q"), 0x51},
-        {_T("r"), 0x52},
-        {_T("s"), 0x53},
-        {_T("t"), 0x54},
-        {_T("u"), 0x55},
-        {_T("v"), 0x56},
-        {_T("w"), 0x57},
-        {_T("x"), 0x58},
-        {_T("y"), 0x59},
-        {_T("z"), 0x5a}
-      }
-    };
+  Symbol alphabet[] = {
+    {L"a", 0x41},
+    {L"b", 0x42},
+    {L"c", 0x43},
+    {L"d", 0x44},
+    {L"e", 0x45},
+    {L"f", 0x46},
+    {L"g", 0x47},
+    {L"h", 0x48},
+    {L"i", 0x49},
+    {L"j", 0x4a},
+    {L"k", 0x4b},
+    {L"l", 0x4c},
+    {L"m", 0x4d},
+    {L"n", 0x4e},
+    {L"o", 0x4f},
+    {L"p", 0x50},
+    {L"q", 0x51},
+    {L"r", 0x52},
+    {L"s", 0x53},
+    {L"t", 0x54},
+    {L"u", 0x55},
+    {L"v", 0x56},
+    {L"w", 0x57},
+    {L"x", 0x58},
+    {L"y", 0x59},
+    {L"z", 0x5a}
+  };
+
+  for (int i = 0; i < 2; i++) {
+    model.keymap.levels.push_back(
+      vector<Symbol>(
+        alphabet,
+        alphabet + sizeof(alphabet) / sizeof(alphabet[0])
+      )
+    );
+  }
+
   model.keymap.primaryClick = 0x0d; // VK_RETURN
   model.keymap.secondaryClick = 0x5d; // VK_APPS
   model.keymap.middleClick = 0x09; // VK_TAB
@@ -819,8 +843,7 @@ Model getModel(HMONITOR monitor) {
   model.gridSettings.pixelsPastEdge = 12;
 
   LOGFONT fontInfo = getSystemTooltipFont();
-  model.style.fontFamily = new TCHAR[_tcslen(fontInfo.lfFaceName) + 1];
-  _tcscpy(model.style.fontFamily, fontInfo.lfFaceName);
+  model.style.fontFamily = wstring(fontInfo.lfFaceName);
   model.style.fontPointSize = logicalHeightToPointSize(
     fontInfo.lfHeight,
     monitor
@@ -840,10 +863,6 @@ Model getModel(HMONITOR monitor) {
   model.style.paddingLeft = -1;
 
   return model;
-}
-
-void destroyModel(Model model) {
-  delete[] model.style.fontFamily;
 }
 
 void drawModel(Model model, View& view) {
@@ -873,23 +892,23 @@ void drawModel(Model model, View& view) {
     adjusted,
     bitmapBounds,
     bubbleCount,
-    PointF(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
+    PointF(bitmapBounds.Width * (REAL)0.5, bitmapBounds.Height * (REAL)0.5)
   );
 
   vector<int> bases = getBases(model.keymap.levels, bubbleCount);
-  int wordIndexStart = getWordIndexStart(bases, bubbleCount, model.word);
-  int wordIndexStop = getWordIndexStop(bases, bubbleCount, model.word);
+  size_t wordIndexStart = getWordIndexStart(bases, bubbleCount, model.word);
+  size_t wordIndexStop = getWordIndexStop(bases, bubbleCount, model.word);
   if (wordIndexStop - wordIndexStart <= 1) {
     jumpPoints.clear();
   }
 
-  for (int i = 0; i < jumpPoints.size(); i++) {
+  for (size_t i = 0; i < jumpPoints.size(); i++) {
     if (i < wordIndexStart || i >= wordIndexStop) {
       continue;
     }
     wstring label;
     vector<int> sequence = getWord(bases, bubbleCount, i);
-    for (int j = 0; j < sequence.size(); j++) {
+    for (size_t j = 0; j < sequence.size(); j++) {
       label += model.keymap.levels[j][sequence[j]].spelling;
     }
     vector<WCHAR> labelVector(label.begin(), label.end());
@@ -944,6 +963,7 @@ View view;
 class IdleAction {
 public:
   virtual bool operator() () =0;
+  virtual ~IdleAction() {};
 };
 
 class IdleSendInput: public IdleAction {
@@ -1021,13 +1041,13 @@ VOID CALLBACK doIdleActions(
 ) {
   KillTimer(window, timerID);
 
-  for (int i = 0; i < idleActions.size(); i++) {
+  for (size_t i = 0; i < idleActions.size(); i++) {
     if (!(*idleActions[i])()) {
       break;
     }
   }
 
-  for (int i = 0; i < idleActions.size(); i++) {
+  for (size_t i = 0; i < idleActions.size(); i++) {
     delete idleActions[i];
   }
 
@@ -1148,7 +1168,7 @@ LRESULT CALLBACK WndProc(
       if (model.word.size() < model.keymap.levels.size()) {
         wordChoices = min(
           wordChoices,
-          model.keymap.levels[model.word.size()].size()
+          (int)model.keymap.levels[model.word.size()].size()
         );
       }
       if (wordChoices > 1) {
@@ -1156,7 +1176,7 @@ LRESULT CALLBACK WndProc(
           if (wParam == model.keymap.levels[model.word.size()][i].keycode) {
             model.word.push_back(i);
             if (getWordChoices(bases, wordCount, model.word) <= 1) {
-              int chosenWord = getWordIndexStart(
+              size_t chosenWord = getWordIndexStart(
                 bases, wordCount, model.word
               );
 
@@ -1170,7 +1190,10 @@ LRESULT CALLBACK WndProc(
                 adjusted,
                 bitmapBounds,
                 wordCount,
-                PointF(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
+                PointF(
+                  bitmapBounds.Width * (REAL)0.5,
+                  bitmapBounds.Height * (REAL)0.5
+                )
               );
 
               Point chosenPoint = jumpPoints[chosenWord];
@@ -1231,12 +1254,12 @@ int CALLBACK WinMain(
   windowClass.cbClsExtra = 0;
   windowClass.cbWndExtra = 0;
   windowClass.hInstance = appInstance;
-  windowClass.hIcon = LoadIcon(appInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+  windowClass.hIcon = NULL;
   windowClass.hCursor = LoadCursor(NULL, IDC_ARROW);
   windowClass.hbrBackground = (HBRUSH)COLOR_WINDOW; // doesn't matter
   windowClass.lpszMenuName = NULL;
   windowClass.lpszClassName = windowClassName;
-  windowClass.hIconSm = LoadIcon(appInstance, MAKEINTRESOURCE(IDI_APPLICATION));
+  windowClass.hIconSm = NULL;
 
   RegisterClassEx(&windowClass);
 
@@ -1273,7 +1296,6 @@ int CALLBACK WinMain(
   }
 
   destroyView(view);
-  destroyModel(model);
 
   GdiplusShutdown(gdiplusToken);
 
