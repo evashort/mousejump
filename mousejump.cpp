@@ -412,10 +412,14 @@ public:
   }
 };
 
+PointF pointFromDoubles(double x, y) {
+  return PointF((REAL)x, (REAL)y);
+}
+
 #define degrees(x) (x * (3.1415926535897932384626433832795 / 180))
 vector<PointF> getHoneycomb(RectF bounds, int points) {
-  PointF v1((REAL)cos(degrees(15)), (REAL)sin(degrees(15)));
-  PointF v2((REAL)cos(degrees(75)), (REAL)sin(degrees(75)));
+  PointF v1 = pointFromDoubles(cos(degrees(15)), sin(degrees(15)));
+  PointF v2 = pointFromDoubles(cos(degrees(75)), sin(degrees(75)));
 
   int v1Start = getMinMultiplierInBounds(bounds, v1, v2);
   int v1Stop = getMaxMultiplierInBounds(bounds, v1, v2) + 1;
@@ -464,29 +468,25 @@ Point clampToRect(Rect rect, Point point) {
   );
 }
 
+RectF rectFromDoubles(double x, y, width, height) {
+  return RectF((REAL)x, (REAL)y, (REAL)width, (REAL)height);
+}
+
 vector<Point> getJumpPoints(
   GridSettings gridSettings,
   Rect bounds,
   int bubbleCount,
   PointF origin
 ) {
-  RectF newBounds(
-    (REAL)(
-      (bounds.X - origin.X - gridSettings.pixelsPastEdge) /
+  RectF newBounds = rectFromDoubles(
+    (bounds.X - origin.X - gridSettings.pixelsPastEdge) /
       gridSettings.cellWidth
-    ),
-    (REAL)(
-      (bounds.Y - origin.Y - gridSettings.pixelsPastEdge) /
-        gridSettings.cellHeight
-    ),
-    (REAL)(
-      (bounds.Width + 2 * gridSettings.pixelsPastEdge) /
-        gridSettings.cellWidth
-    ),
-    (REAL)(
-      (bounds.Height + 2 * gridSettings.pixelsPastEdge) /
-        gridSettings.cellHeight
-    )
+    (bounds.Y - origin.Y - gridSettings.pixelsPastEdge) /
+      gridSettings.cellHeight
+    (bounds.Width + 2 * gridSettings.pixelsPastEdge) /
+      gridSettings.cellWidth
+    (bounds.Height + 2 * gridSettings.pixelsPastEdge) /
+      gridSettings.cellHeight
   );
 
   vector<PointF> honeycomb = getHoneycomb(newBounds, bubbleCount);
@@ -708,17 +708,12 @@ void drawBubble(
     graphics.DrawPath(artSupplies.borderPen, &border);
   }
 
-  RectF textBounds(
-    (REAL)(
-      borderBounds.X + pixelateSize(style.borderWidth) +
-        pixelate(style.paddingLeft)
-    ),
-    (REAL)(
-      borderBounds.Y + pixelateSize(style.borderWidth) +
-        pixelate(style.paddingTop)
-    ),
-    (REAL)textSize.Width,
-    (REAL)textSize.Height
+  RectF textBounds = rectFromDoubles(
+    borderBounds.X + pixelateSize(style.borderWidth) +
+      pixelate(style.paddingLeft)
+    borderBounds.Y + pixelateSize(style.borderWidth) +
+      pixelate(style.paddingTop)
+    textSize.Width, textSize.Height
   );
 
   int chosenWidth = getChosenWidth(
@@ -892,7 +887,7 @@ void drawModel(Model model, View& view) {
     adjusted,
     bitmapBounds,
     bubbleCount,
-    PointF(bitmapBounds.Width * (REAL)0.5, bitmapBounds.Height * (REAL)0.5)
+    pointFromDoubles(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
   );
 
   vector<int> bases = getBases(model.keymap.levels, bubbleCount);
@@ -1190,9 +1185,9 @@ LRESULT CALLBACK WndProc(
                 adjusted,
                 bitmapBounds,
                 wordCount,
-                PointF(
-                  bitmapBounds.Width * (REAL)0.5,
-                  bitmapBounds.Height * (REAL)0.5
+                pointFromDoubles(
+                  bitmapBounds.Width * 0.5,
+                  bitmapBounds.Height * 0.5
                 )
               );
 
