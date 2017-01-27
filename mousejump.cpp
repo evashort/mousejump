@@ -87,7 +87,7 @@ void destroyView(View view) {
   view.start.y = 0;
 }
 
-bool updateView(HMONITOR monitor, View& view) {
+bool updateView(View& view, HMONITOR monitor) {
   MONITORINFOEX monitorInfo;
   monitorInfo.cbSize = sizeof(MONITORINFOEX);
   if (!GetMonitorInfo(monitor, &monitorInfo)) {
@@ -133,20 +133,8 @@ LOGFONT getSystemTooltipFont() {
   return metrics.lfStatusFont;
 }
 
-int getPixelsPerLogicalInch(HMONITOR monitor) {
-  MONITORINFOEX monitorInfo;
-  monitorInfo.cbSize = sizeof(MONITORINFOEX);
-  GetMonitorInfo(monitor, &monitorInfo);
-  HDC infoContext = CreateIC(_T("DISPLAY"), monitorInfo.szDevice, NULL, NULL);
-  int pixelsPerLogicalInch = GetDeviceCaps(infoContext, LOGPIXELSY);
-  DeleteDC(infoContext);
-
-  return pixelsPerLogicalInch;
-}
-
-double logicalHeightToPointSize(int logicalHeight, HMONITOR monitor) {
-  double pixelsPerLogicalInch = getPixelsPerLogicalInch(monitor);
-  return abs(logicalHeight) * 72 / pixelsPerLogicalInch;
+double logicalHeightToPointSize(int logicalHeight) {
+  return abs(logicalHeight) * 72.0 / 96.0;
 }
 
 Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
@@ -412,7 +400,7 @@ public:
   }
 };
 
-PointF pointFromDoubles(double x, y) {
+PointF pointFromDoubles(double x, double y) {
   return PointF((REAL)x, (REAL)y);
 }
 
@@ -461,35 +449,31 @@ void translateHoneycomb(
   }
 }
 
-Point clampToRect(Rect rect, Point point) {
+Point clampToSize(int width, int height, Point point) {
   return Point(
-    max(rect.X, min(rect.X + rect.Width - 1, point.X)),
-    max(rect.Y, min(rect.Y + rect.Height - 1, point.Y))
+    max(0, min(width - 1, point.X)),
+    max(0, min(height - 1, point.Y))
   );
 }
 
-RectF rectFromDoubles(double x, y, width, height) {
+RectF rectFromDoubles(double x, double y, double width, double height) {
   return RectF((REAL)x, (REAL)y, (REAL)width, (REAL)height);
 }
 
 vector<Point> getJumpPoints(
   GridSettings gridSettings,
-  Rect bounds,
+  int width, int height,
   int bubbleCount,
   PointF origin
 ) {
-  RectF newBounds = rectFromDoubles(
-    (bounds.X - origin.X - gridSettings.pixelsPastEdge) /
-      gridSettings.cellWidth
-    (bounds.Y - origin.Y - gridSettings.pixelsPastEdge) /
-      gridSettings.cellHeight
-    (bounds.Width + 2 * gridSettings.pixelsPastEdge) /
-      gridSettings.cellWidth
-    (bounds.Height + 2 * gridSettings.pixelsPastEdge) /
-      gridSettings.cellHeight
+  RectF bounds = rectFromDoubles(
+    (-origin.X - gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
+    (-origin.Y - gridSettings.pixelsPastEdge) / gridSettings.cellHeight,
+    (width + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
+    (height + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellHeight
   );
 
-  vector<PointF> honeycomb = getHoneycomb(newBounds, bubbleCount);
+  vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
   scaleHoneycomb(
     honeycomb, (REAL)gridSettings.cellWidth, (REAL)gridSettings.cellHeight
   );
@@ -499,8 +483,8 @@ vector<Point> getJumpPoints(
   jumpPoints.reserve(honeycomb.size());
   for (size_t i = 0; i < honeycomb.size(); i++) {
     jumpPoints.push_back(
-      clampToRect(
-        bounds,
+      clampToSize(
+        width, height,
         Point((int)floor(honeycomb[i].X), (int)floor(honeycomb[i].Y))
       )
     );
@@ -710,9 +694,9 @@ void drawBubble(
 
   RectF textBounds = rectFromDoubles(
     borderBounds.X + pixelateSize(style.borderWidth) +
-      pixelate(style.paddingLeft)
+      pixelate(style.paddingLeft),
     borderBounds.Y + pixelateSize(style.borderWidth) +
-      pixelate(style.paddingTop)
+      pixelate(style.paddingTop),
     textSize.Width, textSize.Height
   );
 
@@ -769,16 +753,16 @@ typedef struct {
 } Keymap;
 
 typedef struct {
-  HMONITOR monitor;
   Keymap keymap;
   GridSettings gridSettings;
   Style style;
+  int width;
+  int height;
   vector<int> word;
 } Model;
 
-Model getModel(HMONITOR monitor) {
+Model getModel(int width, int height) {
   Model model;
-  model.monitor = monitor;
 
   Symbol alphabet[] = {
     {L"a", 0x41},
@@ -839,10 +823,7 @@ Model getModel(HMONITOR monitor) {
 
   LOGFONT fontInfo = getSystemTooltipFont();
   model.style.fontFamily = wstring(fontInfo.lfFaceName);
-  model.style.fontPointSize = logicalHeightToPointSize(
-    fontInfo.lfHeight,
-    monitor
-  );
+  model.style.fontPointSize = logicalHeightToPointSize(fontInfo.lfHeight);
 
   model.style.textColor = getSystemColor(COLOR_INFOTEXT);
   model.style.chosenTextColor = getSystemColor(COLOR_GRAYTEXT);
@@ -857,37 +838,37 @@ Model getModel(HMONITOR monitor) {
   model.style.paddingBottom = 0;
   model.style.paddingLeft = -1;
 
+  model.width = width;
+  model.height = height;
+
   return model;
 }
 
 void drawModel(Model model, View& view) {
   ArtSupplies artSupplies = getArtSupplies(model.style);
-  Rect bitmapBounds(
-    0, 0, getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
-  );
 
   Graphics graphics(view.deviceContext);
-  graphics.SetClip(bitmapBounds);
+  graphics.SetClip(Rect(0, 0, model.width, model.height));
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
   graphics.Clear(Color(0, 0, 0, 0));
 
   int bubbleCount = getBubbleCount(
     model.keymap.levels,
     model.gridSettings,
-    bitmapBounds.Width, bitmapBounds.Height
+    model.width, model.height
   );
 
   GridSettings adjusted = adjustGridSettings(
     model.gridSettings,
-    bitmapBounds.Width, bitmapBounds.Height,
+    model.width, model.height,
     bubbleCount
   );
 
   vector<Point> jumpPoints = getJumpPoints(
     adjusted,
-    bitmapBounds,
+    model.width, model.height,
     bubbleCount,
-    pointFromDoubles(bitmapBounds.Width * 0.5, bitmapBounds.Height * 0.5)
+    pointFromDoubles(model.width * 0.5, model.height * 0.5)
   );
 
   vector<int> bases = getBases(model.keymap.levels, bubbleCount);
@@ -951,9 +932,6 @@ void showView(View view, HWND window) {
     ULW_ALPHA // per-pixel alpha instead of chromakey
   );
 }
-
-Model model;
-View view;
 
 class IdleAction {
 public:
@@ -1095,6 +1073,10 @@ void click(int button, bool goalState) {
   whenIdle(new IdleSendInput(getClick(actions[goalState][button])));
 }
 
+HMONITOR monitor;
+View view;
+Model model;
+
 LRESULT CALLBACK WndProc(
   HWND window,
   UINT message,
@@ -1149,14 +1131,10 @@ LRESULT CALLBACK WndProc(
       drawModel(model, view);
       showView(view, window);
     } else {
-      Rect bitmapBounds(
-        0, 0, getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap)
-      );
-
       int wordCount = getBubbleCount(
         model.keymap.levels,
         model.gridSettings,
-        bitmapBounds.Width, bitmapBounds.Height
+        model.width, model.height
       );
       vector<int> bases = getBases(model.keymap.levels, wordCount);
       int wordChoices = getWordChoices(bases, wordCount, model.word);
@@ -1177,18 +1155,15 @@ LRESULT CALLBACK WndProc(
 
               GridSettings adjusted = adjustGridSettings(
                 model.gridSettings,
-                bitmapBounds.Width, bitmapBounds.Height,
+                model.width, model.height,
                 wordCount
               );
 
               vector<Point> jumpPoints = getJumpPoints(
                 adjusted,
-                bitmapBounds,
+                model.width, model.height,
                 wordCount,
-                pointFromDoubles(
-                  bitmapBounds.Width * 0.5,
-                  bitmapBounds.Height * 0.5
-                )
+                pointFromDoubles(model.width * 0.5, model.height * 0.5)
               );
 
               Point chosenPoint = jumpPoints[chosenWord];
@@ -1209,12 +1184,21 @@ LRESULT CALLBACK WndProc(
     }
     break;
   case WM_DISPLAYCHANGE:
-    if (!updateView(model.monitor, view)) {
+    if (!updateView(view, monitor)) {
       PostMessage(window, WM_CLOSE, 0, 0);
+    } else {
+      int newWidth = getBitmapWidth(view.bitmap);
+      int newHeight = getBitmapHeight(view.bitmap);
+      if (model.width != newWidth || model.height != newHeight) {
+        model.width = newWidth;
+        model.height = newHeight;
+        model.word.clear();
+      }
+
+      drawModel(model, view);
+      showView(view, window);
     }
 
-    drawModel(model, view);
-    showView(view, window);
     break;
   case WM_DESTROY:
     PostQuitMessage(0);
@@ -1234,12 +1218,6 @@ int CALLBACK WinMain(
   LPSTR lpCmdLine,
   int showWindowFlags
 ) {
-  // Use GDI+ because vanilla GDI has no concept of transparency and can't
-  // even draw an opaque rectangle on a transparent bitmap
-  GdiplusStartupInput gdiplusStartupInput;
-  ULONG_PTR           gdiplusToken;
-  GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-
   LPTSTR windowClassName = _T("mousejump");
 
   WNDCLASSEX windowClass;
@@ -1260,11 +1238,20 @@ int CALLBACK WinMain(
 
   POINT cursorPos;
   GetCursorPos(&cursorPos);
-  HMONITOR monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
+  monitor = MonitorFromPoint(cursorPos, MONITOR_DEFAULTTONEAREST);
 
-  model = getModel(monitor);
   view = getView();
-  updateView(model.monitor, view);
+  if (!updateView(view, monitor)) {
+    return 1;
+  }
+
+  // Use GDI+ because vanilla GDI has no concept of transparency and can't
+  // even draw an opaque rectangle on a transparent bitmap
+  GdiplusStartupInput gdiplusStartupInput;
+  ULONG_PTR           gdiplusToken;
+  GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
+  model = getModel(getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap));
   drawModel(model, view);
 
   HWND window = CreateWindowEx(
