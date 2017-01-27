@@ -759,6 +759,7 @@ typedef struct {
   int width;
   int height;
   vector<int> word;
+  bool showBubbles;
 } Model;
 
 Model getModel(int width, int height) {
@@ -841,6 +842,8 @@ Model getModel(int width, int height) {
   model.width = width;
   model.height = height;
 
+  model.showBubbles = true;
+
   return model;
 }
 
@@ -864,19 +867,19 @@ void drawModel(Model model, View& view) {
     bubbleCount
   );
 
-  vector<Point> jumpPoints = getJumpPoints(
-    adjusted,
-    model.width, model.height,
-    bubbleCount,
-    pointFromDoubles(model.width * 0.5, model.height * 0.5)
-  );
+  vector<Point> jumpPoints;
+  if (model.showBubbles) {
+    jumpPoints = getJumpPoints(
+      adjusted,
+      model.width, model.height,
+      bubbleCount,
+      pointFromDoubles(model.width * 0.5, model.height * 0.5)
+    );
+  }
 
   vector<int> bases = getBases(model.keymap.levels, bubbleCount);
   size_t wordIndexStart = getWordIndexStart(bases, bubbleCount, model.word);
   size_t wordIndexStop = getWordIndexStop(bases, bubbleCount, model.word);
-  if (wordIndexStop - wordIndexStart <= 1) {
-    jumpPoints.clear();
-  }
 
   for (size_t i = 0; i < jumpPoints.size(); i++) {
     if (i < wordIndexStart || i >= wordIndexStop) {
@@ -1090,19 +1093,40 @@ LRESULT CALLBACK WndProc(
     if (wParam == model.keymap.exit) {
       whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.clear) {
-      if (model.word.size() > 0) {
+      if (model.word.size() > 0 || !model.showBubbles) {
         model.word.clear();
+        model.showBubbles = true;
         drawModel(model, view);
         showView(view, window);
       }
     } else if (wParam == model.keymap.left) {
       moveCursorBy(-model.keymap.hStride, 0);
+      if (model.showBubbles) {
+        model.showBubbles = false;
+        drawModel(model, view);
+        showView(view, window);
+      }
     } else if (wParam == model.keymap.up) {
       moveCursorBy(0, -model.keymap.vStride);
+      if (model.showBubbles) {
+        model.showBubbles = false;
+        drawModel(model, view);
+        showView(view, window);
+      }
     } else if (wParam == model.keymap.right) {
       moveCursorBy(model.keymap.hStride, 0);
+      if (model.showBubbles) {
+        model.showBubbles = false;
+        drawModel(model, view);
+        showView(view, window);
+      }
     } else if (wParam == model.keymap.down) {
       moveCursorBy(0, model.keymap.vStride);
+      if (model.showBubbles) {
+        model.showBubbles = false;
+        drawModel(model, view);
+        showView(view, window);
+      }
     } else if (wParam == model.keymap.primaryClick) {
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 0);
       whenIdle(new IdleClose(window));
@@ -1116,21 +1140,24 @@ LRESULT CALLBACK WndProc(
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
       whenIdle(new IdleReactivate(window));
       model.word.clear();
+      model.showBubbles = true;
       drawModel(model, view);
       showView(view, window);
     } else if (wParam == model.keymap.secondaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
       whenIdle(new IdleReactivate(window));
       model.word.clear();
+      model.showBubbles = true;
       drawModel(model, view);
       showView(view, window);
     } else if (wParam == model.keymap.middleHold) {
       click(2, 1);
       whenIdle(new IdleReactivate(window));
       model.word.clear();
+      model.showBubbles = true;
       drawModel(model, view);
       showView(view, window);
-    } else {
+    } else if (model.showBubbles) {
       int wordCount = getBubbleCount(
         model.keymap.levels,
         model.gridSettings,
@@ -1173,6 +1200,8 @@ LRESULT CALLBACK WndProc(
                   view.start.x + chosenPoint.X, view.start.y + chosenPoint.Y
                 )
               );
+
+              model.showBubbles = false;
             }
 
             drawModel(model, view);
