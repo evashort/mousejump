@@ -117,74 +117,27 @@ bool updateView(View& view, HMONITOR monitor) {
   return true;
 }
 
-Color getSystemColor(int colorConstant) {
-  COLORREF colorBytes = GetSysColor(colorConstant);
-  return Color(
-    GetRValue(colorBytes),
-    GetGValue(colorBytes),
-    GetBValue(colorBytes)
-  );
-}
+typedef struct {
+  double cellWidth;
+  double cellHeight;
+  double pixelsPastEdge;
+} GridSettings;
 
-LOGFONT getSystemTooltipFont() {
-  NONCLIENTMETRICS metrics;
-  metrics.cbSize = sizeof(NONCLIENTMETRICS);
-  SystemParametersInfo(SPI_GETNONCLIENTMETRICS, 0, &metrics, 0);
-  return metrics.lfStatusFont;
-}
-
-double logicalHeightToPointSize(int logicalHeight) {
-  return abs(logicalHeight) * 72.0 / 96.0;
-}
-
-Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
-  RectF bounds;
-  graphics.MeasureString(text, -1, font, PointF(0.0f, 0.0f), &bounds);
-  return Size((int)round(bounds.Width), (int)round(bounds.Height));
-}
-
-int getChosenWidth(
-  const Graphics &graphics, const Font *font, LPTSTR text, int chosenChars
-) {
-  RectF bounds;
-  graphics.MeasureString(text, -1, font, PointF(0.0f, 0.0f), &bounds);
-  REAL fullWidth = bounds.Width;
-
-  graphics.MeasureString(
-    text, chosenChars, font, PointF(0.0f, 0.0f), &bounds
-  );
-  REAL chosenWidth = bounds.Width;
-
-  graphics.MeasureString(
-    &text[chosenChars], -1, font, PointF(0.0f, 0.0f), &bounds
-  );
-  REAL unchosenWidth = bounds.Width;
-
-  return (int)round(0.5 * (chosenWidth + fullWidth - unchosenWidth));
-}
-
-StringFormat *getCenteredFormat() {
-  static StringFormat format(
-    StringFormatFlagsNoWrap | StringFormatFlagsNoClip,
-    LANG_NEUTRAL
-  );
-  format.SetAlignment(StringAlignmentCenter);
-  format.SetLineAlignment(StringAlignmentCenter);
-  format.SetTrimming(StringTrimmingNone);
-  return &format;
-}
-
-int getBitmapWidth(HBITMAP bitmap) {
-  BITMAP bitmapInfo;
-  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
-  return bitmapInfo.bmWidth;
-}
-
-int getBitmapHeight(HBITMAP bitmap) {
-  BITMAP bitmapInfo;
-  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
-  return bitmapInfo.bmHeight;
-}
+typedef struct {
+  wstring fontFamily;
+  double fontPointSize;
+  Color textColor;
+  Color chosenTextColor;
+  Color fillColor;
+  Color borderColor;
+  double borderRadius;
+  double borderWidth;
+  double earHeight;
+  double paddingTop;
+  double paddingRight;
+  double paddingBottom;
+  double paddingLeft;
+} Style;
 
 typedef struct {
   // Keycode reference:
@@ -194,28 +147,48 @@ typedef struct {
 } Symbol;
 
 typedef struct {
-  double cellWidth;
-  double cellHeight;
-  double pixelsPastEdge;
-} GridSettings;
+  vector<vector<Symbol> > levels;
+  UINT primaryClick;
+  UINT secondaryClick;
+  UINT middleClick;
+  UINT primaryHold;
+  UINT secondaryHold;
+  UINT middleHold;
+  UINT exit;
+  UINT clear;
+  UINT left;
+  UINT up;
+  UINT right;
+  UINT down;
+  int hStride;
+  int vStride;
+} Keymap;
+
+typedef struct {
+  Keymap keymap;
+  GridSettings gridSettings;
+  Style style;
+  int width;
+  int height;
+  vector<int> word;
+  bool showBubbles;
+} Model;
 
 double inflatedArea(double width, double height, double border) {
   return (width + 2 * border) * (height + 2 * border);
 }
 
-int getBubbleCount(
-  vector<vector<Symbol> > levels,
-  GridSettings gridSettings,
-  int width, int height
-) {
+int getWordCount(Model model) {
   int symbolLimit = 1;
-  for (size_t i = 0; i < levels.size(); i++) {
-    symbolLimit *= levels[i].size();
+  for (size_t i = 0; i < model.keymap.levels.size(); i++) {
+    symbolLimit *= model.keymap.levels[i].size();
   }
 
   double cellArea =
-    gridSettings.cellWidth * gridSettings.cellHeight * sqrt(0.75);
-  double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
+    model.gridSettings.cellWidth * model.gridSettings.cellHeight * sqrt(0.75);
+  double gridArea = inflatedArea(
+    model.width, model.height, model.gridSettings.pixelsPastEdge
+  );
   int areaLimit = (int)round(gridArea / cellArea);
 
   return min(symbolLimit, areaLimit);
@@ -506,22 +479,6 @@ int pixelate(double offset) {
 }
 
 typedef struct {
-  wstring fontFamily;
-  double fontPointSize;
-  Color textColor;
-  Color chosenTextColor;
-  Color fillColor;
-  Color borderColor;
-  double borderRadius;
-  double borderWidth;
-  double earHeight;
-  double paddingTop;
-  double paddingRight;
-  double paddingBottom;
-  double paddingLeft;
-} Style;
-
-typedef struct {
   Font *font;
   SolidBrush *textBrush;
   SolidBrush *chosenTextBrush;
@@ -551,27 +508,6 @@ void destroyArtSupplies(ArtSupplies artSupplies) {
   delete artSupplies.chosenTextBrush;
   delete artSupplies.fillBrush;
   delete artSupplies.borderPen;
-}
-
-Rect getBorderBounds(Style style, Point point, Size textSize, int earCorner) {
-  int width = textSize.Width +
-    pixelate(style.paddingLeft) + pixelate(style.paddingRight) +
-    2 * pixelateSize(style.borderWidth);
-  int height = textSize.Height +
-    pixelate(style.paddingTop) + pixelate(style.paddingBottom) +
-    2 * pixelateSize(style.borderWidth);
-
-  int top = point.Y + pixelateSize(style.earHeight);
-  if (earCorner == 2 || earCorner == 3) {
-    top = point.Y - pixelateSize(style.earHeight) - height + 1;
-  }
-
-  int left = point.X;
-  if (earCorner == 1 || earCorner == 2) {
-    left = point.X - width + 1;
-  }
-
-  return Rect(left, top, width, height);
 }
 
 typedef struct {
@@ -645,6 +581,62 @@ void addBottomLeftCorner(GraphicsPath &border, PathInfo p, bool ear) {
   } else {
     border.AddArc(p.left, p.bottom - p.d, p.d, p.d, 90, 90);
   }
+}
+
+Size getTextSize(const Graphics &graphics, const Font *font, LPTSTR text) {
+  RectF bounds;
+  graphics.MeasureString(text, -1, font, PointF(0.0f, 0.0f), &bounds);
+  return Size((int)round(bounds.Width), (int)round(bounds.Height));
+}
+
+int getChosenWidth(
+  const Graphics &graphics, const Font *font, LPTSTR text, int chosenChars
+) {
+  PointF origin(0, 0);
+
+  RectF bounds;
+  graphics.MeasureString(text, -1, font, origin, &bounds);
+  REAL fullWidth = bounds.Width;
+
+  graphics.MeasureString(text, chosenChars, font, origin, &bounds);
+  REAL chosenWidth = bounds.Width;
+
+  graphics.MeasureString(&text[chosenChars], -1, font, origin, &bounds);
+  REAL unchosenWidth = bounds.Width;
+
+  return (int)round(0.5 * (chosenWidth + fullWidth - unchosenWidth));
+}
+
+StringFormat *getCenteredFormat() {
+  static StringFormat format(
+    StringFormatFlagsNoWrap | StringFormatFlagsNoClip,
+    LANG_NEUTRAL
+  );
+  format.SetAlignment(StringAlignmentCenter);
+  format.SetLineAlignment(StringAlignmentCenter);
+  format.SetTrimming(StringTrimmingNone);
+  return &format;
+}
+
+Rect getBorderBounds(Style style, Point point, Size textSize, int earCorner) {
+  int width = textSize.Width +
+    pixelate(style.paddingLeft) + pixelate(style.paddingRight) +
+    2 * pixelateSize(style.borderWidth);
+  int height = textSize.Height +
+    pixelate(style.paddingTop) + pixelate(style.paddingBottom) +
+    2 * pixelateSize(style.borderWidth);
+
+  int top = point.Y + pixelateSize(style.earHeight);
+  if (earCorner == 2 || earCorner == 3) {
+    top = point.Y - pixelateSize(style.earHeight) - height + 1;
+  }
+
+  int left = point.X;
+  if (earCorner == 1 || earCorner == 2) {
+    left = point.X - width + 1;
+  }
+
+  return Rect(left, top, width, height);
 }
 
 void drawBubble(
@@ -734,33 +726,25 @@ void drawBubble(
   graphics.EndContainer(maskingTape);
 }
 
-typedef struct {
-  vector<vector<Symbol> > levels;
-  UINT primaryClick;
-  UINT secondaryClick;
-  UINT middleClick;
-  UINT primaryHold;
-  UINT secondaryHold;
-  UINT middleHold;
-  UINT exit;
-  UINT clear;
-  UINT left;
-  UINT up;
-  UINT right;
-  UINT down;
-  int hStride;
-  int vStride;
-} Keymap;
+Color getSystemColor(int colorConstant) {
+  COLORREF colorBytes = GetSysColor(colorConstant);
+  return Color(
+    GetRValue(colorBytes),
+    GetGValue(colorBytes),
+    GetBValue(colorBytes)
+  );
+}
 
-typedef struct {
-  Keymap keymap;
-  GridSettings gridSettings;
-  Style style;
-  int width;
-  int height;
-  vector<int> word;
-  bool showBubbles;
-} Model;
+LOGFONT getSystemTooltipFont() {
+  NONCLIENTMETRICS metrics;
+  metrics.cbSize = sizeof(NONCLIENTMETRICS);
+  SystemParametersInfo(SPI_GETNONCLIENTMETRICS, 0, &metrics, 0);
+  return metrics.lfStatusFont;
+}
+
+double logicalHeightToPointSize(int logicalHeight) {
+  return abs(logicalHeight) * 72.0 / 96.0;
+}
 
 Model getModel(int width, int height) {
   Model model;
@@ -855,11 +839,7 @@ void drawModel(Model model, View& view) {
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
   graphics.Clear(Color(0, 0, 0, 0));
 
-  int bubbleCount = getBubbleCount(
-    model.keymap.levels,
-    model.gridSettings,
-    model.width, model.height
-  );
+  int bubbleCount = getWordCount(model);
 
   GridSettings adjusted = adjustGridSettings(
     model.gridSettings,
@@ -903,6 +883,18 @@ void drawModel(Model model, View& view) {
   }
 
   destroyArtSupplies(artSupplies);
+}
+
+int getBitmapWidth(HBITMAP bitmap) {
+  BITMAP bitmapInfo;
+  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
+  return bitmapInfo.bmWidth;
+}
+
+int getBitmapHeight(HBITMAP bitmap) {
+  BITMAP bitmapInfo;
+  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
+  return bitmapInfo.bmHeight;
 }
 
 void showView(View view, HWND window) {
@@ -1158,11 +1150,7 @@ LRESULT CALLBACK WndProc(
       drawModel(model, view);
       showView(view, window);
     } else if (model.showBubbles) {
-      int wordCount = getBubbleCount(
-        model.keymap.levels,
-        model.gridSettings,
-        model.width, model.height
-      );
+      int wordCount = getWordCount(model);
       vector<int> bases = getBases(model.keymap.levels, wordCount);
       int wordChoices = getWordChoices(bases, wordCount, model.word);
       if (model.word.size() < model.keymap.levels.size()) {
