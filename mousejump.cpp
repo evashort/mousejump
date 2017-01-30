@@ -289,7 +289,7 @@ vector<size_t> getWord(Model model, size_t index) {
 GridSettings adjustGridSettings(
   GridSettings gridSettings,
   int width, int height,
-  int bubbleCount
+  size_t bubbleCount
 ) {
   double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
   double bubbleCover =
@@ -369,7 +369,7 @@ PointF pointFromDoubles(double x, double y) {
 }
 
 #define degrees(x) (x * (3.1415926535897932384626433832795 / 180))
-vector<PointF> getHoneycomb(RectF bounds, int points) {
+vector<PointF> getHoneycomb(RectF bounds, size_t points) {
   PointF v1 = pointFromDoubles(cos(degrees(15)), sin(degrees(15)));
   PointF v2 = pointFromDoubles(cos(degrees(75)), sin(degrees(75)));
 
@@ -379,7 +379,7 @@ vector<PointF> getHoneycomb(RectF bounds, int points) {
   int v2Start = getMinMultiplierInBounds(bounds, v2, v1);
   int v2Stop = getMaxMultiplierInBounds(bounds, v2, v1) + 1;
 
-  while ((v1Stop - v1Start) * (v2Stop - v2Start) < points) {
+  while ((v1Stop - v1Start) * (v2Stop - v2Start) < (int)points) {
     v1Start--; v1Stop++; v2Start--; v2Stop++;
   }
 
@@ -397,19 +397,19 @@ vector<PointF> getHoneycomb(RectF bounds, int points) {
   return honeycomb;
 }
 
-void scaleHoneycomb(vector<PointF> &honeycomb, REAL xScale, REAL yScale) {
+void scaleHoneycomb(vector<PointF> &honeycomb, double xScale, double yScale) {
   for (size_t i = 0; i < honeycomb.size(); i++) {
-    honeycomb[i].X *= xScale;
-    honeycomb[i].Y *= yScale;
+    honeycomb[i].X *= (REAL)xScale;
+    honeycomb[i].Y *= (REAL)yScale;
   }
 }
 
 void translateHoneycomb(
-  vector<PointF> &honeycomb, REAL xOffset, REAL yOffset
+  vector<PointF> &honeycomb, double xOffset, double yOffset
 ) {
   for (size_t i = 0; i < honeycomb.size(); i++) {
-    honeycomb[i].X += xOffset;
-    honeycomb[i].Y += yOffset;
+    honeycomb[i].X += (REAL)xOffset;
+    honeycomb[i].Y += (REAL)yOffset;
   }
 }
 
@@ -424,31 +424,38 @@ RectF rectFromDoubles(double x, double y, double width, double height) {
   return RectF((REAL)x, (REAL)y, (REAL)width, (REAL)height);
 }
 
-vector<Point> getJumpPoints(
-  GridSettings gridSettings,
-  int width, int height,
-  int bubbleCount,
-  PointF origin
-) {
+vector<Point> getJumpPoints(Model model) {
+  double xOrigin = 0.5 * model.width;
+  double yOrigin = 0.5 * model.height;
+
+  size_t bubbleCount = getLeafWords(model);
+
+  GridSettings gridSettings = adjustGridSettings(
+    model.gridSettings, model.width, model.height, bubbleCount
+  );
+
   RectF bounds = rectFromDoubles(
-    (-origin.X - gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
-    (-origin.Y - gridSettings.pixelsPastEdge) / gridSettings.cellHeight,
-    (width + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
-    (height + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellHeight
+    (-xOrigin - gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
+    (-yOrigin - gridSettings.pixelsPastEdge) / gridSettings.cellHeight,
+    (model.width + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
+    (model.height + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellHeight
   );
 
   vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
-  scaleHoneycomb(
-    honeycomb, (REAL)gridSettings.cellWidth, (REAL)gridSettings.cellHeight
-  );
-  translateHoneycomb(honeycomb, origin.X, origin.Y);
+  scaleHoneycomb(honeycomb, gridSettings.cellWidth, gridSettings.cellHeight);
+  translateHoneycomb(honeycomb, xOrigin, yOrigin);
+
+  size_t visibleWords = 0;
+  if (model.showBubbles) {
+    visibleWords = getWordsOnNextBranches(model, 1);
+  }
 
   vector<Point> jumpPoints;
-  jumpPoints.reserve(honeycomb.size());
-  for (size_t i = 0; i < honeycomb.size(); i++) {
+  jumpPoints.reserve(visibleWords);
+  for (size_t i = model.wordStart; i < model.wordStart + visibleWords; i++) {
     jumpPoints.push_back(
       clampToSize(
-        width, height,
+        model.width, model.height,
         Point((int)floor(honeycomb[i].X), (int)floor(honeycomb[i].Y))
       )
     );
@@ -833,32 +840,11 @@ void drawModel(Model model, View& view) {
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
   graphics.Clear(Color(0, 0, 0, 0));
 
-  int bubbleCount = (int)getLeafWords(model);
-
-  GridSettings adjusted = adjustGridSettings(
-    model.gridSettings,
-    model.width, model.height,
-    bubbleCount
-  );
-
-  vector<Point> jumpPoints;
-  if (model.showBubbles) {
-    jumpPoints = getJumpPoints(
-      adjusted,
-      model.width, model.height,
-      bubbleCount,
-      pointFromDoubles(model.width * 0.5, model.height * 0.5)
-    );
-  }
-
-  size_t wordStop = model.wordStart + getWordsOnNextBranches(model, 1);
+  vector<Point> jumpPoints = getJumpPoints(model);
 
   for (size_t i = 0; i < jumpPoints.size(); i++) {
-    if (i < model.wordStart || i >= wordStop) {
-      continue;
-    }
     wstring label;
-    vector<size_t> sequence = getWord(model, i);
+    vector<size_t> sequence = getWord(model, i + model.wordStart);
     for (size_t j = 0; j < sequence.size(); j++) {
       label += model.keymap.levels[j][sequence[j]].spelling;
     }
@@ -1158,36 +1144,20 @@ LRESULT CALLBACK WndProc(
           if (wParam == model.keymap.levels[model.wordLength][i].keycode) {
             model.wordLength++;
             model.wordStart += getWordsOnNextBranches(model, i);
-            size_t remainingBubbles = getWordsOnNextBranches(model, 1);
-            if (remainingBubbles < 1) {
+            vector<Point> jumpPoints = getJumpPoints(model);
+            if (jumpPoints.empty()) {
               MessageBox(
                 NULL,
                 _T("MouseJump"),
-                _T("Internal error: remainingBubbles < 1"),
+                _T("Internal error: jumpPoints is empty"),
                 0
               );
             }
-            if (remainingBubbles == 1) {
-              int bubbleCount = (int)getLeafWords(model);
-
-              GridSettings adjusted = adjustGridSettings(
-                model.gridSettings,
-                model.width, model.height,
-                bubbleCount
-              );
-
-              vector<Point> jumpPoints = getJumpPoints(
-                adjusted,
-                model.width, model.height,
-                bubbleCount,
-                pointFromDoubles(model.width * 0.5, model.height * 0.5)
-              );
-
-              Point chosenPoint = jumpPoints[model.wordStart];
-
+            if (jumpPoints.size() == 1) {
               whenIdle(
                 new IdleSetCursorPos(
-                  view.start.x + chosenPoint.X, view.start.y + chosenPoint.Y
+                  view.start.x + jumpPoints[0].X,
+                  view.start.y + jumpPoints[0].Y
                 )
               );
 
