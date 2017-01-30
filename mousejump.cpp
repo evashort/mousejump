@@ -181,7 +181,7 @@ typedef struct {
 } Model;
 
 double inflatedArea(double width, double height, double border) {
-  return (width + 2 * border) * (height + 2 * border);
+  return fmax(0, (width + 2 * border) * (height + 2 * border));
 }
 
 size_t getLeafWords(Model model) {
@@ -190,12 +190,10 @@ size_t getLeafWords(Model model) {
     symbolLimit *= model.keymap.levels[i].size();
   }
 
-  double cellArea =
-    model.gridSettings.cellWidth * model.gridSettings.cellHeight * sqrt(0.75);
-  double gridArea = inflatedArea(
-    model.width, model.height, model.gridSettings.pixelsPastEdge
-  );
-  size_t areaLimit = (size_t)fabs(round(gridArea / cellArea));
+  GridSettings g = model.gridSettings;
+  double cellArea = fmax(1, fabs(g.cellWidth * g.cellHeight * sqrt(0.75)));
+  double gridArea = inflatedArea(model.width, model.height, g.pixelsPastEdge);
+  size_t areaLimit = (size_t)round(gridArea / cellArea);
 
   return umax(umin(symbolLimit, areaLimit), 1);
 }
@@ -430,19 +428,20 @@ vector<Point> getJumpPoints(Model model) {
 
   size_t bubbleCount = getLeafWords(model);
 
-  GridSettings gridSettings = adjustGridSettings(
+  GridSettings g = adjustGridSettings(
     model.gridSettings, model.width, model.height, bubbleCount
   );
 
+
   RectF bounds = rectFromDoubles(
-    (-xOrigin - gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
-    (-yOrigin - gridSettings.pixelsPastEdge) / gridSettings.cellHeight,
-    (model.width + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellWidth,
-    (model.height + 2 * gridSettings.pixelsPastEdge) / gridSettings.cellHeight
+    (-xOrigin - g.pixelsPastEdge) / fabs(g.cellWidth),
+    (-yOrigin - g.pixelsPastEdge) / fabs(g.cellHeight),
+    (model.width + 2 * g.pixelsPastEdge) / fabs(g.cellWidth),
+    (model.height + 2 * g.pixelsPastEdge) / fabs(g.cellHeight)
   );
 
   vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
-  scaleHoneycomb(honeycomb, gridSettings.cellWidth, gridSettings.cellHeight);
+  scaleHoneycomb(honeycomb, g.cellWidth, g.cellHeight);
   translateHoneycomb(honeycomb, xOrigin, yOrigin);
 
   size_t visibleWords = 0;
@@ -800,7 +799,7 @@ Model getModel(int width, int height) {
   model.keymap.hStride = 9;
   model.keymap.vStride = 9;
 
-  model.gridSettings.cellWidth = 97;
+  model.gridSettings.cellWidth = -97;
   model.gridSettings.cellHeight = 39;
   model.gridSettings.pixelsPastEdge = 12;
 
