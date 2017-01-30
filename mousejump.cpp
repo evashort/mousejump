@@ -22,7 +22,7 @@ To debug, insert this snippet after the thing that probably went wrong:
 if (GetLastError()) {
   TCHAR buffer[20];
   _itow(GetLastError(), buffer, 10);
-  MessageBox(NULL, buffer, _T("Error Code"), NULL);
+  MessageBox(NULL, buffer, _T("Error Code"), 0);
 }
 
 Then look up the error code here:
@@ -51,6 +51,11 @@ it.
 
 using namespace Gdiplus;
 using namespace std;
+
+inline int imin(int a, int b) { return b < a ? b : a; }
+inline int imax(int a, int b) { return b > a ? b : a; }
+inline size_t umin(size_t a, size_t b) { return b < a ? b : a; }
+inline size_t umax(size_t a, size_t b) { return b > a ? b : a; }
 
 typedef struct {
   HDC deviceContext;
@@ -170,7 +175,8 @@ typedef struct {
   Style style;
   int width;
   int height;
-  vector<int> word;
+  size_t wordLength;
+  size_t wordStart;
   bool showBubbles;
 } Model;
 
@@ -178,8 +184,8 @@ double inflatedArea(double width, double height, double border) {
   return (width + 2 * border) * (height + 2 * border);
 }
 
-int getWordCount(Model model) {
-  int symbolLimit = 1;
+size_t getLeafWords(Model model) {
+  size_t symbolLimit = 1;
   for (size_t i = 0; i < model.keymap.levels.size(); i++) {
     symbolLimit *= model.keymap.levels[i].size();
   }
@@ -189,110 +195,95 @@ int getWordCount(Model model) {
   double gridArea = inflatedArea(
     model.width, model.height, model.gridSettings.pixelsPastEdge
   );
-  int areaLimit = (int)round(gridArea / cellArea);
+  size_t areaLimit = (size_t)fabs(round(gridArea / cellArea));
 
-  return min(symbolLimit, areaLimit);
+  return umin(symbolLimit, areaLimit);
 }
 
-int digitsToNumber(vector<int> bases, vector<int> digits) {
-  int number = 0;
-  if (digits.size() > 0 && bases.size() > 0) {
-    number = digits[0];
+typedef struct {
+  size_t leafWords;
+  size_t shorterWordLength;
+  size_t longWordLength;
+  size_t possibleShorterWords;
+  size_t longWordsPerShorterWord;
+  size_t possibleLongWords;
+  size_t shorterWords;
+  size_t longWords;
+} WordIndexInfo;
+
+WordIndexInfo getWordIndexInfo(Model model) {
+  WordIndexInfo info;
+
+  info.leafWords = getLeafWords(model);
+
+  info.shorterWordLength = 0;
+  info.possibleShorterWords = 1;
+  info.longWordsPerShorterWord = 1;
+  info.possibleLongWords = 1;
+  for (
+    info.longWordLength = 0;
+    info.longWordLength < model.keymap.levels.size() &&
+    info.possibleLongWords <= info.leafWords;
+    info.longWordLength++
+  ) {
+    info.shorterWordLength = info.longWordLength;
+    info.possibleShorterWords = info.possibleLongWords;
+    info.longWordsPerShorterWord =
+      model.keymap.levels[info.longWordLength].size();
+    info.possibleLongWords *= info.longWordsPerShorterWord;
   }
 
-  for (size_t i = 1; i < bases.size(); i++) {
-    number *= bases[i - 1];
-    if (i < digits.size()) {
-      number += digits[i];
+  info.shorterWords =
+    (info.possibleLongWords - info.leafWords) /
+    (info.longWordsPerShorterWord - 1);
+
+  info.longWords = info.leafWords - info.shorterWords;
+
+  return info;
+}
+
+int getWordsOnNextBranches(Model model, size_t branches) {
+  WordIndexInfo info = getWordIndexInfo(model);
+
+  size_t remainingLongWords = 0;
+  if (model.wordStart < info.longWords) {
+    remainingLongWords = info.longWords - model.wordStart;
+  }
+
+  size_t possibleLongWordDelta = branches;
+  for (size_t i = model.wordLength; i < info.longWordLength; i++) {
+    possibleLongWordDelta *= model.keymap.levels[i].size();
+  }
+
+  size_t longWordDelta = umin(possibleLongWordDelta, remainingLongWords);
+
+  size_t shorterWordDelta =
+    (possibleLongWordDelta - longWordDelta) / info.longWordsPerShorterWord;
+
+  return longWordDelta + shorterWordDelta;
+}
+
+vector<size_t> getWord(Model model, size_t index) {
+  WordIndexInfo info = getWordIndexInfo(model);
+  size_t skippedShorterWords = info.possibleShorterWords - info.shorterWords;
+
+  size_t adjustedIndex = index;
+  size_t wordLength = info.longWordLength;
+  if (index >= info.longWords) {
+    adjustedIndex += skippedShorterWords - info.longWords;
+    wordLength = info.shorterWordLength;
+  }
+
+  vector<size_t> word(wordLength);
+  if (wordLength > 0) {
+    for (size_t i = wordLength - 1; i > 0; i--) {
+      word[i] = adjustedIndex % model.keymap.levels[i - 1].size();
+      adjustedIndex /= model.keymap.levels[i - 1].size();
     }
+    word[0] = adjustedIndex;
   }
 
-  return number;
-}
-
-vector<int> numberToDigits(vector<int> bases, int number) {
-  vector<int> digits(bases.size());
-  for (size_t i = bases.size() - 1; i > 0; i--) {
-    digits[i] = number % bases[i - 1];
-    number /= bases[i - 1];
-  }
-  digits[0] = number;
-  return digits;
-}
-
-int getProduct(vector<int> factors) {
-  int product = 1;
-  for (size_t i = 0; i < factors.size(); i++) {
-    product *= factors[i];
-  }
-  return product;
-}
-
-int getShorterWords(vector<int> bases, int wordCount) {
-  int extraWords = getProduct(bases) - wordCount;
-  int shorteningCost = bases[bases.size() - 1] - 1;
-  return extraWords / shorteningCost;
-}
-
-int getFullWords(vector<int> bases, int wordCount) {
-  return wordCount - getShorterWords(bases, wordCount);
-}
-
-int ceilDivide(int x, int y) {
-  return (x + y - 1) / y;
-}
-
-size_t getWordIndexStart(vector<int> bases, int wordCount, vector<int> word) {
-  int fullWords = getFullWords(bases, wordCount);
-  int fullWordIndex = digitsToNumber(bases, word);
-  if (fullWordIndex < fullWords) {
-    return fullWordIndex;
-  }
-
-  vector<int> shorterBases(bases.begin(), --bases.end());
-  int skippedShorterWords = ceilDivide(fullWords, bases[bases.size() - 1]);
-  int shorterWordIndex = digitsToNumber(shorterBases, word);
-  int result = shorterWordIndex + fullWords - skippedShorterWords;
-  return result < 0 ? 0 : (size_t)result;
-}
-
-size_t getWordIndexStop(vector<int> bases, int wordCount, vector<int> word) {
-  if (word.size() <= 0) {
-    return wordCount;
-  }
-
-  vector<int> highWord(word);
-  highWord[highWord.size() - 1]++;
-  return getWordIndexStart(bases, wordCount, highWord);
-}
-
-int getWordChoices(vector<int> bases, int wordCount, vector<int> word) {
-  int start = getWordIndexStart(bases, wordCount, word);
-  int stop = getWordIndexStop(bases, wordCount, word);
-  return stop - start;
-}
-
-vector<int> getWord(vector<int> bases, int wordCount, int wordIndex) {
-  int fullWords = getFullWords(bases, wordCount);
-  if (wordIndex < fullWords) {
-    return numberToDigits(bases, wordIndex);
-  }
-
-  vector<int> shorterBases(bases.begin(), --bases.end());
-  int skippedShorterWords = ceilDivide(fullWords, bases[bases.size() - 1]);
-  int shorterWordIndex = wordIndex - fullWords + skippedShorterWords;
-  return numberToDigits(shorterBases, shorterWordIndex);
-}
-
-vector<int> getBases(vector<vector<Symbol> > levels, int wordCount) {
-  vector<int> bases;
-  int possibleWords = 1;
-  for (size_t i = 0; i < levels.size() && possibleWords < wordCount; i++) {
-    bases.push_back(levels[i].size());
-    possibleWords *= levels[i].size();
-  }
-
-  return bases;
+  return word;
 }
 
 GridSettings adjustGridSettings(
@@ -424,8 +415,8 @@ void translateHoneycomb(
 
 Point clampToSize(int width, int height, Point point) {
   return Point(
-    max(0, min(width - 1, point.X)),
-    max(0, min(height - 1, point.Y))
+    imax(0, imin(width - 1, point.X)),
+    imax(0, imin(height - 1, point.Y))
   );
 }
 
@@ -468,7 +459,7 @@ vector<Point> getJumpPoints(
 
 int pixelateSize(double size) {
   if (size > 0) {
-    return max((int)round(size), 1);
+    return imax((int)round(size), 1);
   }
 
   return 0;
@@ -826,6 +817,9 @@ Model getModel(int width, int height) {
   model.width = width;
   model.height = height;
 
+  model.wordLength = 0;
+  model.wordStart = 0;
+
   model.showBubbles = true;
 
   return model;
@@ -839,7 +833,7 @@ void drawModel(Model model, View& view) {
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
   graphics.Clear(Color(0, 0, 0, 0));
 
-  int bubbleCount = getWordCount(model);
+  int bubbleCount = (int)getLeafWords(model);
 
   GridSettings adjusted = adjustGridSettings(
     model.gridSettings,
@@ -857,16 +851,14 @@ void drawModel(Model model, View& view) {
     );
   }
 
-  vector<int> bases = getBases(model.keymap.levels, bubbleCount);
-  size_t wordIndexStart = getWordIndexStart(bases, bubbleCount, model.word);
-  size_t wordIndexStop = getWordIndexStop(bases, bubbleCount, model.word);
+  size_t wordStop = model.wordStart + getWordsOnNextBranches(model, 1);
 
   for (size_t i = 0; i < jumpPoints.size(); i++) {
-    if (i < wordIndexStart || i >= wordIndexStop) {
+    if (i < model.wordStart || i >= wordStop) {
       continue;
     }
     wstring label;
-    vector<int> sequence = getWord(bases, bubbleCount, i);
+    vector<size_t> sequence = getWord(model, i);
     for (size_t j = 0; j < sequence.size(); j++) {
       label += model.keymap.levels[j][sequence[j]].spelling;
     }
@@ -878,7 +870,7 @@ void drawModel(Model model, View& view) {
       artSupplies,
       jumpPoints[i],
       &labelVector[0],
-      model.word.size()
+      model.wordLength
     );
   }
 
@@ -1085,8 +1077,9 @@ LRESULT CALLBACK WndProc(
     if (wParam == model.keymap.exit) {
       whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.clear) {
-      if (model.word.size() > 0 || !model.showBubbles) {
-        model.word.clear();
+      if (model.wordLength > 0 || !model.showBubbles) {
+        model.wordLength = 0;
+        model.wordStart = 0;
         model.showBubbles = true;
         drawModel(model, view);
         showView(view, window);
@@ -1131,57 +1124,66 @@ LRESULT CALLBACK WndProc(
     } else if (wParam == model.keymap.primaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
       whenIdle(new IdleReactivate(window));
-      model.word.clear();
+      model.wordLength = 0;
+      model.wordStart = 0;
       model.showBubbles = true;
       drawModel(model, view);
       showView(view, window);
     } else if (wParam == model.keymap.secondaryHold) {
       click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
       whenIdle(new IdleReactivate(window));
-      model.word.clear();
+      model.wordLength = 0;
+      model.wordStart = 0;
       model.showBubbles = true;
       drawModel(model, view);
       showView(view, window);
     } else if (wParam == model.keymap.middleHold) {
       click(2, 1);
       whenIdle(new IdleReactivate(window));
-      model.word.clear();
+      model.wordLength = 0;
+      model.wordStart = 0;
       model.showBubbles = true;
       drawModel(model, view);
       showView(view, window);
     } else if (model.showBubbles) {
-      int wordCount = getWordCount(model);
-      vector<int> bases = getBases(model.keymap.levels, wordCount);
-      int wordChoices = getWordChoices(bases, wordCount, model.word);
-      if (model.word.size() < model.keymap.levels.size()) {
-        wordChoices = min(
-          wordChoices,
-          (int)model.keymap.levels[model.word.size()].size()
+      size_t wordChoices = 1;
+      if (model.wordLength < model.keymap.levels.size()) {
+        wordChoices = umin(
+          getWordsOnNextBranches(model, 1),
+          model.keymap.levels[model.wordLength].size()
         );
       }
       if (wordChoices > 1) {
-        for (int i = 0; i < wordChoices; i++) {
-          if (wParam == model.keymap.levels[model.word.size()][i].keycode) {
-            model.word.push_back(i);
-            if (getWordChoices(bases, wordCount, model.word) <= 1) {
-              size_t chosenWord = getWordIndexStart(
-                bases, wordCount, model.word
+        for (size_t i = 0; i < wordChoices; i++) {
+          if (wParam == model.keymap.levels[model.wordLength][i].keycode) {
+            model.wordLength++;
+            model.wordStart += getWordsOnNextBranches(model, i);
+            size_t remainingBubbles = getWordsOnNextBranches(model, 1);
+            if (remainingBubbles < 1) {
+              MessageBox(
+                NULL,
+                _T("MouseJump"),
+                _T("Internal error: remainingBubbles < 1"),
+                0
               );
+            }
+            if (remainingBubbles == 1) {
+              int bubbleCount = (int)getLeafWords(model);
 
               GridSettings adjusted = adjustGridSettings(
                 model.gridSettings,
                 model.width, model.height,
-                wordCount
+                bubbleCount
               );
 
               vector<Point> jumpPoints = getJumpPoints(
                 adjusted,
                 model.width, model.height,
-                wordCount,
+                bubbleCount,
                 pointFromDoubles(model.width * 0.5, model.height * 0.5)
               );
 
-              Point chosenPoint = jumpPoints[chosenWord];
+              Point chosenPoint = jumpPoints[model.wordStart];
 
               whenIdle(
                 new IdleSetCursorPos(
@@ -1209,7 +1211,8 @@ LRESULT CALLBACK WndProc(
       if (model.width != newWidth || model.height != newHeight) {
         model.width = newWidth;
         model.height = newHeight;
-        model.word.clear();
+        model.wordLength = 0;
+        model.wordStart = 0;
       }
 
       drawModel(model, view);
