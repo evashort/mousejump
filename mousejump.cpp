@@ -197,7 +197,7 @@ size_t getLeafWords(Model model) {
   );
   size_t areaLimit = (size_t)fabs(round(gridArea / cellArea));
 
-  return umin(symbolLimit, areaLimit);
+  return umax(umin(symbolLimit, areaLimit), 1);
 }
 
 typedef struct {
