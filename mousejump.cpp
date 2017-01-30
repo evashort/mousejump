@@ -191,7 +191,7 @@ size_t getLeafWords(Model model) {
   }
 
   GridSettings g = model.gridSettings;
-  double cellArea = fmax(1, fabs(g.cellWidth * g.cellHeight * sqrt(0.75)));
+  double cellArea = fmax(1, fabs(g.cellWidth * g.cellHeight));
   double gridArea = inflatedArea(model.width, model.height, g.pixelsPastEdge);
   size_t areaLimit = (size_t)round(gridArea / cellArea);
 
@@ -291,8 +291,7 @@ GridSettings adjustGridSettings(
 ) {
   double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
   double bubbleCover =
-    gridSettings.cellWidth * gridSettings.cellHeight * sqrt(0.75) * \
-    bubbleCount;
+    gridSettings.cellWidth * gridSettings.cellHeight * bubbleCount;
   double scale = fmax(sqrt(gridArea / bubbleCover), 1);
 
   GridSettings result;
@@ -428,20 +427,22 @@ vector<Point> getJumpPoints(Model model) {
 
   size_t bubbleCount = getLeafWords(model);
 
-  GridSettings g = adjustGridSettings(
+  GridSettings gridSettings = adjustGridSettings(
     model.gridSettings, model.width, model.height, bubbleCount
   );
 
+  double xScale = gridSettings.cellWidth / sqrt(sqrt(0.75));
+  double yScale = gridSettings.cellHeight / sqrt(sqrt(0.75));
 
   RectF bounds = rectFromDoubles(
-    (-xOrigin - g.pixelsPastEdge) / fabs(g.cellWidth),
-    (-yOrigin - g.pixelsPastEdge) / fabs(g.cellHeight),
-    (model.width + 2 * g.pixelsPastEdge) / fabs(g.cellWidth),
-    (model.height + 2 * g.pixelsPastEdge) / fabs(g.cellHeight)
+    (-xOrigin - gridSettings.pixelsPastEdge) / fabs(xScale),
+    (-yOrigin - gridSettings.pixelsPastEdge) / fabs(yScale),
+    (model.width + 2 * gridSettings.pixelsPastEdge) / fabs(xScale),
+    (model.height + 2 * gridSettings.pixelsPastEdge) / fabs(yScale)
   );
 
   vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
-  scaleHoneycomb(honeycomb, g.cellWidth, g.cellHeight);
+  scaleHoneycomb(honeycomb, xScale, yScale);
   translateHoneycomb(honeycomb, xOrigin, yOrigin);
 
   size_t visibleWords = 0;
@@ -799,8 +800,8 @@ Model getModel(int width, int height) {
   model.keymap.hStride = 9;
   model.keymap.vStride = 9;
 
-  model.gridSettings.cellWidth = -97;
-  model.gridSettings.cellHeight = 39;
+  model.gridSettings.cellWidth = -90.268671332903661097298218457374;
+  model.gridSettings.cellHeight = 36.293589504981884358707531132346;
   model.gridSettings.pixelsPastEdge = 12;
 
   LOGFONT fontInfo = getSystemTooltipFont();
