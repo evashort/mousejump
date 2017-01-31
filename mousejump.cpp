@@ -145,8 +145,6 @@ typedef struct {
 } Style;
 
 typedef struct {
-  // Keycode reference:
-  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd375731.aspx
   wstring spelling;
   UINT keycode;
 } Symbol;
@@ -156,9 +154,7 @@ typedef struct {
   UINT primaryClick;
   UINT secondaryClick;
   UINT middleClick;
-  UINT primaryHold;
-  UINT secondaryHold;
-  UINT middleHold;
+  UINT drag;
   UINT exit;
   UINT clear;
   UINT left;
@@ -310,14 +306,8 @@ REAL dot(PointF v1, PointF v2) {
 }
 
 PointF getCorner(RectF rect, int corner) {
-  REAL x = rect.X;
-  REAL y = rect.Y;
-  if (corner == 1 || corner == 2) {
-    x = rect.GetRight();
-  }
-  if (corner == 2 || corner == 3) {
-    y = rect.GetBottom();
-  }
+  REAL x = (corner == 1 || corner == 2) ? rect.GetRight() : rect.X;
+  REAL y = (corner == 2 || corner == 3) ? rect.GetBottom() : rect.Y;
   return PointF(x, y);
 }
 
@@ -785,12 +775,12 @@ Model getModel(int width, int height) {
     );
   }
 
+  // Keycode reference:
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd375731.aspx
   model.keymap.primaryClick = 0x0d; // VK_RETURN
   model.keymap.secondaryClick = 0x5d; // VK_APPS
   model.keymap.middleClick = 0x09; // VK_TAB
-  model.keymap.primaryHold = 0x2e; // VK_DELETE
-  model.keymap.secondaryHold = 0;
-  model.keymap.middleHold = 0;
+  model.keymap.drag = 0x20; // VK_SPACE
   model.keymap.exit = 0x1b; // VK_ESCAPE
   model.keymap.clear = 0x08; // VK_BACK
   model.keymap.left = 0x25; // VK_LEFT
@@ -1032,18 +1022,18 @@ INPUT getClick(DWORD dwFlags) {
   return click;
 }
 
-void click(int button, bool goalState) {
-  int keycodes[3] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON};
-  int actions[2][3] = {
-    {MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_MIDDLEUP},
-    {MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_MIDDLEDOWN}
-  };
+void click(int button) {
+  int keycodes[] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON};
+  int downActions[] =
+    {MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_MIDDLEDOWN};
+  int upActions[] =
+    {MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_MIDDLEUP};
 
-  if ((GetKeyState(keycodes[button]) < 0) == goalState) {
-    whenIdle(new IdleSendInput(getClick(actions[!goalState][button])));
+  if (!(GetKeyState(keycodes[button]) < 0)) {
+    whenIdle(new IdleSendInput(getClick(downActions[button])));
   }
 
-  whenIdle(new IdleSendInput(getClick(actions[goalState][button])));
+  whenIdle(new IdleSendInput(getClick(upActions[button])));
 }
 
 HMONITOR monitor;
@@ -1099,38 +1089,14 @@ LRESULT CALLBACK WndProc(
         showView(view, window);
       }
     } else if (wParam == model.keymap.primaryClick) {
-      click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 0);
+      click(GetSystemMetrics(SM_SWAPBUTTON) != 0);
       whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.secondaryClick) {
-      click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 0);
+      click(GetSystemMetrics(SM_SWAPBUTTON) == 0);
       whenIdle(new IdleClose(window));
     } else if (wParam == model.keymap.middleClick) {
-      click(2, 0);
+      click(2);
       whenIdle(new IdleClose(window));
-    } else if (wParam == model.keymap.primaryHold) {
-      click(GetSystemMetrics(SM_SWAPBUTTON) != 0, 1);
-      whenIdle(new IdleReactivate(window));
-      model.wordLength = 0;
-      model.wordStart = 0;
-      model.showBubbles = true;
-      drawModel(model, view);
-      showView(view, window);
-    } else if (wParam == model.keymap.secondaryHold) {
-      click(GetSystemMetrics(SM_SWAPBUTTON) == 0, 1);
-      whenIdle(new IdleReactivate(window));
-      model.wordLength = 0;
-      model.wordStart = 0;
-      model.showBubbles = true;
-      drawModel(model, view);
-      showView(view, window);
-    } else if (wParam == model.keymap.middleHold) {
-      click(2, 1);
-      whenIdle(new IdleReactivate(window));
-      model.wordLength = 0;
-      model.wordStart = 0;
-      model.showBubbles = true;
-      drawModel(model, view);
-      showView(view, window);
     } else if (model.showBubbles) {
       size_t wordChoices = 1;
       if (model.wordLength < model.keymap.levels.size()) {
