@@ -37,6 +37,7 @@ it.
 #include <agents.h>
 #include <chrono>
 #include <thread>
+#include <random>
 
 #pragma comment(linker, "/subsystem:windows")
 #pragma comment(lib, "user32")
@@ -430,6 +431,7 @@ vector<Point> getJumpPoints(Model model) {
   vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
   scaleHoneycomb(honeycomb, xScale, yScale);
   translateHoneycomb(honeycomb, xOrigin, yOrigin);
+  shuffle(honeycomb.begin(), honeycomb.end(), default_random_engine());
 
   size_t visibleWords = 0;
   if (model.showBubbles) {
