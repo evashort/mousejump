@@ -171,6 +171,7 @@ typedef struct {
   size_t wordLength;
   size_t wordStart;
   bool showBubbles;
+  size_t originIndex;
 } Model;
 
 double inflatedArea(double width, double height, double border) {
@@ -405,13 +406,15 @@ Point clampToSize(int width, int height, Point point) {
 }
 
 RectF rectFromDoubles(double x, double y, double width, double height) {
-  return RectF((REAL)x, (REAL)y, (REAL)width, (REAL)height);
+  return RectF(
+    (REAL)(x + fmin(width, 0)), (REAL)(y + fmin(height, 0)),
+    (REAL)fabs(width), (REAL)fabs(height)
+  );
 }
 
-vector<Point> getJumpPoints(Model model) {
-  double xOrigin = 0.5 * model.width;
-  double yOrigin = 0.5 * model.height;
+const size_t ORIGIN_COUNT = 3;
 
+vector<Point> getJumpPoints(Model model) {
   size_t bubbleCount = getLeafWords(model);
 
   GridSettings gridSettings = adjustGridSettings(
@@ -421,11 +424,26 @@ vector<Point> getJumpPoints(Model model) {
   double xScale = gridSettings.cellWidth / sqrt(sqrt(0.75));
   double yScale = gridSettings.cellHeight / sqrt(sqrt(0.75));
 
+  double xOrigin = 0;
+  double yOrigin = 0;
+  switch (model.originIndex) {
+  case 1:
+    xOrigin = sqrt(1.0 / 3) * cos(degrees(45));
+    yOrigin = sqrt(1.0 / 3) * sin(degrees(45));
+    break;
+  case 2:
+    xOrigin = sqrt(1.0 / 3) * cos(degrees(105));
+    yOrigin = sqrt(1.0 / 3) * sin(degrees(105));
+    break;
+  }
+  xOrigin = 0.5 * model.width + xOrigin * xScale;
+  yOrigin = 0.5 * model.height + yOrigin * yScale;
+
   RectF bounds = rectFromDoubles(
-    (-xOrigin - gridSettings.pixelsPastEdge) / fabs(xScale),
-    (-yOrigin - gridSettings.pixelsPastEdge) / fabs(yScale),
-    (model.width + 2 * gridSettings.pixelsPastEdge) / fabs(xScale),
-    (model.height + 2 * gridSettings.pixelsPastEdge) / fabs(yScale)
+    (-xOrigin - gridSettings.pixelsPastEdge) / xScale,
+    (-yOrigin - gridSettings.pixelsPastEdge) / yScale,
+    (model.width + 2 * gridSettings.pixelsPastEdge) / xScale,
+    (model.height + 2 * gridSettings.pixelsPastEdge) / yScale
   );
 
   vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
@@ -817,6 +835,8 @@ Model getModel(int width, int height) {
 
   model.showBubbles = true;
 
+  model.originIndex = 0;
+
   return model;
 }
 
@@ -1179,13 +1199,15 @@ LRESULT CALLBACK WndProc(
         target, (PatientAction*)new PatientIgnoreFutureEvents()
       );
     } else if (wParam == model.keymap.clear) {
-      if (model.wordLength > 0 || !model.showBubbles) {
-        model.wordLength = 0;
-        model.wordStart = 0;
-        model.showBubbles = true;
-        drawModel(model, view);
-        showView(view, window);
+      if (model.wordLength <= 0 && model.showBubbles) {
+        model.originIndex = (model.originIndex + 1) % ORIGIN_COUNT;
       }
+
+      model.wordLength = 0;
+      model.wordStart = 0;
+      model.showBubbles = true;
+      drawModel(model, view);
+      showView(view, window);
     } else if (wParam == model.keymap.left) {
       moveCursorBy(-model.keymap.hStride, 0, model, view, window);
     } else if (wParam == model.keymap.up) {
