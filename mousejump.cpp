@@ -8,15 +8,6 @@ https://www.visualstudio.com/downloads/#build-tools-for-visual-studio-2017-rc
 cd /Users/Evan/Documents/GitHub/mousejump
 cl /EHsc /W3 mousejump.cpp && mousejump.exe
 
-Can also be compiled with MinGW, but the executable will be about 5x larger.
-1. Download and install MinGW from http://www.mingw.org/
-2. In the MinGW Installation Manager, choose Basic Setup and mark mingw32-base
-   and mingw32-gcc-g++ for installation.
-3. Add C:\MinGW\bin\ to the PATH system environment variable.
-4.
-cd /Users/Evan/Documents/GitHub/mousejump
-g++ -O3 -Wall mousejump.cpp -o mousejump.exe -luser32 -lgdi32 -lgdiplus -Wl,--subsystem,windows -s -static-libstdc++ && mousejump.exe
-
 To debug, insert this snippet after the thing that probably went wrong:
 
 if (GetLastError()) {
@@ -43,6 +34,9 @@ it.
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <agents.h>
+#include <chrono>
+#include <thread>
 
 #pragma comment(linker, "/subsystem:windows")
 #pragma comment(lib, "user32")
@@ -52,6 +46,8 @@ it.
 using namespace Gdiplus;
 using namespace std;
 
+#undef min
+#undef max
 inline int imin(int a, int b) { return b < a ? b : a; }
 inline int imax(int a, int b) { return b > a ? b : a; }
 inline size_t umin(size_t a, size_t b) { return b < a ? b : a; }
@@ -306,8 +302,8 @@ REAL dot(PointF v1, PointF v2) {
 }
 
 PointF getCorner(RectF rect, int corner) {
-  REAL x = (corner == 1 || corner == 2) ? rect.GetRight() : rect.X;
-  REAL y = (corner == 2 || corner == 3) ? rect.GetBottom() : rect.Y;
+  REAL x = corner == 1 || corner == 2 ? rect.GetRight() : rect.X;
+  REAL y = corner == 2 || corner == 3 ? rect.GetBottom() : rect.Y;
   return PointF(x, y);
 }
 
@@ -896,144 +892,267 @@ void showView(View view, HWND window) {
   );
 }
 
-class IdleAction {
+const int PATIENT_DONE = 0;
+const int PATIENT_RETRY = 1;
+const int PATIENT_CANCEL = 2;
+
+typedef struct {
+  int status;
+  int delay;
+} PatientResult;
+
+PatientResult defaultDelay(int status) {
+  int delay = 0;
+  switch (status) {
+  case PATIENT_RETRY: delay = 200; break;
+  case PATIENT_CANCEL: delay = 10; break;
+  }
+
+  PatientResult result = {status, delay};
+  return result;
+}
+
+class PatientAction {
 public:
-  virtual bool operator() () =0;
-  virtual ~IdleAction() {};
+  virtual PatientResult operator() () =0;
+  virtual ~PatientAction() {};
 };
 
-class IdleSendInput: public IdleAction {
-private:
-  INPUT input;
+class PatientCursorMover: public PatientAction {
+protected:
+  POINT oldPos;
+  int triesLeft;
+  bool triedYet;
+  virtual POINT getGoalPos() const =0;
 public:
-  IdleSendInput(INPUT input) {
-    this->input = input;
+  PatientCursorMover() {
+    triesLeft = 5;
+    triedYet = false;
   }
-  bool operator() () {
-    SendInput(1, &input, sizeof(INPUT));
-    return true;
-  }
-};
+  PatientResult operator() () {
+    POINT goalPos;
+    if (triedYet) {
+      goalPos = getGoalPos();
+    } else {
+      triedYet = true;
 
-class IdleSetCursorPos: public IdleAction {
-private:
-  int x;
-  int y;
-public:
-  IdleSetCursorPos(int x, int y) {
-    this->x = x;
-    this->y = y;
-  }
-  bool operator() () {
-    SetCursorPos(x, y);
-    return true;
-  }
-};
-
-class IdleReactivate: public IdleAction {
-private:
-  HWND window;
-public:
-  IdleReactivate(HWND window) {
-    this->window = window;
-  }
-  bool operator() () {
-    bool result = SetForegroundWindow(window);
-    if (!result) {
-      PostMessage(window, WM_CLOSE, 0, 0);
+      GetCursorPos(&oldPos);
+      goalPos = getGoalPos();
+      if (oldPos.x == goalPos.x && oldPos.y == goalPos.y) {
+        return defaultDelay(PATIENT_DONE);
+      }
     }
 
-    return result;
+    SetCursorPos(goalPos.x, goalPos.y);
+
+    POINT newPos;
+    GetCursorPos(&newPos);
+    if (newPos.x != oldPos.x || newPos.y != oldPos.y) {
+      return defaultDelay(PATIENT_DONE);
+    }
+
+    triesLeft--;
+    if (triesLeft <= 0) {
+      MessageBox(NULL, _T("Failed to move cursor"), _T("MouseJump"), 0);
+      return defaultDelay(PATIENT_CANCEL);
+    }
+
+    return defaultDelay(PATIENT_RETRY);
   }
 };
 
-class IdleClose: public IdleAction {
+class PatientSetCursorPos: public PatientCursorMover {
+private:
+  POINT goalPos;
+protected:
+  POINT getGoalPos() const {
+    return goalPos;
+  }
+public:
+  PatientSetCursorPos(int x, int y) {
+    goalPos.x = x;
+    goalPos.y = y;
+  }
+};
+
+class PatientMoveCursorBy: public PatientCursorMover {
+private:
+  POINT offset;
+protected:
+  POINT getGoalPos() const {
+    POINT result = {oldPos.x + offset.x, oldPos.y + offset.y};
+    return result;
+  }
+public:
+  PatientMoveCursorBy(int xOffset, int yOffset) {
+    offset.x = xOffset;
+    offset.y = yOffset;
+  }
+};
+
+class PatientClick: public PatientAction {
+private:
+  int button;
+  bool press;
+  int triesLeft;
+  bool triedYet;
+  UINT getKeycode() const {
+    switch (button) {
+    case 2: return VK_RBUTTON;
+    case 1: return VK_MBUTTON;
+    default: return VK_LBUTTON;
+    }
+  }
+  int getAction() const {
+    switch (button) {
+    case 2: return press ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+    case 1: return press ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+    default: return press ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    }
+  }
+public:
+  PatientClick(int button, bool press) {
+    this->button = button;
+    this->press = press;
+    triesLeft = 5;
+    triedYet = false;
+  }
+  PatientResult operator() () {
+    if (!triedYet) {
+      triedYet = true;
+
+      if ((button == 0 || button == 2) && GetSystemMetrics(SM_SWAPBUTTON)) {
+        button = 2 * !button;
+      }
+    }
+
+    UINT keycode = getKeycode();
+
+    if ((GetAsyncKeyState(keycode) < 0) == press) {
+      return defaultDelay(PATIENT_DONE);
+    }
+
+    INPUT click;
+    click.type = INPUT_MOUSE;
+    click.mi.dx = 0;
+    click.mi.dy = 0;
+    click.mi.mouseData = 0;
+    click.mi.dwFlags = getAction();
+    click.mi.time = 0;
+    click.mi.dwExtraInfo = 0;
+    SendInput(1, &click, sizeof(INPUT));
+
+    if ((GetAsyncKeyState(keycode) < 0) == press) {
+      return defaultDelay(PATIENT_DONE);
+    }
+
+    triesLeft--;
+    if (triesLeft <= 0) {
+      MessageBox(NULL, _T("Failed to send click"), _T("MouseJump"), 0);
+      return defaultDelay(PATIENT_CANCEL);
+    }
+
+    return defaultDelay(PATIENT_RETRY);
+  }
+};
+
+class PatientCloseWindow : public PatientAction {
 private:
   HWND window;
 public:
-  IdleClose(HWND window) {
+  PatientCloseWindow(HWND window) {
     this->window = window;
   }
-  bool operator() () {
-    PostMessage(window, WM_CLOSE, 0, 0);
-    return false;
+  PatientResult operator() () {
+    SendMessage(window, WM_CLOSE, 0, 0);
+    return defaultDelay(PATIENT_DONE);
+  }
+};
+
+class PatientIgnoreFutureEvents : public PatientAction {
+public:
+  PatientIgnoreFutureEvents() {}
+  PatientResult operator() () {
+    return {PATIENT_CANCEL, 60000}; // one minute is basically forever
+  }
+};
+
+class PatientConsumer : public concurrency::agent {
+private:
+  concurrency::ISource<PatientAction*>& pendingActions;
+public:
+  PatientConsumer(concurrency::ISource<PatientAction*>& pendingActions) :
+    pendingActions(pendingActions)
+  {}
+protected:
+  void run() {
+    chrono::high_resolution_clock::time_point cancelEnd =
+      chrono::high_resolution_clock::time_point::min();
+    while (PatientAction* action = concurrency::receive(pendingActions)) {
+      if (
+        chrono::high_resolution_clock::time_point::min() < cancelEnd &&
+        chrono::high_resolution_clock::now() < cancelEnd
+      ) {
+        delete action;
+        continue;
+      }
+
+      cancelEnd = chrono::high_resolution_clock::time_point::min();
+
+      PatientResult result;
+      while ((result = (*action)()).status == PATIENT_RETRY) {
+        if (result.delay > 0) {
+          this_thread::sleep_for(chrono::milliseconds(result.delay));
+        }
+      }
+
+      delete action;
+
+      if (result.delay > 0) {
+        switch (result.status) {
+        case PATIENT_CANCEL:
+          cancelEnd =
+            chrono::high_resolution_clock::now() +
+            chrono::milliseconds(result.delay);
+          break;
+        case PATIENT_DONE:
+          this_thread::sleep_for(chrono::milliseconds(result.delay));
+          break;
+        }
+      }
+    }
+
+    done();
   }
 };
 
 // Dragon's API has a function called PlayString for simulating keystrokes,
 // which seems to block other programs from sending mouse input while it's
-// running. I get around this problem by waiting until a timer has elapsed
-// before sending mouse input. Even though the timer has an interval of 0 ms,
-// the timer tick message won't be created until all other pending messages
-// have been processed, as explained here:
-// https://blogs.msdn.microsoft.com/oldnewthing/20141204-00/?p=43473
-vector<IdleAction*> idleActions;
+// running. To get around this, I use a producer-consumer pattern to queue up
+// mouse actions and retry them in a separte thread until they work.
+concurrency::unbounded_buffer<PatientAction*> pendingActions;
+concurrency::ITarget<PatientAction*>& target = pendingActions;
+PatientConsumer consumer(pendingActions);
 
-VOID CALLBACK doIdleActions(
-  HWND window,
-  UINT message,
-  UINT_PTR timerID,
-  DWORD currentTime
+void moveCursorBy(
+  int xOffset, int yOffset, Model model, View view, HWND window
 ) {
-  KillTimer(window, timerID);
-
-  for (size_t i = 0; i < idleActions.size(); i++) {
-    if (!(*idleActions[i])()) {
-      break;
-    }
+  concurrency::send(
+    target, (PatientAction*)new PatientMoveCursorBy(xOffset, yOffset)
+  );
+  if (model.showBubbles) {
+    model.showBubbles = false;
+    drawModel(model, view);
+    showView(view, window);
   }
-
-  for (size_t i = 0; i < idleActions.size(); i++) {
-    delete idleActions[i];
-  }
-
-  idleActions.clear();
 }
 
-void whenIdle(IdleAction *action) {
-  if (idleActions.empty()) {
-    SetTimer(NULL, 0, 0, (TIMERPROC)doIdleActions);
-  }
-
-  idleActions.push_back(action);
-}
-
-void moveCursorBy(int xOffset, int yOffset) {
-  INPUT input;
-  input.type = INPUT_MOUSE;
-  input.mi.dx = xOffset;
-  input.mi.dy = yOffset;
-  input.mi.mouseData = 0;
-  input.mi.dwFlags = MOUSEEVENTF_MOVE;
-  input.mi.time = 0;
-  input.mi.dwExtraInfo = 0;
-  whenIdle(new IdleSendInput(input));
-}
-
-INPUT getClick(DWORD dwFlags) {
-  INPUT click;
-  click.type = INPUT_MOUSE;
-  click.mi.dx = 0;
-  click.mi.dy = 0;
-  click.mi.mouseData = 0;
-  click.mi.dwFlags = dwFlags;
-  click.mi.time = 0;
-  click.mi.dwExtraInfo = 0;
-  return click;
-}
-
-void click(int button) {
-  int keycodes[] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON};
-  int downActions[] =
-    {MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_MIDDLEDOWN};
-  int upActions[] =
-    {MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_MIDDLEUP};
-
-  if (!(GetKeyState(keycodes[button]) < 0)) {
-    whenIdle(new IdleSendInput(getClick(downActions[button])));
-  }
-
-  whenIdle(new IdleSendInput(getClick(upActions[button])));
+void click(int button, HWND window) {
+  concurrency::send(target, (PatientAction*)new PatientCloseWindow(window));
+  concurrency::send(target, (PatientAction*)new PatientClick(button, false));
+  concurrency::send(target, (PatientAction*)new PatientClick(button, true));
+  concurrency::send(target, (PatientAction*)new PatientClick(button, false));
+  concurrency::send(target, (PatientAction*)new PatientIgnoreFutureEvents());
 }
 
 HMONITOR monitor;
@@ -1051,7 +1170,12 @@ LRESULT CALLBACK WndProc(
   switch (message) {
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
-      whenIdle(new IdleClose(window));
+      concurrency::send(
+        target, (PatientAction*)new PatientCloseWindow(window)
+      );
+      concurrency::send(
+        target, (PatientAction*)new PatientIgnoreFutureEvents()
+      );
     } else if (wParam == model.keymap.clear) {
       if (model.wordLength > 0 || !model.showBubbles) {
         model.wordLength = 0;
@@ -1061,42 +1185,19 @@ LRESULT CALLBACK WndProc(
         showView(view, window);
       }
     } else if (wParam == model.keymap.left) {
-      moveCursorBy(-model.keymap.hStride, 0);
-      if (model.showBubbles) {
-        model.showBubbles = false;
-        drawModel(model, view);
-        showView(view, window);
-      }
+      moveCursorBy(-model.keymap.hStride, 0, model, view, window);
     } else if (wParam == model.keymap.up) {
-      moveCursorBy(0, -model.keymap.vStride);
-      if (model.showBubbles) {
-        model.showBubbles = false;
-        drawModel(model, view);
-        showView(view, window);
-      }
+      moveCursorBy(0, -model.keymap.vStride, model, view, window);
     } else if (wParam == model.keymap.right) {
-      moveCursorBy(model.keymap.hStride, 0);
-      if (model.showBubbles) {
-        model.showBubbles = false;
-        drawModel(model, view);
-        showView(view, window);
-      }
+      moveCursorBy(model.keymap.hStride, 0, model, view, window);
     } else if (wParam == model.keymap.down) {
-      moveCursorBy(0, model.keymap.vStride);
-      if (model.showBubbles) {
-        model.showBubbles = false;
-        drawModel(model, view);
-        showView(view, window);
-      }
+      moveCursorBy(0, model.keymap.vStride, model, view, window);
     } else if (wParam == model.keymap.primaryClick) {
-      click(GetSystemMetrics(SM_SWAPBUTTON) != 0);
-      whenIdle(new IdleClose(window));
+      click(0, window);
     } else if (wParam == model.keymap.secondaryClick) {
-      click(GetSystemMetrics(SM_SWAPBUTTON) == 0);
-      whenIdle(new IdleClose(window));
+      click(2, window);
     } else if (wParam == model.keymap.middleClick) {
-      click(2);
-      whenIdle(new IdleClose(window));
+      click(1, window);
     } else if (model.showBubbles) {
       size_t wordChoices = 1;
       if (model.wordLength < model.keymap.levels.size()) {
@@ -1120,8 +1221,9 @@ LRESULT CALLBACK WndProc(
               );
             }
             if (jumpPoints.size() == 1) {
-              whenIdle(
-                new IdleSetCursorPos(
+              concurrency::send(
+                target,
+                (PatientAction*)new PatientSetCursorPos(
                   view.start.x + jumpPoints[0].X,
                   view.start.y + jumpPoints[0].Y
                 )
@@ -1210,6 +1312,8 @@ int CALLBACK WinMain(
   model = getModel(getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap));
   drawModel(model, view);
 
+  consumer.start();
+
   HWND window = CreateWindowEx(
     WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT,
     windowClassName,
@@ -1236,6 +1340,9 @@ int CALLBACK WinMain(
   destroyView(view);
 
   GdiplusShutdown(gdiplusToken);
+
+  concurrency::send(target, (PatientAction*)NULL);
+  concurrency::agent::wait(&consumer);
 
   return (int)message.wParam;
 }

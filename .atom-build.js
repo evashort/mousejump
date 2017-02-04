@@ -12,10 +12,10 @@ module.exports = {
     LIB: "/Program Files (x86)/Windows Kits/10/Lib/10.0.14393.0/ucrt/x86;/Program Files (x86)/Windows Kits/10/Lib/10.0.14393.0/um/x86;/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/VC/Tools/MSVC/14.10.24728/lib/x86"
   },
   errorMatch: [
-    "(?<file>.+)\\((?<line>\\d+)\\): (?<message>error.*)"
+    "(?<file>.+)\\((?<line>\\d+)\\) ?: (?<message>error.*)"
   ],
   warningMatch: [
-    "(?<file>.+)\\((?<line>\\d+)\\): (?<message>warning.*)"
+    "(?<file>.+)\\((?<line>\\d+)\\) ?: (?<message>warning.*)"
   ],
   keymap: "f5",
   atomCommandName: "visualstudio:win32",
