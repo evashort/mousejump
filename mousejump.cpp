@@ -1156,17 +1156,10 @@ concurrency::unbounded_buffer<PatientAction*> pendingActions;
 concurrency::ITarget<PatientAction*>& target = pendingActions;
 PatientConsumer consumer(pendingActions);
 
-void moveCursorBy(
-  int xOffset, int yOffset, Model model, View view, HWND window
-) {
+void moveCursorBy(int xOffset, int yOffset) {
   concurrency::send(
     target, (PatientAction*)new PatientMoveCursorBy(xOffset, yOffset)
   );
-  if (model.showBubbles) {
-    model.showBubbles = false;
-    drawModel(model, view);
-    showView(view, window);
-  }
 }
 
 void click(int button, HWND window) {
@@ -1180,6 +1173,14 @@ void click(int button, HWND window) {
 HMONITOR monitor;
 View view;
 Model model;
+
+void hideBubbles(HWND window) {
+  if (model.showBubbles) {
+    model.showBubbles = false;
+    drawModel(model, view);
+    showView(view, window);
+  }
+}
 
 LRESULT CALLBACK WndProc(
   HWND window,
@@ -1209,13 +1210,17 @@ LRESULT CALLBACK WndProc(
       drawModel(model, view);
       showView(view, window);
     } else if (wParam == model.keymap.left) {
-      moveCursorBy(-model.keymap.hStride, 0, model, view, window);
+      moveCursorBy(-model.keymap.hStride, 0);
+      hideBubbles(window);
     } else if (wParam == model.keymap.up) {
-      moveCursorBy(0, -model.keymap.vStride, model, view, window);
+      moveCursorBy(0, -model.keymap.vStride);
+      hideBubbles(window);
     } else if (wParam == model.keymap.right) {
-      moveCursorBy(model.keymap.hStride, 0, model, view, window);
+      moveCursorBy(model.keymap.hStride, 0);
+      hideBubbles(window);
     } else if (wParam == model.keymap.down) {
-      moveCursorBy(0, model.keymap.vStride, model, view, window);
+      moveCursorBy(0, model.keymap.vStride);
+      hideBubbles(window);
     } else if (wParam == model.keymap.primaryClick) {
       click(0, window);
     } else if (wParam == model.keymap.secondaryClick) {
