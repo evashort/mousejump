@@ -1268,6 +1268,7 @@ LRESULT CALLBACK WndProc(
   case MODEL_CHANGED:
     drawModel(model, view);
     showView(view, window);
+    break;
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
       sendAction(new PatientCloseWindow(window));
