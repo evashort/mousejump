@@ -923,6 +923,9 @@ void showView(View view, HWND window) {
   );
 }
 
+const UINT MODEL_CHANGED = WM_USER;
+const UINT DRAG_INFO_CHANGED = WM_USER + 1;
+
 const int PATIENT_DONE = 0;
 const int PATIENT_RETRY = 1;
 const int PATIENT_CANCEL = 2;
@@ -949,8 +952,6 @@ public:
   virtual ~PatientAction() {};
 };
 
-const UINT UPDATE_DRAG_INFO = WM_USER;
-
 class PatientCursorMover: public PatientAction {
 protected:
   HWND window;
@@ -964,7 +965,7 @@ private:
     if (dragInfo.dragging) {
       dragInfo.dragStop.x = x;
       dragInfo.dragStop.y = y;
-      SendMessage(window, UPDATE_DRAG_INFO, 0, 0);
+      SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
     } else {
       SetCursorPos(x, y);
     }
@@ -1077,7 +1078,7 @@ public:
       dragInfo.dragStop = dragInfo.dragStart;
     }
 
-    SendMessage(window, UPDATE_DRAG_INFO, 0, 0);
+    SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
 
     return defaultDelay(PATIENT_DONE);
   }
@@ -1247,11 +1248,11 @@ View view;
 Model model;
 DragInfo dragInfo;
 
-void hideBubbles(HWND window) {
+void moveCursorBy(HWND window, int xOffset, int yOffset) {
+  sendAction(new PatientMoveCursorBy(window, dragInfo, xOffset, yOffset));
   if (model.showBubbles) {
     model.showBubbles = false;
-    drawModel(model, view);
-    showView(view, window);
+    PostMessage(window, MODEL_CHANGED, 0, 0);
   }
 }
 
@@ -1264,6 +1265,9 @@ LRESULT CALLBACK WndProc(
   LRESULT result = 0;
 
   switch (message) {
+  case MODEL_CHANGED:
+    drawModel(model, view);
+    showView(view, window);
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
       sendAction(new PatientCloseWindow(window));
@@ -1276,28 +1280,15 @@ LRESULT CALLBACK WndProc(
       model.wordLength = 0;
       model.wordStart = 0;
       model.showBubbles = true;
-      drawModel(model, view);
-      showView(view, window);
+      PostMessage(window, MODEL_CHANGED, 0, 0);
     } else if (wParam == model.keymap.left) {
-      sendAction(
-        new PatientMoveCursorBy(window, dragInfo, -model.keymap.hStride, 0)
-      );
-      hideBubbles(window);
+      moveCursorBy(window, -model.keymap.hStride, 0);
     } else if (wParam == model.keymap.up) {
-      sendAction(
-        new PatientMoveCursorBy(window, dragInfo, 0, -model.keymap.vStride)
-      );
-      hideBubbles(window);
+      moveCursorBy(window, 0, -model.keymap.vStride);
     } else if (wParam == model.keymap.right) {
-      sendAction(
-        new PatientMoveCursorBy(window, dragInfo, model.keymap.hStride, 0)
-      );
-      hideBubbles(window);
+      moveCursorBy(window, model.keymap.hStride, 0);
     } else if (wParam == model.keymap.down) {
-      sendAction(
-        new PatientMoveCursorBy(window, dragInfo, 0, model.keymap.vStride)
-      );
-      hideBubbles(window);
+      moveCursorBy(window, 0, model.keymap.vStride);
     } else if (wParam == model.keymap.primaryClick) {
       click(window, dragInfo, 0);
     } else if (wParam == model.keymap.secondaryClick) {
@@ -1339,8 +1330,7 @@ LRESULT CALLBACK WndProc(
               model.showBubbles = false;
             }
 
-            drawModel(model, view);
-            showView(view, window);
+            PostMessage(window, MODEL_CHANGED, 0, 0);
             break;
           }
         }
@@ -1360,8 +1350,7 @@ LRESULT CALLBACK WndProc(
         model.wordStart = 0;
       }
 
-      drawModel(model, view);
-      showView(view, window);
+      PostMessage(window, MODEL_CHANGED, 0, 0);
     }
 
     break;
@@ -1417,7 +1406,6 @@ int CALLBACK WinMain(
   GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
   model = getModel(getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap));
-  drawModel(model, view);
 
   dragInfo.dragging = false;
 
@@ -1435,9 +1423,7 @@ int CALLBACK WinMain(
     appInstance,
     NULL
   );
-
-  showView(view, window);
-
+  SendMessage(window, MODEL_CHANGED, 0, 0);
   ShowWindow(window, showWindowFlags);
 
   MSG message;
