@@ -163,6 +163,12 @@ typedef struct {
 } Keymap;
 
 typedef struct {
+  bool dragging;
+  POINT dragStart;
+  POINT dragStop;
+} DragInfo;
+
+typedef struct {
   Keymap keymap;
   GridSettings gridSettings;
   Style style;
@@ -172,6 +178,7 @@ typedef struct {
   size_t wordStart;
   bool showBubbles;
   size_t originIndex;
+  DragInfo dragInfo;
 } Model;
 
 double inflatedArea(double width, double height, double border) {
@@ -837,6 +844,8 @@ Model getModel(int width, int height) {
 
   model.originIndex = 0;
 
+  model.dragInfo.dragging = false;
+
   return model;
 }
 
@@ -940,26 +949,46 @@ public:
   virtual ~PatientAction() {};
 };
 
+const UINT UPDATE_DRAG_INFO = WM_USER;
+
 class PatientCursorMover: public PatientAction {
 protected:
+  HWND window;
+  DragInfo &dragInfo;
+  virtual POINT getGoalPos(POINT oldPos) const =0;
+private:
   POINT oldPos;
   int triesLeft;
   bool triedYet;
-  virtual POINT getGoalPos() const =0;
-public:
-  PatientCursorMover() {
-    triesLeft = 5;
-    triedYet = false;
+  void setCursorPos(int x, int y) {
+    if (dragInfo.dragging) {
+      dragInfo.dragStop.x = x;
+      dragInfo.dragStop.y = y;
+      SendMessage(window, UPDATE_DRAG_INFO, 0, 0);
+    } else {
+      SetCursorPos(x, y);
+    }
   }
+  void getCursorPos(POINT *result) {
+    if (dragInfo.dragging) {
+      *result = dragInfo.dragStop;
+    } else {
+      GetCursorPos(result);
+    }
+  }
+public:
+  PatientCursorMover(HWND window, DragInfo &dragInfo) :
+    window(window), dragInfo(dragInfo), triesLeft(5), triedYet(false)
+  {}
   PatientResult operator() () {
     POINT goalPos;
     if (triedYet) {
-      goalPos = getGoalPos();
+      goalPos = getGoalPos(oldPos);
     } else {
       triedYet = true;
 
       GetCursorPos(&oldPos);
-      goalPos = getGoalPos();
+      goalPos = getGoalPos(oldPos);
       if (oldPos.x == goalPos.x && oldPos.y == goalPos.y) {
         return defaultDelay(PATIENT_DONE);
       }
@@ -987,28 +1016,70 @@ class PatientSetCursorPos: public PatientCursorMover {
 private:
   POINT goalPos;
 protected:
-  POINT getGoalPos() const {
+  POINT getGoalPos(POINT oldPos) const {
     return goalPos;
   }
 public:
-  PatientSetCursorPos(int x, int y) {
-    goalPos.x = x;
-    goalPos.y = y;
-  }
+  PatientSetCursorPos(HWND window, DragInfo &dragInfo, int x, int y) :
+    PatientCursorMover(window, dragInfo), goalPos{x, y}
+  {}
 };
 
 class PatientMoveCursorBy: public PatientCursorMover {
 private:
   POINT offset;
 protected:
-  POINT getGoalPos() const {
-    POINT result = {oldPos.x + offset.x, oldPos.y + offset.y};
-    return result;
+  POINT getGoalPos(POINT oldPos) const {
+    return {oldPos.x + offset.x, oldPos.y + offset.y};
   }
 public:
-  PatientMoveCursorBy(int xOffset, int yOffset) {
-    offset.x = xOffset;
-    offset.y = yOffset;
+  PatientMoveCursorBy(
+    HWND window, DragInfo &dragInfo, int xOffset, int yOffset
+  ) :
+    PatientCursorMover(window, dragInfo), offset{xOffset, yOffset}
+  {}
+};
+
+class PatientMoveToDragStart: public PatientCursorMover {
+protected:
+  POINT getGoalPos(POINT oldPos) const {
+    return dragInfo.dragStart;
+  }
+public:
+  PatientMoveToDragStart(HWND window, DragInfo &dragInfo) :
+    PatientCursorMover(window, dragInfo)
+  {}
+};
+
+class PatientMoveToDragStop: public PatientCursorMover {
+protected:
+  POINT getGoalPos(POINT oldPos) const {
+    return dragInfo.dragStop;
+  }
+public:
+  PatientMoveToDragStop(HWND window, DragInfo &dragInfo) :
+    PatientCursorMover(window, dragInfo)
+  {}
+};
+
+class PatientToggleDragging: public PatientAction {
+private:
+  HWND window;
+  DragInfo &dragInfo;
+public:
+  PatientToggleDragging(HWND window, DragInfo &dragInfo) :
+    window(window), dragInfo(dragInfo)
+  {}
+  PatientResult operator() () {
+    dragInfo.dragging = !dragInfo.dragging;
+    if (dragInfo.dragging) {
+      GetCursorPos(&dragInfo.dragStart);
+      dragInfo.dragStop = dragInfo.dragStart;
+    }
+
+    SendMessage(window, UPDATE_DRAG_INFO, 0, 0);
+
+    return defaultDelay(PATIENT_DONE);
   }
 };
 
@@ -1156,23 +1227,25 @@ concurrency::unbounded_buffer<PatientAction*> pendingActions;
 concurrency::ITarget<PatientAction*>& target = pendingActions;
 PatientConsumer consumer(pendingActions);
 
-void moveCursorBy(int xOffset, int yOffset) {
-  concurrency::send(
-    target, (PatientAction*)new PatientMoveCursorBy(xOffset, yOffset)
-  );
+void sendAction(PatientAction *action) {
+  concurrency::send(target, (PatientAction*)action);
 }
 
-void click(int button, HWND window) {
-  concurrency::send(target, (PatientAction*)new PatientCloseWindow(window));
-  concurrency::send(target, (PatientAction*)new PatientClick(button, false));
-  concurrency::send(target, (PatientAction*)new PatientClick(button, true));
-  concurrency::send(target, (PatientAction*)new PatientClick(button, false));
-  concurrency::send(target, (PatientAction*)new PatientIgnoreFutureEvents());
+void click(HWND window, DragInfo &dragInfo, int button) {
+  sendAction(new PatientCloseWindow(window));
+  sendAction(new PatientToggleDragging(window, dragInfo));
+  sendAction(new PatientClick(button, false));
+  sendAction(new PatientMoveToDragStart(window, dragInfo));
+  sendAction(new PatientClick(button, true));
+  sendAction(new PatientMoveToDragStop(window, dragInfo));
+  sendAction(new PatientClick(button, false));
+  sendAction(new PatientIgnoreFutureEvents());
 }
 
 HMONITOR monitor;
 View view;
 Model model;
+DragInfo dragInfo;
 
 void hideBubbles(HWND window) {
   if (model.showBubbles) {
@@ -1193,12 +1266,8 @@ LRESULT CALLBACK WndProc(
   switch (message) {
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
-      concurrency::send(
-        target, (PatientAction*)new PatientCloseWindow(window)
-      );
-      concurrency::send(
-        target, (PatientAction*)new PatientIgnoreFutureEvents()
-      );
+      sendAction(new PatientCloseWindow(window));
+      sendAction(new PatientIgnoreFutureEvents());
     } else if (wParam == model.keymap.clear) {
       if (model.wordLength <= 0 && model.showBubbles) {
         model.originIndex = (model.originIndex + 1) % ORIGIN_COUNT;
@@ -1210,23 +1279,31 @@ LRESULT CALLBACK WndProc(
       drawModel(model, view);
       showView(view, window);
     } else if (wParam == model.keymap.left) {
-      moveCursorBy(-model.keymap.hStride, 0);
+      sendAction(
+        new PatientMoveCursorBy(window, dragInfo, -model.keymap.hStride, 0)
+      );
       hideBubbles(window);
     } else if (wParam == model.keymap.up) {
-      moveCursorBy(0, -model.keymap.vStride);
+      sendAction(
+        new PatientMoveCursorBy(window, dragInfo, 0, -model.keymap.vStride)
+      );
       hideBubbles(window);
     } else if (wParam == model.keymap.right) {
-      moveCursorBy(model.keymap.hStride, 0);
+      sendAction(
+        new PatientMoveCursorBy(window, dragInfo, model.keymap.hStride, 0)
+      );
       hideBubbles(window);
     } else if (wParam == model.keymap.down) {
-      moveCursorBy(0, model.keymap.vStride);
+      sendAction(
+        new PatientMoveCursorBy(window, dragInfo, 0, model.keymap.vStride)
+      );
       hideBubbles(window);
     } else if (wParam == model.keymap.primaryClick) {
-      click(0, window);
+      click(window, dragInfo, 0);
     } else if (wParam == model.keymap.secondaryClick) {
-      click(2, window);
+      click(window, dragInfo, 2);
     } else if (wParam == model.keymap.middleClick) {
-      click(1, window);
+      click(window, dragInfo, 1);
     } else if (model.showBubbles) {
       size_t wordChoices = 1;
       if (model.wordLength < model.keymap.levels.size()) {
@@ -1250,9 +1327,10 @@ LRESULT CALLBACK WndProc(
               );
             }
             if (jumpPoints.size() == 1) {
-              concurrency::send(
-                target,
-                (PatientAction*)new PatientSetCursorPos(
+              sendAction(
+                new PatientSetCursorPos(
+                  window,
+                  dragInfo,
                   view.start.x + jumpPoints[0].X,
                   view.start.y + jumpPoints[0].Y
                 )
@@ -1340,6 +1418,8 @@ int CALLBACK WinMain(
 
   model = getModel(getBitmapWidth(view.bitmap), getBitmapHeight(view.bitmap));
   drawModel(model, view);
+
+  dragInfo.dragging = false;
 
   consumer.start();
 
