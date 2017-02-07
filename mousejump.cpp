@@ -139,6 +139,9 @@ typedef struct {
   double paddingRight;
   double paddingBottom;
   double paddingLeft;
+  Color dragColor;
+  double dragWidth;
+  double dragRadius;
 } Style;
 
 typedef struct {
@@ -495,6 +498,7 @@ typedef struct {
   SolidBrush *chosenTextBrush;
   SolidBrush *fillBrush;
   Pen *borderPen;
+  Pen *dragPen;
 } ArtSupplies;
 
 ArtSupplies getArtSupplies(Style style) {
@@ -508,6 +512,10 @@ ArtSupplies getArtSupplies(Style style) {
   artSupplies.borderPen = new Pen(
     style.borderColor,
     (REAL)pixelateSize(style.borderWidth)
+  );
+  artSupplies.dragPen = new Pen(
+    style.dragColor,
+    (REAL)pixelateSize(style.dragWidth)
   );
 
   return artSupplies;
@@ -834,6 +842,10 @@ Model getModel(int width, int height) {
   model.style.paddingBottom = 0;
   model.style.paddingLeft = -1;
 
+  model.style.dragColor = Color(255, 0, 0);
+  model.style.dragWidth = 1;
+  model.style.dragRadius = 10;
+
   model.width = width;
   model.height = height;
 
@@ -856,6 +868,21 @@ void drawModel(Model model, View& view) {
   graphics.SetClip(Rect(0, 0, model.width, model.height));
   graphics.SetSmoothingMode(SmoothingModeAntiAlias);
   graphics.Clear(Color(0, 0, 0, 0));
+
+  if (model.dragInfo.dragging) {
+    POINT start = model.dragInfo.dragStart;
+    POINT stop = model.dragInfo.dragStop;
+    if (start.x == stop.x && start.y == stop.y) {
+      int r = pixelateSize(model.style.dragRadius);
+      graphics.DrawEllipse(
+        artSupplies.dragPen, start.x - r, start.y - r, 2 * r, 2 * r
+      );
+    } else {
+      graphics.DrawLine(
+        artSupplies.dragPen, start.x, start.y, stop.x, stop.y
+      );
+    }
+  }
 
   vector<Point> jumpPoints = getJumpPoints(model);
 
@@ -988,17 +1015,17 @@ public:
     } else {
       triedYet = true;
 
-      GetCursorPos(&oldPos);
+      getCursorPos(&oldPos);
       goalPos = getGoalPos(oldPos);
       if (oldPos.x == goalPos.x && oldPos.y == goalPos.y) {
         return defaultDelay(PATIENT_DONE);
       }
     }
 
-    SetCursorPos(goalPos.x, goalPos.y);
+    setCursorPos(goalPos.x, goalPos.y);
 
     POINT newPos;
-    GetCursorPos(&newPos);
+    getCursorPos(&newPos);
     if (newPos.x != oldPos.x || newPos.y != oldPos.y) {
       return defaultDelay(PATIENT_DONE);
     }
@@ -1081,6 +1108,22 @@ public:
     SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
 
     return defaultDelay(PATIENT_DONE);
+  }
+};
+
+class PatientWaitBasedOnDragging: public PatientAction {
+private:
+  DragInfo &dragInfo;
+  int draggingDelay;
+  int normalDelay;
+public:
+  PatientWaitBasedOnDragging(
+    DragInfo &dragInfo, int draggingDelay, int normalDelay
+  ) :
+    dragInfo(dragInfo), draggingDelay(draggingDelay), normalDelay(normalDelay)
+  {}
+  PatientResult operator() () {
+    return {PATIENT_DONE, dragInfo.dragging ? draggingDelay : normalDelay};
   }
 };
 
@@ -1239,6 +1282,7 @@ void click(HWND window, DragInfo &dragInfo, int button) {
   sendAction(new PatientMoveToDragStart(window, dragInfo));
   sendAction(new PatientClick(button, true));
   sendAction(new PatientMoveToDragStop(window, dragInfo));
+  sendAction(new PatientWaitBasedOnDragging(dragInfo, 0, 100));
   sendAction(new PatientClick(button, false));
   sendAction(new PatientIgnoreFutureEvents());
 }
@@ -1256,6 +1300,13 @@ void moveCursorBy(HWND window, int xOffset, int yOffset) {
   }
 }
 
+void showAllBubbles(HWND window) {
+  model.wordLength = 0;
+  model.wordStart = 0;
+  model.showBubbles = true;
+  PostMessage(window, MODEL_CHANGED, 0, 0);
+}
+
 LRESULT CALLBACK WndProc(
   HWND window,
   UINT message,
@@ -1269,6 +1320,13 @@ LRESULT CALLBACK WndProc(
     drawModel(model, view);
     showView(view, window);
     break;
+  case DRAG_INFO_CHANGED:
+    // This read is thread-safe because the consumer thread only sends
+    // DRAG_INFO_CHANGED using SendMessage, which blocks until this thread
+    // returns.
+    model.dragInfo = dragInfo;
+    PostMessage(window, MODEL_CHANGED, 0, 0);
+    break;
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
       sendAction(new PatientCloseWindow(window));
@@ -1278,10 +1336,11 @@ LRESULT CALLBACK WndProc(
         model.originIndex = (model.originIndex + 1) % ORIGIN_COUNT;
       }
 
-      model.wordLength = 0;
-      model.wordStart = 0;
-      model.showBubbles = true;
-      PostMessage(window, MODEL_CHANGED, 0, 0);
+      showAllBubbles(window);
+    } else if (wParam == model.keymap.drag) {
+      sendAction(new PatientToggleDragging(window, dragInfo));
+      sendAction(new PatientMoveToDragStop(window, dragInfo));
+      showAllBubbles(window);
     } else if (wParam == model.keymap.left) {
       moveCursorBy(window, -model.keymap.hStride, 0);
     } else if (wParam == model.keymap.up) {
