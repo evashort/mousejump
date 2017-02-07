@@ -1340,7 +1340,9 @@ LRESULT CALLBACK WndProc(
     } else if (wParam == model.keymap.drag) {
       sendAction(new PatientToggleDragging(window, dragInfo));
       sendAction(new PatientMoveToDragStop(window, dragInfo));
-      showAllBubbles(window);
+      if (model.wordLength > 0 || !model.showBubbles) {
+        showAllBubbles(window);
+      }
     } else if (wParam == model.keymap.left) {
       moveCursorBy(window, -model.keymap.hStride, 0);
     } else if (wParam == model.keymap.up) {
