@@ -30,6 +30,7 @@ it.
 #include <windows.h>
 #include <tchar.h>
 #include <gdiplus.h>
+#include <ShellScalingApi.h>
 #include <cmath>
 #include <vector>
 #include <algorithm>
@@ -43,6 +44,7 @@ it.
 #pragma comment(lib, "user32")
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "gdiplus")
+#pragma comment(lib, "SHCore")
 
 using namespace Gdiplus;
 using namespace std;
@@ -58,6 +60,7 @@ typedef struct {
   HDC deviceContext;
   HBITMAP bitmap;
   POINT start;
+  double scale;
   HGDIOBJ originalBitmap;
 } View;
 
@@ -67,6 +70,7 @@ View getView() {
   view.bitmap = NULL;
   view.start.x = 0;
   view.start.y = 0;
+  view.scale = 0;
   view.originalBitmap = NULL;
   return view;
 }
@@ -87,6 +91,7 @@ void destroyView(View view) {
 
   view.start.x = 0;
   view.start.y = 0;
+  view.scale = 0;
 }
 
 bool updateView(View& view, HMONITOR monitor) {
@@ -114,16 +119,15 @@ bool updateView(View& view, HMONITOR monitor) {
 
   view.start.x = monitorInfo.rcMonitor.left;
   view.start.y = monitorInfo.rcMonitor.top;
+
+  UINT dpiX, dpiY;
+  GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+  view.scale = dpiY / 96.0;
+
   view.originalBitmap = SelectObject(view.deviceContext, view.bitmap);
 
   return true;
 }
-
-typedef struct {
-  double cellWidth;
-  double cellHeight;
-  double pixelsPastEdge;
-} GridSettings;
 
 typedef struct {
   wstring fontFamily;
@@ -143,6 +147,27 @@ typedef struct {
   double dragWidth;
   double dragRadius;
 } Style;
+
+Style scaleStyle(Style style, double scale) {
+  style.fontPointSize *= scale;
+  style.borderRadius *= scale;
+  style.borderWidth *= scale;
+  style.earHeight *= scale;
+  style.paddingTop *= scale;
+  style.paddingRight *= scale;
+  style.paddingBottom *= scale;
+  style.paddingLeft *= scale;
+  style.dragWidth *= scale;
+  style.dragRadius *= scale;
+
+  return style;
+}
+
+typedef struct {
+  double cellWidth;
+  double cellHeight;
+  double pixelsPastEdge;
+} GridSettings;
 
 typedef struct {
   wstring spelling;
@@ -862,7 +887,9 @@ Model getModel(int width, int height) {
 }
 
 void drawModel(Model model, View& view) {
-  ArtSupplies artSupplies = getArtSupplies(model.style);
+  Style style = scaleStyle(model.style, view.scale);
+
+  ArtSupplies artSupplies = getArtSupplies(style);
 
   Graphics graphics(view.deviceContext);
   graphics.SetClip(Rect(0, 0, model.width, model.height));
@@ -873,7 +900,7 @@ void drawModel(Model model, View& view) {
     POINT start = model.dragInfo.dragStart;
     POINT stop = model.dragInfo.dragStop;
     if (start.x == stop.x && start.y == stop.y) {
-      int r = pixelateSize(model.style.dragRadius);
+      int r = pixelateSize(style.dragRadius);
       graphics.DrawEllipse(
         artSupplies.dragPen, start.x - r, start.y - r, 2 * r, 2 * r
       );
@@ -896,7 +923,7 @@ void drawModel(Model model, View& view) {
     labelVector.push_back(0);
     drawBubble(
       graphics,
-      model.style,
+      style,
       artSupplies,
       jumpPoints[i],
       &labelVector[0],
@@ -1416,6 +1443,16 @@ LRESULT CALLBACK WndProc(
     }
 
     break;
+  case WM_DPICHANGED:
+  {
+    double newScale = HIWORD(wParam) / 96.0;
+    if (newScale != view.scale) {
+      view.scale = newScale;
+      PostMessage(window, MODEL_CHANGED, 0, 0);
+    }
+  }
+
+    break;
   case WM_DESTROY:
     PostQuitMessage(0);
     break;
@@ -1434,6 +1471,8 @@ int CALLBACK WinMain(
   LPSTR lpCmdLine,
   int showWindowFlags
 ) {
+  SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+
   LPTSTR windowClassName = _T("mousejump");
 
   WNDCLASSEX windowClass;
