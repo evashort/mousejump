@@ -320,14 +320,12 @@ GridSettings adjustGridSettings(
 ) {
   double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
   double bubbleCover =
-    gridSettings.cellWidth * gridSettings.cellHeight * bubbleCount;
+    abs(gridSettings.cellWidth * gridSettings.cellHeight * bubbleCount);
   double scale = fmax(sqrt(gridArea / bubbleCover), 1);
 
-  GridSettings result;
-  result.pixelsPastEdge = gridSettings.pixelsPastEdge;
-  result.cellWidth = gridSettings.cellWidth * scale;
-  result.cellHeight = gridSettings.cellHeight * scale;
-  return result;
+  gridSettings.cellWidth *= scale;
+  gridSettings.cellHeight *= scale;
+  return gridSettings;
 }
 
 PointF getNormal(PointF v) {
