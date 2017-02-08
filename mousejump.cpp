@@ -791,42 +791,22 @@ double logicalHeightToPointSize(int logicalHeight) {
 Model getModel(int width, int height) {
   Model model;
 
-  Symbol alphabet[] = {
-    {L"a", 0x41},
-    {L"b", 0x42},
-    {L"c", 0x43},
-    {L"d", 0x44},
-    {L"e", 0x45},
-    {L"f", 0x46},
-    {L"g", 0x47},
-    {L"h", 0x48},
-    {L"i", 0x49},
-    {L"j", 0x4a},
-    {L"k", 0x4b},
-    {L"l", 0x4c},
-    {L"m", 0x4d},
-    {L"n", 0x4e},
-    {L"o", 0x4f},
-    {L"p", 0x50},
-    {L"q", 0x51},
-    {L"r", 0x52},
-    {L"s", 0x53},
-    {L"t", 0x54},
-    {L"u", 0x55},
-    {L"v", 0x56},
-    {L"w", 0x57},
-    {L"x", 0x58},
-    {L"y", 0x59},
-    {L"z", 0x5a}
+  Symbol digits[] = {
+    {L"0", 0x30},
+    {L"1", 0x31},
+    {L"2", 0x32},
+    {L"3", 0x33},
+    {L"4", 0x34},
+    {L"5", 0x35},
+    {L"6", 0x36},
+    {L"7", 0x37},
+    {L"8", 0x38},
+    {L"9", 0x39},
   };
-
+  Symbol *digitsStop = digits + sizeof(digits) / sizeof(digits[0]);
+  model.keymap.levels.push_back(vector<Symbol>(digits + 1, digitsStop));
   for (int i = 0; i < 2; i++) {
-    model.keymap.levels.push_back(
-      vector<Symbol>(
-        alphabet,
-        alphabet + sizeof(alphabet) / sizeof(alphabet[0])
-      )
-    );
+    model.keymap.levels.push_back(vector<Symbol>(digits, digitsStop));
   }
 
   // Keycode reference:
