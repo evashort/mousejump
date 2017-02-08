@@ -205,7 +205,7 @@ typedef struct {
   size_t wordLength;
   size_t wordStart;
   bool showBubbles;
-  size_t originIndex;
+  POINT origin;
   DragInfo dragInfo;
 } Model;
 
@@ -457,31 +457,16 @@ vector<Point> getJumpPoints(Model model) {
   double xScale = gridSettings.cellWidth / sqrt(sqrt(0.75));
   double yScale = gridSettings.cellHeight / sqrt(sqrt(0.75));
 
-  double xOrigin = 0;
-  double yOrigin = 0;
-  switch (model.originIndex) {
-  case 1:
-    xOrigin = sqrt(1.0 / 3) * cos(degrees(45));
-    yOrigin = sqrt(1.0 / 3) * sin(degrees(45));
-    break;
-  case 2:
-    xOrigin = sqrt(1.0 / 3) * cos(degrees(105));
-    yOrigin = sqrt(1.0 / 3) * sin(degrees(105));
-    break;
-  }
-  xOrigin = 0.5 * model.width + xOrigin * xScale;
-  yOrigin = 0.5 * model.height + yOrigin * yScale;
-
   RectF bounds = rectFromDoubles(
-    (-xOrigin - gridSettings.pixelsPastEdge) / xScale,
-    (-yOrigin - gridSettings.pixelsPastEdge) / yScale,
+    (-model.origin.x - gridSettings.pixelsPastEdge) / xScale,
+    (-model.origin.y - gridSettings.pixelsPastEdge) / yScale,
     (model.width + 2 * gridSettings.pixelsPastEdge) / xScale,
     (model.height + 2 * gridSettings.pixelsPastEdge) / yScale
   );
 
   vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
   scaleHoneycomb(honeycomb, xScale, yScale);
-  translateHoneycomb(honeycomb, xOrigin, yOrigin);
+  translateHoneycomb(honeycomb, model.origin.x, model.origin.y);
   shuffle(honeycomb.begin(), honeycomb.end(), default_random_engine());
 
   size_t visibleWords = 0;
@@ -857,7 +842,7 @@ Model getModel(int width, int height) {
 
   model.showBubbles = true;
 
-  model.originIndex = 0;
+  model.origin = {width / 2, height / 2};
 
   model.dragInfo.dragging = false;
 
@@ -1300,16 +1285,19 @@ DragInfo dragInfo;
 void moveCursorBy(HWND window, int xOffset, int yOffset) {
   sendAction(new PatientMoveCursorBy(window, dragInfo, xOffset, yOffset));
   if (model.showBubbles) {
-    model.showBubbles = false;
+    model.origin.x += xOffset;
+    model.origin.y += yOffset;
     PostMessage(window, MODEL_CHANGED, 0, 0);
   }
 }
 
 void showAllBubbles(HWND window) {
-  model.wordLength = 0;
-  model.wordStart = 0;
-  model.showBubbles = true;
-  PostMessage(window, MODEL_CHANGED, 0, 0);
+  if (model.wordLength > 0 || !model.showBubbles) {
+    model.wordLength = 0;
+    model.wordStart = 0;
+    model.showBubbles = true;
+    PostMessage(window, MODEL_CHANGED, 0, 0);
+  }
 }
 
 LRESULT CALLBACK WndProc(
@@ -1337,17 +1325,11 @@ LRESULT CALLBACK WndProc(
       sendAction(new PatientCloseWindow(window));
       sendAction(new PatientIgnoreFutureEvents());
     } else if (wParam == model.keymap.clear) {
-      if (model.wordLength <= 0 && model.showBubbles) {
-        model.originIndex = (model.originIndex + 1) % ORIGIN_COUNT;
-      }
-
       showAllBubbles(window);
     } else if (wParam == model.keymap.drag) {
       sendAction(new PatientToggleDragging(window, dragInfo));
       sendAction(new PatientMoveToDragStop(window, dragInfo));
-      if (model.wordLength > 0 || !model.showBubbles) {
-        showAllBubbles(window);
-      }
+      showAllBubbles(window);
     } else if (wParam == model.keymap.left) {
       moveCursorBy(window, -model.keymap.hStride, 0);
     } else if (wParam == model.keymap.up) {
@@ -1413,6 +1395,7 @@ LRESULT CALLBACK WndProc(
       if (model.width != newWidth || model.height != newHeight) {
         model.width = newWidth;
         model.height = newHeight;
+        model.origin = {newWidth / 2, newHeight / 2};
         model.wordLength = 0;
         model.wordStart = 0;
       }
