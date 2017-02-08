@@ -824,8 +824,8 @@ Model getModel(int width, int height) {
   model.keymap.hStride = 9;
   model.keymap.vStride = 9;
 
-  model.gridSettings.cellWidth = -90.268671332903661097298218457374;
-  model.gridSettings.cellHeight = 36.293589504981884358707531132346;
+  model.gridSettings.cellWidth = -40;
+  model.gridSettings.cellHeight = 30;
   model.gridSettings.pixelsPastEdge = 12;
 
   LOGFONT fontInfo = getSystemTooltipFont();
@@ -842,7 +842,7 @@ Model getModel(int width, int height) {
   model.style.earHeight = 4;
   model.style.paddingTop = -2;
   model.style.paddingRight = -1;
-  model.style.paddingBottom = 0;
+  model.style.paddingBottom = -2;
   model.style.paddingLeft = -1;
 
   model.style.dragColor = Color(255, 0, 0);
