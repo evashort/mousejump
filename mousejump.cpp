@@ -304,8 +304,8 @@ vector<size_t> getWord(Model model, size_t index) {
   vector<size_t> word(wordLength);
   if (wordLength > 0) {
     for (size_t i = wordLength - 1; i > 0; i--) {
-      word[i] = adjustedIndex % model.keymap.levels[i - 1].size();
-      adjustedIndex /= model.keymap.levels[i - 1].size();
+      word[i] = adjustedIndex % model.keymap.levels[i].size();
+      adjustedIndex /= model.keymap.levels[i].size();
     }
     word[0] = adjustedIndex;
   }
