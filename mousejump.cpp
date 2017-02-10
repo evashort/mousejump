@@ -300,8 +300,12 @@ int getWordsOnNextBranches(Model model, size_t branches) {
   return longWordDelta + shorterWordDelta;
 }
 
-vector<size_t> getWord(Model model, size_t index) {
-  WordIndexInfo info = getWordIndexInfo(model);
+size_t getWord(
+  WordIndexInfo info,
+  vector<vector<Symbol> > levels,
+  size_t index,
+  size_t *word
+) {
   size_t skippedShorterWords = info.possibleShorterWords - info.shorterWords;
 
   size_t adjustedIndex = index;
@@ -311,16 +315,15 @@ vector<size_t> getWord(Model model, size_t index) {
     wordLength = info.shorterWordLength;
   }
 
-  vector<size_t> word(wordLength);
   if (wordLength > 0) {
     for (size_t i = wordLength - 1; i > 0; i--) {
-      word[i] = adjustedIndex % model.keymap.levels[i].size();
-      adjustedIndex /= model.keymap.levels[i].size();
+      word[i] = adjustedIndex % levels[i].size();
+      adjustedIndex /= levels[i].size();
     }
     word[0] = adjustedIndex;
   }
 
-  return word;
+  return wordLength;
 }
 
 PointF getNormal(PointF v) {
@@ -541,6 +544,18 @@ vector<Point> getJumpPoints(Model model) {
   return jumpPoints;
 }
 
+int getBitmapWidth(HBITMAP bitmap) {
+  BITMAP bitmapInfo;
+  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
+  return bitmapInfo.bmWidth;
+}
+
+int getBitmapHeight(HBITMAP bitmap) {
+  BITMAP bitmapInfo;
+  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
+  return bitmapInfo.bmHeight;
+}
+
 int pixelateSize(double size) {
   if (size > 0) {
     return imax((int)round(size), 1);
@@ -729,8 +744,10 @@ void drawBubble(
 ) {
   Size textSize = getTextSize(graphics, artSupplies.font, text);
 
-  Rect screenBounds;
-  graphics.GetClipBounds(&screenBounds);
+  HDC deviceContext = graphics.GetHDC();
+  HBITMAP bitmap = (HBITMAP)GetCurrentObject(deviceContext, OBJ_BITMAP);
+  Rect screenBounds(0, 0, getBitmapWidth(bitmap), getBitmapHeight(bitmap));
+  graphics.ReleaseHDC(deviceContext);
 
   int corners[] = {0, 1, 3, 2};
   int earCorner = corners[0];
@@ -933,38 +950,47 @@ void drawModel(Model model, View& view) {
   }
 
   vector<Point> jumpPoints = getJumpPoints(model);
+  WordIndexInfo info = getWordIndexInfo(model);
+  size_t *word = new size_t[model.keymap.levels.size()];
+
+  size_t labelCapacity = 0;
+  for (size_t i = 0; i < model.keymap.levels.size(); i++) {
+    size_t levelCapacity = 0;
+    for (size_t j = 0; j < model.keymap.levels[i].size(); j++) {
+      levelCapacity = umax(
+        levelCapacity, model.keymap.levels[i][j].spelling.length()
+      );
+    }
+    labelCapacity += levelCapacity;
+  }
+  LPTSTR label = new TCHAR[labelCapacity + 1];
 
   for (size_t i = 0; i < jumpPoints.size(); i++) {
-    wstring label;
-    vector<size_t> sequence = getWord(model, i + model.wordStart);
-    for (size_t j = 0; j < sequence.size(); j++) {
-      label += model.keymap.levels[j][sequence[j]].spelling;
+    size_t wordLength = getWord(
+      info, model.keymap.levels, i + model.wordStart, word
+    );
+    size_t labelLength = 0;
+    for (size_t j = 0; j < wordLength; j++) {
+      labelLength += model.keymap.levels[j][word[j]].spelling.copy(
+        label + labelLength, labelCapacity - labelLength
+      );
     }
-    vector<WCHAR> labelVector(label.begin(), label.end());
-    labelVector.push_back(0);
+    label[labelLength] = 0;
+
     drawBubble(
       graphics,
       style,
       artSupplies,
       jumpPoints[i],
-      &labelVector[0],
+      label,
       model.wordLength
     );
   }
 
+  delete[] word;
+  delete[] label;
+
   destroyArtSupplies(artSupplies);
-}
-
-int getBitmapWidth(HBITMAP bitmap) {
-  BITMAP bitmapInfo;
-  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
-  return bitmapInfo.bmWidth;
-}
-
-int getBitmapHeight(HBITMAP bitmap) {
-  BITMAP bitmapInfo;
-  GetObject(bitmap, sizeof(BITMAP), &bitmapInfo);
-  return bitmapInfo.bmHeight;
 }
 
 void showView(View view, HWND window) {
