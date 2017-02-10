@@ -702,17 +702,6 @@ int getChosenWidth(
   return (int)round(0.5 * (chosenWidth + fullWidth - unchosenWidth));
 }
 
-StringFormat *getCenteredFormat() {
-  static StringFormat format(
-    StringFormatFlagsNoWrap | StringFormatFlagsNoClip,
-    LANG_NEUTRAL
-  );
-  format.SetAlignment(StringAlignmentCenter);
-  format.SetLineAlignment(StringAlignmentCenter);
-  format.SetTrimming(StringTrimmingNone);
-  return &format;
-}
-
 Rect getBorderBounds(Style style, Point point, Size textSize, int earCorner) {
   int width = textSize.Width +
     pixelate(style.paddingLeft) + pixelate(style.paddingRight) +
@@ -781,6 +770,14 @@ void drawBubble(
     graphics.DrawPath(artSupplies.borderPen, &border);
   }
 
+  StringFormat format(
+    StringFormatFlagsNoWrap | StringFormatFlagsNoClip,
+    LANG_NEUTRAL
+  );
+  format.SetAlignment(StringAlignmentCenter);
+  format.SetLineAlignment(StringAlignmentCenter);
+  format.SetTrimming(StringTrimmingNone);
+
   RectF textBounds = RectF(
     (REAL)(
       borderBounds.X + pixelateSize(style.borderWidth) +
@@ -811,7 +808,7 @@ void drawBubble(
     text, -1,
     artSupplies.font,
     textBounds,
-    getCenteredFormat(),
+    &format,
     artSupplies.textBrush
   );
 
@@ -820,7 +817,7 @@ void drawBubble(
     text, -1,
     artSupplies.font,
     textBounds,
-    getCenteredFormat(),
+    &format,
     artSupplies.chosenTextBrush
   );
 
