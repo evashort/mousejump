@@ -35,6 +35,7 @@ it.
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <numeric>
 #include <agents.h>
 #include <chrono>
 #include <thread>
@@ -206,11 +207,23 @@ typedef struct {
   size_t wordStart;
   bool showBubbles;
   POINT origin;
+  vector<Point> honeycomb;
   DragInfo dragInfo;
 } Model;
 
-double inflatedArea(double width, double height, double border) {
-  return fmax(0, (width + 2 * border) * (height + 2 * border));
+double getBoundsArea(Model model) {
+  return fmax(
+    0,
+    (model.width + 2 * model.gridSettings.pixelsPastEdge) *
+    (model.height + 2 * model.gridSettings.pixelsPastEdge)
+  );
+}
+
+double getCellArea(Model model) {
+  return fmax(
+    1,
+    fabs(model.gridSettings.cellWidth * model.gridSettings.cellHeight)
+  );
 }
 
 size_t getLeafWords(Model model) {
@@ -219,10 +232,7 @@ size_t getLeafWords(Model model) {
     symbolLimit *= model.keymap.levels[i].size();
   }
 
-  GridSettings g = model.gridSettings;
-  double cellArea = fmax(1, fabs(g.cellWidth * g.cellHeight));
-  double gridArea = inflatedArea(model.width, model.height, g.pixelsPastEdge);
-  size_t areaLimit = (size_t)round(gridArea / cellArea);
+  size_t areaLimit = (size_t)round(getBoundsArea(model) / getCellArea(model));
 
   return umax(umin(symbolLimit, areaLimit), 1);
 }
@@ -313,21 +323,6 @@ vector<size_t> getWord(Model model, size_t index) {
   return word;
 }
 
-GridSettings adjustGridSettings(
-  GridSettings gridSettings,
-  int width, int height,
-  size_t bubbleCount
-) {
-  double gridArea = inflatedArea(width, height, gridSettings.pixelsPastEdge);
-  double bubbleCover =
-    abs(gridSettings.cellWidth * gridSettings.cellHeight * bubbleCount);
-  double scale = fmax(sqrt(gridArea / bubbleCover), 1);
-
-  gridSettings.cellWidth *= scale;
-  gridSettings.cellHeight *= scale;
-  return gridSettings;
-}
-
 PointF getNormal(PointF v) {
   return PointF(v.Y, -v.X);
 }
@@ -362,112 +357,160 @@ int getMaxMultiplierInBounds(RectF bounds, PointF scaled, PointF other) {
   return (int)floor(fmax(a, fmax(b, fmax(c, d))));
 }
 
-REAL getBoundsDistance(RectF bounds, PointF v) {
-  return fmax(
-    fmax(bounds.GetLeft() - v.X, v.X - bounds.GetRight()),
-    fmax(bounds.GetTop() - v.Y, v.Y - bounds.GetBottom())
-  );
-}
-
 class BoundsDistanceComparator {
 private:
   RectF bounds;
-public:
-  BoundsDistanceComparator(const RectF &bounds) {
-    this->bounds = bounds;
+  PointF v1;
+  PointF v2;
+  REAL boundsDistance(PointF v) {
+    return fmax(
+      fmax(bounds.GetLeft() - v.X, v.X - bounds.GetRight()),
+      fmax(bounds.GetTop() - v.Y, v.Y - bounds.GetBottom())
+    );
   }
+  PointF toVector(Point p) {
+    return PointF(v1.X * p.X + v2.X * p.Y, v1.Y * p.X + v2.Y * p.Y);
+  }
+public:
+  BoundsDistanceComparator(RectF bounds, PointF v1, PointF v2) :
+    bounds(bounds), v1(v1), v2(v2)
+  {}
 
-  bool operator() (PointF v1, PointF v2) {
-    return getBoundsDistance(bounds, v1) < getBoundsDistance(bounds, v2);
+  bool operator() (Point p1, Point p2) {
+    return boundsDistance(toVector(p1)) < boundsDistance(toVector(p2));
   }
 };
 
-PointF pointFromDoubles(double x, double y) {
-  return PointF((REAL)x, (REAL)y);
-}
-
-#define degrees(x) (x * (3.1415926535897932384626433832795 / 180))
-vector<PointF> getHoneycomb(RectF bounds, size_t points) {
-  PointF v1 = pointFromDoubles(cos(degrees(15)), sin(degrees(15)));
-  PointF v2 = pointFromDoubles(cos(degrees(75)), sin(degrees(75)));
-
+vector<Point> getHoneycomb(
+  RectF bounds, PointF v1, PointF v2, size_t leafWords
+) {
   int v1Start = getMinMultiplierInBounds(bounds, v1, v2);
   int v1Stop = getMaxMultiplierInBounds(bounds, v1, v2) + 1;
 
   int v2Start = getMinMultiplierInBounds(bounds, v2, v1);
   int v2Stop = getMaxMultiplierInBounds(bounds, v2, v1) + 1;
 
-  while ((v1Stop - v1Start) * (v2Stop - v2Start) < (int)points) {
+  while ((v1Stop - v1Start) * (v2Stop - v2Start) < (int)leafWords) {
     v1Start--; v1Stop++; v2Start--; v2Stop++;
   }
 
-  vector<PointF> honeycomb;
+  vector<Point> honeycomb;
   honeycomb.reserve((v1Stop - v1Start) * (v2Stop - v2Start));
   for (int i = v1Start; i < v1Stop; i++) {
     for (int j = v2Start; j < v2Stop; j++) {
-      honeycomb.push_back(PointF(v1.X * i + v2.X * j, v1.Y * i + v2.Y * j));
+      honeycomb.push_back(Point(i, j));
     }
   }
 
-  sort(honeycomb.begin(), honeycomb.end(), BoundsDistanceComparator(bounds));
-  honeycomb.resize(points);
+  sort(
+    honeycomb.begin(), honeycomb.end(),
+    BoundsDistanceComparator(bounds, v1, v2)
+  );
+  honeycomb.resize(leafWords);
+  shuffle(honeycomb.begin(), honeycomb.end(), default_random_engine());
 
   return honeycomb;
 }
 
-void scaleHoneycomb(vector<PointF> &honeycomb, double xScale, double yScale) {
-  for (size_t i = 0; i < honeycomb.size(); i++) {
-    honeycomb[i].X *= (REAL)xScale;
-    honeycomb[i].Y *= (REAL)yScale;
-  }
-}
-
-void translateHoneycomb(
-  vector<PointF> &honeycomb, double xOffset, double yOffset
-) {
-  for (size_t i = 0; i < honeycomb.size(); i++) {
-    honeycomb[i].X += (REAL)xOffset;
-    honeycomb[i].Y += (REAL)yOffset;
-  }
-}
-
-Point clampToSize(int width, int height, Point point) {
-  return Point(
-    imax(0, imin(width - 1, point.X)),
-    imax(0, imin(height - 1, point.Y))
-  );
-}
-
-RectF rectFromDoubles(double x, double y, double width, double height) {
+RectF getBounds(Model model) {
+  REAL p = (REAL)model.gridSettings.pixelsPastEdge;
   return RectF(
-    (REAL)(x + fmin(width, 0)), (REAL)(y + fmin(height, 0)),
-    (REAL)fabs(width), (REAL)fabs(height)
+    -model.origin.x - p, -model.origin.y - p,
+    model.width + 2 * p, model.height + 2 * p
   );
 }
 
-const size_t ORIGIN_COUNT = 3;
+vector<PointF> getCellSides(Model model, size_t leafWords) {
+  double fillCompensation = fmax(
+    1,
+    sqrt(getBoundsArea(model) / (leafWords * getCellArea(model)))
+  );
+  // side length of an equilateral 60/120-degree rhombus with unit area
+  double skewCompensation = 1 / sqrt(sqrt(0.75));
+  double compensation = fillCompensation * skewCompensation;
+
+  double xScale = model.gridSettings.cellWidth * compensation;
+  double yScale = model.gridSettings.cellHeight * compensation;
+
+  return {
+    PointF(
+      (REAL)(xScale * cos(15 * 3.1415926535897932384626433832795 / 180)),
+      (REAL)(yScale * sin(15 * 3.1415926535897932384626433832795 / 180))
+    ),
+    PointF(
+      (REAL)(xScale * cos(75 * 3.1415926535897932384626433832795 / 180)),
+      (REAL)(yScale * sin(75 * 3.1415926535897932384626433832795 / 180))
+    )
+  };
+}
+
+bool pointless(Point a, Point b) {
+  return a.X == b.X ? a.Y < b.Y : a.X < b.X;
+}
+
+vector<vector<size_t> > getSetDifferences(vector<Point> a, vector<Point> b) {
+  vector<size_t> aOrder(a.size());
+  iota(aOrder.begin(), aOrder.end(), 0);
+  sort(
+    aOrder.begin(), aOrder.end(),
+    [&](size_t i, size_t j) { return pointless(a[i], a[j]); }
+  );
+
+  vector<size_t> bOrder(b.size());
+  iota(bOrder.begin(), bOrder.end(), 0);
+  sort(
+    bOrder.begin(), bOrder.end(),
+    [&](size_t i, size_t j) { return pointless(b[i], b[j]); }
+  );
+
+  vector<size_t> aOnly;
+  vector<size_t> bOnly;
+  for (size_t i = 0, j = 0; i < aOrder.size() || j < bOrder.size(); ) {
+    bool aRuledOut = i >= aOrder.size();
+    bool bRuledOut = j >= bOrder.size();
+    if (!(aRuledOut || bRuledOut)) {
+      aRuledOut = aRuledOut || pointless(b[bOrder[j]], a[aOrder[i]]);
+      bRuledOut = bRuledOut || pointless(a[aOrder[i]], b[bOrder[j]]);
+    }
+    if (aRuledOut) bOnly.push_back(bOrder[j]);
+    if (bRuledOut) aOnly.push_back(aOrder[i]);
+    if (!aRuledOut) i++;
+    if (!bRuledOut) j++;
+  }
+
+  sort(aOnly.begin(), aOnly.end());
+  sort(bOnly.begin(), bOnly.end());
+
+  return {aOnly, bOnly};
+}
+
+vector<Point> updateHoneycomb(Model model) {
+  size_t leafWords = getLeafWords(model);
+  RectF bounds = getBounds(model);
+  vector<PointF> v = getCellSides(model, leafWords);
+  vector<Point> newHoneycomb = getHoneycomb(bounds, v[0], v[1], leafWords);
+
+  if (newHoneycomb.size() == model.honeycomb.size()) {
+    vector<vector<size_t> > d = getSetDifferences(
+      model.honeycomb, newHoneycomb
+    );
+    for (size_t i = 0; i < d[0].size(); i++) {
+      model.honeycomb[d[0][i]] = newHoneycomb[d[1][i]];
+    }
+    return model.honeycomb;
+  }
+
+  return newHoneycomb;
+}
+
+int clamp(int start, int end, int x) {
+  return imax(start, imin(end, x));
+}
 
 vector<Point> getJumpPoints(Model model) {
-  size_t bubbleCount = getLeafWords(model);
-
-  GridSettings gridSettings = adjustGridSettings(
-    model.gridSettings, model.width, model.height, bubbleCount
-  );
-
-  double xScale = gridSettings.cellWidth / sqrt(sqrt(0.75));
-  double yScale = gridSettings.cellHeight / sqrt(sqrt(0.75));
-
-  RectF bounds = rectFromDoubles(
-    (-model.origin.x - gridSettings.pixelsPastEdge) / xScale,
-    (-model.origin.y - gridSettings.pixelsPastEdge) / yScale,
-    (model.width + 2 * gridSettings.pixelsPastEdge) / xScale,
-    (model.height + 2 * gridSettings.pixelsPastEdge) / yScale
-  );
-
-  vector<PointF> honeycomb = getHoneycomb(bounds, bubbleCount);
-  scaleHoneycomb(honeycomb, xScale, yScale);
-  translateHoneycomb(honeycomb, model.origin.x, model.origin.y);
-  shuffle(honeycomb.begin(), honeycomb.end(), default_random_engine());
+  size_t leafWords = getLeafWords(model);
+  RectF bounds = getBounds(model);
+  vector<PointF> v = getCellSides(model, leafWords);
 
   size_t visibleWords = 0;
   if (model.showBubbles) {
@@ -478,9 +521,19 @@ vector<Point> getJumpPoints(Model model) {
   jumpPoints.reserve(visibleWords);
   for (size_t i = model.wordStart; i < model.wordStart + visibleWords; i++) {
     jumpPoints.push_back(
-      clampToSize(
-        model.width, model.height,
-        Point((int)floor(honeycomb[i].X), (int)floor(honeycomb[i].Y))
+      Point(
+        clamp(
+          0, model.width - 1,
+          (int)floorf(
+            v[0].X * model.honeycomb[i].X + v[1].X * model.honeycomb[i].Y
+          ) + model.origin.x
+        ),
+        clamp(
+          0, model.height - 1,
+          (int)floorf(
+            v[0].Y * model.honeycomb[i].X + v[1].Y * model.honeycomb[i].Y
+          ) + model.origin.y
+        )
       )
     );
   }
@@ -711,12 +764,16 @@ void drawBubble(
     graphics.DrawPath(artSupplies.borderPen, &border);
   }
 
-  RectF textBounds = rectFromDoubles(
-    borderBounds.X + pixelateSize(style.borderWidth) +
-      pixelate(style.paddingLeft),
-    borderBounds.Y + pixelateSize(style.borderWidth) +
-      pixelate(style.paddingTop),
-    textSize.Width, textSize.Height
+  RectF textBounds = RectF(
+    (REAL)(
+      borderBounds.X + pixelateSize(style.borderWidth) +
+      pixelate(style.paddingLeft)
+    ),
+    (REAL)(
+      borderBounds.Y + pixelateSize(style.borderWidth) +
+        pixelate(style.paddingTop)
+    ),
+    (REAL)textSize.Width, (REAL)textSize.Height
   );
 
   int chosenWidth = getChosenWidth(
@@ -843,6 +900,7 @@ Model getModel(int width, int height) {
   model.showBubbles = true;
 
   model.origin = {width / 2, height / 2};
+  model.honeycomb = updateHoneycomb(model);
 
   model.dragInfo.dragging = false;
 
@@ -1287,6 +1345,7 @@ void moveCursorBy(HWND window, int xOffset, int yOffset) {
   if (model.showBubbles) {
     model.origin.x += xOffset;
     model.origin.y += yOffset;
+    model.honeycomb = updateHoneycomb(model);
     PostMessage(window, MODEL_CHANGED, 0, 0);
   }
 }
