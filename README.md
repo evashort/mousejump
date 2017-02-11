@@ -1,4 +1,4 @@
-# mousejump
+# MouseJump
 AceJump-inspired interface for moving the mouse by keyboard or voice
 
 The program is currently in a finished and usable state.
