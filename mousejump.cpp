@@ -506,7 +506,7 @@ vector<Point> updateHoneycomb(Model model) {
   return newHoneycomb;
 }
 
-int clamp(int start, int end, int x) {
+int clip(int x, int start, int end) {
   return imax(start, imin(end, x));
 }
 
@@ -525,17 +525,17 @@ vector<Point> getJumpPoints(Model model) {
   for (size_t i = model.wordStart; i < model.wordStart + visibleWords; i++) {
     jumpPoints.push_back(
       Point(
-        clamp(
-          0, model.width - 1,
+        clip(
           (int)floorf(
             v[0].X * model.honeycomb[i].X + v[1].X * model.honeycomb[i].Y
-          ) + model.origin.x
+          ) + model.origin.x,
+          0, model.width - 1
         ),
-        clamp(
-          0, model.height - 1,
+        clip(
           (int)floorf(
             v[0].Y * model.honeycomb[i].X + v[1].Y * model.honeycomb[i].Y
-          ) + model.origin.y
+          ) + model.origin.y,
+          0, model.height - 1
         )
       )
     );
@@ -1129,7 +1129,10 @@ private:
   POINT offset;
 protected:
   POINT getGoalPos(POINT oldPos) const {
-    return {oldPos.x + offset.x, oldPos.y + offset.y};
+    return {
+      clip(oldPos.x + offset.x, 0, GetSystemMetrics(SM_CXSCREEN) - 1),
+      clip(oldPos.y + offset.y, 0, GetSystemMetrics(SM_CYSCREEN) - 1)
+    };
   }
 public:
   PatientMoveCursorBy(
