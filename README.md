@@ -11,6 +11,8 @@ Build instructions are in `mousejump.cpp`.
 
 - **Number keys:** Move cursor to label
 
+- **Backspace:** Show all labels
+
 - **Enter:** Click with primary button
 
 - **"Apps" key (the one with the picture of a context menu):** Click with secondary button
