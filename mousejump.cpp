@@ -1161,6 +1161,30 @@ public:
   {}
 };
 
+class PatientNudge: public PatientCursorMover {
+protected:
+  POINT getGoalPos(POINT oldPos) const {
+    if (!dragInfo.dragging) { // because we toggle dragging before doing it
+      int xOffset = dragInfo.dragStop.x - dragInfo.dragStart.x;
+      int yOffset = dragInfo.dragStop.y - dragInfo.dragStart.y;
+      double dragDistance = sqrt(xOffset * xOffset + yOffset * yOffset);
+      int nudgeDistance = dragDistance > 7 ? 5 : 10;
+      return {
+        dragInfo.dragStart.x +
+        (int)(round(xOffset * nudgeDistance / dragDistance)),
+        dragInfo.dragStart.y +
+        (int)(round(yOffset * nudgeDistance / dragDistance))
+      };
+    }
+
+    return oldPos;
+  }
+public:
+  PatientNudge(HWND window, DragInfo &dragInfo) :
+    PatientCursorMover(window, dragInfo)
+  {}
+};
+
 class PatientToggleDragging: public PatientAction {
 private:
   HWND window;
@@ -1352,6 +1376,8 @@ void click(HWND window, DragInfo &dragInfo, int button) {
   sendAction(new PatientClick(button, false));
   sendAction(new PatientMoveToDragStart(window, dragInfo));
   sendAction(new PatientClick(button, true));
+  sendAction(new PatientNudge(window, dragInfo));
+  sendAction(new PatientWaitBasedOnDragging(dragInfo, 0, 100));
   sendAction(new PatientMoveToDragStop(window, dragInfo));
   sendAction(new PatientWaitBasedOnDragging(dragInfo, 0, 100));
   sendAction(new PatientClick(button, false));
