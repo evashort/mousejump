@@ -1439,7 +1439,6 @@ LRESULT CALLBACK WndProc(
       showAllBubbles(window);
     } else if (wParam == model.keymap.drag) {
       sendAction(new PatientToggleDragging(window, dragInfo));
-      sendAction(new PatientMoveToDragStop(window, dragInfo));
       showAllBubbles(window);
     } else if (wParam == model.keymap.left) {
       moveCursorBy(window, -model.keymap.hStride, 0);
