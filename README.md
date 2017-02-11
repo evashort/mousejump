@@ -9,17 +9,17 @@ Build instructions are in `mousejump.cpp`.
 `.atom-build.js` enables one-button build within Atom, using https://atom.io/packages/build
 
 
-- Number keys: Move cursor to label
+- **Number keys:** Move cursor to label
 
-- Enter: Click with primary button
+- **Enter:** Click with primary button
 
-- "Apps" key (the one with the picture of a context menu): Click with secondary button
+- **"Apps" key (the one with the picture of a context menu):** Click with secondary button
 
-- Tab: Middle-click
+- **Tab:** Middle-click
 
-- Arrow keys: Move cursor AND labels
+- **Arrow keys:** Move cursor AND labels
 
-- Space: Other commands now choose drag destination instead of moving cursor
+- **Space:** Other commands now choose drag destination instead of moving cursor
 
 
 I control MouseJump using Vocola voice commands that press these keys for me.
