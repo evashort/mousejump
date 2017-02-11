@@ -21,6 +21,8 @@ Build instructions are in `mousejump.cpp`.
 
 - **Space:** Other commands now choose drag destination instead of moving cursor
 
+- **Space and then enter without choosing drag destination:** Double click
+
 
 I control MouseJump using Vocola voice commands that press these keys for me.
 My full voice command setup is here: https://github.com/evanshort73/mypersonalvcl

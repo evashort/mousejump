@@ -194,7 +194,7 @@ typedef struct {
 typedef struct {
   bool dragging;
   POINT dragStart;
-  POINT dragStop;
+  POINT dragEnd;
 } DragInfo;
 
 typedef struct {
@@ -933,16 +933,14 @@ void drawModel(Model model, View& view) {
 
   if (model.dragInfo.dragging) {
     POINT start = model.dragInfo.dragStart;
-    POINT stop = model.dragInfo.dragStop;
-    if (start.x == stop.x && start.y == stop.y) {
+    POINT end = model.dragInfo.dragEnd;
+    if (start.x == end.x && start.y == end.y) {
       int r = pixelateSize(style.dragRadius);
       graphics.DrawEllipse(
         artSupplies.dragPen, start.x - r, start.y - r, 2 * r, 2 * r
       );
     } else {
-      graphics.DrawLine(
-        artSupplies.dragPen, start.x, start.y, stop.x, stop.y
-      );
+      graphics.DrawLine(artSupplies.dragPen, start.x, start.y, end.x, end.y);
     }
   }
 
@@ -1024,16 +1022,20 @@ void showView(View view, HWND window) {
 const UINT MODEL_CHANGED = WM_USER;
 const UINT DRAG_INFO_CHANGED = WM_USER + 1;
 
-const int PATIENT_DONE = 0;
-const int PATIENT_RETRY = 1;
-const int PATIENT_CANCEL = 2;
+const UINT PATIENT_DONE = 0;
+const UINT PATIENT_RETRY = 1;
+const UINT PATIENT_CANCEL = 2;
+
+const UINT CLICKING = 0x1;
+const UINT DOUBLE_CLICKING = 0x2;
+const UINT DRAGGING = 0x4;
 
 typedef struct {
-  int status;
+  UINT status;
   int delay;
 } PatientResult;
 
-PatientResult defaultDelay(int status) {
+PatientResult defaultDelay(UINT status) {
   int delay = 0;
   switch (status) {
   case PATIENT_RETRY: delay = 200; break;
@@ -1050,53 +1052,65 @@ public:
   virtual ~PatientAction() {};
 };
 
+class PatientIf : public PatientAction {
+private:
+  const DragInfo& dragInfo;
+  UINT condition;
+  PatientAction *consequent;
+public:
+  PatientIf(
+    const DragInfo& dragInfo, UINT condition, PatientAction *consequent
+  ) :
+    dragInfo(dragInfo), condition(condition), consequent(consequent)
+  {}
+  ~PatientIf() {
+    delete consequent;
+  }
+  PatientResult operator() () {
+    UINT reality = CLICKING;
+    if (dragInfo.dragging) {
+      if (
+        dragInfo.dragStart.x == dragInfo.dragEnd.x &&
+        dragInfo.dragStart.y == dragInfo.dragEnd.y
+      ) {
+        reality = DOUBLE_CLICKING;
+      } else {
+        reality = DRAGGING;
+      }
+    }
+
+    if (condition & reality) {
+      return (*consequent)();
+    }
+
+    return defaultDelay(PATIENT_DONE);
+  }
+};
+
 class PatientCursorMover: public PatientAction {
 protected:
-  HWND window;
-  DragInfo &dragInfo;
   virtual POINT getGoalPos(POINT oldPos) const =0;
 private:
   POINT oldPos;
+  POINT goalPos;
   int triesLeft;
   bool triedYet;
-  void setCursorPos(int x, int y) {
-    if (dragInfo.dragging) {
-      dragInfo.dragStop.x = x;
-      dragInfo.dragStop.y = y;
-      SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
-    } else {
-      SetCursorPos(x, y);
-    }
-  }
-  void getCursorPos(POINT *result) {
-    if (dragInfo.dragging) {
-      *result = dragInfo.dragStop;
-    } else {
-      GetCursorPos(result);
-    }
-  }
 public:
-  PatientCursorMover(HWND window, DragInfo &dragInfo) :
-    window(window), dragInfo(dragInfo), triesLeft(5), triedYet(false)
-  {}
+  PatientCursorMover() : triesLeft(5), triedYet(false) {}
   PatientResult operator() () {
-    POINT goalPos;
-    if (triedYet) {
-      goalPos = getGoalPos(oldPos);
-    } else {
+    if (!triedYet) {
       triedYet = true;
-
-      getCursorPos(&oldPos);
+      GetCursorPos(&oldPos);
       goalPos = getGoalPos(oldPos);
       if (oldPos.x == goalPos.x && oldPos.y == goalPos.y) {
         return defaultDelay(PATIENT_DONE);
       }
     }
 
-    setCursorPos(goalPos.x, goalPos.y);
+    SetCursorPos(goalPos.x, goalPos.y);
 
     POINT newPos;
-    getCursorPos(&newPos);
+    GetCursorPos(&newPos);
     if (newPos.x != oldPos.x || newPos.y != oldPos.y) {
       return defaultDelay(PATIENT_DONE);
     }
@@ -1119,9 +1133,7 @@ protected:
     return goalPos;
   }
 public:
-  PatientSetCursorPos(HWND window, DragInfo &dragInfo, int x, int y) :
-    PatientCursorMover(window, dragInfo), goalPos{x, y}
-  {}
+  PatientSetCursorPos(int x, int y) : goalPos{x, y} {}
 };
 
 class PatientMoveCursorBy: public PatientCursorMover {
@@ -1135,57 +1147,49 @@ protected:
     };
   }
 public:
-  PatientMoveCursorBy(
-    HWND window, DragInfo &dragInfo, int xOffset, int yOffset
-  ) :
-    PatientCursorMover(window, dragInfo), offset{xOffset, yOffset}
-  {}
+  PatientMoveCursorBy(int xOffset, int yOffset) : offset{xOffset, yOffset} {}
 };
 
 class PatientMoveToDragStart: public PatientCursorMover {
+private:
+  const DragInfo &dragInfo;
 protected:
   POINT getGoalPos(POINT oldPos) const {
     return dragInfo.dragStart;
   }
 public:
-  PatientMoveToDragStart(HWND window, DragInfo &dragInfo) :
-    PatientCursorMover(window, dragInfo)
-  {}
+  PatientMoveToDragStart(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
 };
 
-class PatientMoveToDragStop: public PatientCursorMover {
+class PatientMoveToDragEnd: public PatientCursorMover {
+private:
+  const DragInfo &dragInfo;
 protected:
   POINT getGoalPos(POINT oldPos) const {
-    return dragInfo.dragStop;
+    return dragInfo.dragEnd;
   }
 public:
-  PatientMoveToDragStop(HWND window, DragInfo &dragInfo) :
-    PatientCursorMover(window, dragInfo)
-  {}
+  PatientMoveToDragEnd(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
 };
 
 class PatientNudge: public PatientCursorMover {
+private:
+  const DragInfo &dragInfo;
 protected:
   POINT getGoalPos(POINT oldPos) const {
-    if (!dragInfo.dragging) { // because we toggle dragging before doing it
-      int xOffset = dragInfo.dragStop.x - dragInfo.dragStart.x;
-      int yOffset = dragInfo.dragStop.y - dragInfo.dragStart.y;
-      double dragDistance = sqrt(xOffset * xOffset + yOffset * yOffset);
-      int nudgeDistance = dragDistance > 7 ? 5 : 10;
-      return {
-        dragInfo.dragStart.x +
-        (int)(round(xOffset * nudgeDistance / dragDistance)),
-        dragInfo.dragStart.y +
-        (int)(round(yOffset * nudgeDistance / dragDistance))
-      };
-    }
-
-    return oldPos;
+    int xOffset = dragInfo.dragEnd.x - dragInfo.dragStart.x;
+    int yOffset = dragInfo.dragEnd.y - dragInfo.dragStart.y;
+    double dragDistance = sqrt(xOffset * xOffset + yOffset * yOffset);
+    int nudgeDistance = dragDistance > 7 ? 5 : 10;
+    return {
+      dragInfo.dragStart.x +
+      (int)(round(xOffset * nudgeDistance / dragDistance)),
+      dragInfo.dragStart.y +
+      (int)(round(yOffset * nudgeDistance / dragDistance))
+    };
   }
 public:
-  PatientNudge(HWND window, DragInfo &dragInfo) :
-    PatientCursorMover(window, dragInfo)
-  {}
+  PatientNudge(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
 };
 
 class PatientToggleDragging: public PatientAction {
@@ -1200,7 +1204,7 @@ public:
     dragInfo.dragging = !dragInfo.dragging;
     if (dragInfo.dragging) {
       GetCursorPos(&dragInfo.dragStart);
-      dragInfo.dragStop = dragInfo.dragStart;
+      dragInfo.dragEnd = dragInfo.dragStart;
     }
 
     SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
@@ -1209,19 +1213,48 @@ public:
   }
 };
 
-class PatientWaitBasedOnDragging: public PatientAction {
+class PatientSetDragEnd: public PatientAction {
 private:
+  HWND window;
   DragInfo &dragInfo;
-  int draggingDelay;
-  int normalDelay;
+  POINT goalPos;
 public:
-  PatientWaitBasedOnDragging(
-    DragInfo &dragInfo, int draggingDelay, int normalDelay
-  ) :
-    dragInfo(dragInfo), draggingDelay(draggingDelay), normalDelay(normalDelay)
+  PatientSetDragEnd(HWND window, DragInfo &dragInfo, int x, int y) :
+    window(window), dragInfo(dragInfo), goalPos{x, y}
   {}
   PatientResult operator() () {
-    return {PATIENT_DONE, dragInfo.dragging ? draggingDelay : normalDelay};
+    dragInfo.dragEnd = goalPos;
+    SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
+    return defaultDelay(PATIENT_DONE);
+  }
+};
+
+class PatientMoveDragEndBy: public PatientAction {
+private:
+  HWND window;
+  DragInfo &dragInfo;
+  POINT offset;
+public:
+  PatientMoveDragEndBy(
+    HWND window, DragInfo &dragInfo, int xOffset, int yOffset
+  ) :
+    window(window), dragInfo(dragInfo), offset{xOffset, yOffset}
+  {}
+  PatientResult operator() () {
+    dragInfo.dragEnd.x += offset.x;
+    dragInfo.dragEnd.y += offset.y;
+    SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
+    return defaultDelay(PATIENT_DONE);
+  }
+};
+
+class PatientWait: public PatientAction {
+private:
+  int delay;
+public:
+  PatientWait(int delay) : delay(delay) {}
+  PatientResult operator() () {
+    return {PATIENT_DONE, delay};
   }
 };
 
@@ -1375,14 +1408,23 @@ void sendAction(PatientAction *action) {
 
 void click(HWND window, DragInfo &dragInfo, int button) {
   sendAction(new PatientCloseWindow(window));
-  sendAction(new PatientToggleDragging(window, dragInfo));
   sendAction(new PatientClick(button, false));
-  sendAction(new PatientMoveToDragStart(window, dragInfo));
+  sendAction(
+    new PatientIf(dragInfo, DRAGGING, new PatientMoveToDragStart(dragInfo))
+  );
   sendAction(new PatientClick(button, true));
-  sendAction(new PatientNudge(window, dragInfo));
-  sendAction(new PatientWaitBasedOnDragging(dragInfo, 0, 100));
-  sendAction(new PatientMoveToDragStop(window, dragInfo));
-  sendAction(new PatientWaitBasedOnDragging(dragInfo, 0, 100));
+  sendAction(new PatientIf(dragInfo, DRAGGING, new PatientNudge(dragInfo)));
+  sendAction(new PatientIf(dragInfo, DRAGGING, new PatientWait(100)));
+  sendAction(
+    new PatientIf(dragInfo, DRAGGING, new PatientMoveToDragEnd(dragInfo))
+  );
+  sendAction(new PatientIf(dragInfo, DRAGGING, new PatientWait(100)));
+  sendAction(
+    new PatientIf(dragInfo, DOUBLE_CLICKING, new PatientClick(button, false))
+  );
+  sendAction(
+    new PatientIf(dragInfo, DOUBLE_CLICKING, new PatientClick(button, true))
+  );
   sendAction(new PatientClick(button, false));
   sendAction(new PatientIgnoreFutureEvents());
 }
@@ -1393,7 +1435,18 @@ Model model;
 DragInfo dragInfo;
 
 void moveCursorBy(HWND window, int xOffset, int yOffset) {
-  sendAction(new PatientMoveCursorBy(window, dragInfo, xOffset, yOffset));
+  sendAction(
+    new PatientIf(
+      dragInfo, CLICKING,
+      new PatientMoveCursorBy(xOffset, yOffset)
+    )
+  );
+  sendAction(
+    new PatientIf(
+      dragInfo, DOUBLE_CLICKING | DRAGGING,
+      new PatientMoveDragEndBy(window, dragInfo, xOffset, yOffset)
+    )
+  );
   if (model.showBubbles) {
     model.origin.x += xOffset;
     model.origin.y += yOffset;
@@ -1477,12 +1530,18 @@ LRESULT CALLBACK WndProc(
               );
             }
             if (jumpPoints.size() == 1) {
+              int x = view.start.x + jumpPoints[0].X;
+              int y = view.start.y + jumpPoints[0].Y;
               sendAction(
-                new PatientSetCursorPos(
-                  window,
-                  dragInfo,
-                  view.start.x + jumpPoints[0].X,
-                  view.start.y + jumpPoints[0].Y
+                new PatientIf(
+                  dragInfo, CLICKING,
+                  new PatientSetCursorPos(x, y)
+                )
+              );
+              sendAction(
+                new PatientIf(
+                  dragInfo, DOUBLE_CLICKING | DRAGGING,
+                  new PatientSetDragEnd(window, dragInfo, x, y)
                 )
               );
 
