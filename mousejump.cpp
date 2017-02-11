@@ -1582,7 +1582,7 @@ int CALLBACK WinMain(
   consumer.start();
 
   HWND window = CreateWindowEx(
-    WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT,
+    WS_EX_LAYERED | WS_EX_TRANSPARENT,
     windowClassName,
     _T("MouseJump"),
     WS_POPUP,
