@@ -1022,9 +1022,9 @@ void showView(View view, HWND window) {
 const UINT MODEL_CHANGED = WM_USER;
 const UINT DRAG_INFO_CHANGED = WM_USER + 1;
 
-const UINT PATIENT_DONE = 0;
-const UINT PATIENT_RETRY = 1;
-const UINT PATIENT_CANCEL = 2;
+const UINT TASK_DONE = 0;
+const UINT TASK_RETRY = 1;
+const UINT TASK_CANCEL = 2;
 
 const UINT CLICKING = 0x1;
 const UINT DOUBLE_CLICKING = 0x2;
@@ -1033,40 +1033,38 @@ const UINT DRAGGING = 0x4;
 typedef struct {
   UINT status;
   int delay;
-} PatientResult;
+} TaskResult;
 
-PatientResult defaultDelay(UINT status) {
+TaskResult defaultDelay(UINT status) {
   int delay = 0;
   switch (status) {
-  case PATIENT_RETRY: delay = 200; break;
-  case PATIENT_CANCEL: delay = 10; break;
+  case TASK_RETRY: delay = 200; break;
+  case TASK_CANCEL: delay = 10; break;
   }
 
-  PatientResult result = {status, delay};
+  TaskResult result = {status, delay};
   return result;
 }
 
-class PatientAction {
+class Task {
 public:
-  virtual PatientResult operator() () =0;
-  virtual ~PatientAction() {};
+  virtual TaskResult operator() () =0;
+  virtual ~Task() {};
 };
 
-class PatientIf : public PatientAction {
+class IfTask : public Task {
 private:
   const DragInfo& dragInfo;
   UINT condition;
-  PatientAction *consequent;
+  Task *consequent;
 public:
-  PatientIf(
-    const DragInfo& dragInfo, UINT condition, PatientAction *consequent
-  ) :
+  IfTask(const DragInfo& dragInfo, UINT condition, Task *consequent) :
     dragInfo(dragInfo), condition(condition), consequent(consequent)
   {}
-  ~PatientIf() {
+  ~IfTask() {
     delete consequent;
   }
-  PatientResult operator() () {
+  TaskResult operator() () {
     UINT reality = CLICKING;
     if (dragInfo.dragging) {
       if (
@@ -1083,11 +1081,11 @@ public:
       return (*consequent)();
     }
 
-    return defaultDelay(PATIENT_DONE);
+    return defaultDelay(TASK_DONE);
   }
 };
 
-class PatientCursorMover: public PatientAction {
+class CursorMovingTask: public Task {
 protected:
   virtual POINT getGoalPos(POINT oldPos) const =0;
 private:
@@ -1096,14 +1094,14 @@ private:
   int triesLeft;
   bool triedYet;
 public:
-  PatientCursorMover() : triesLeft(5), triedYet(false) {}
-  PatientResult operator() () {
+  CursorMovingTask() : triesLeft(5), triedYet(false) {}
+  TaskResult operator() () {
     if (!triedYet) {
       triedYet = true;
       GetCursorPos(&oldPos);
       goalPos = getGoalPos(oldPos);
       if (oldPos.x == goalPos.x && oldPos.y == goalPos.y) {
-        return defaultDelay(PATIENT_DONE);
+        return defaultDelay(TASK_DONE);
       }
     }
 
@@ -1112,20 +1110,20 @@ public:
     POINT newPos;
     GetCursorPos(&newPos);
     if (newPos.x != oldPos.x || newPos.y != oldPos.y) {
-      return defaultDelay(PATIENT_DONE);
+      return defaultDelay(TASK_DONE);
     }
 
     triesLeft--;
     if (triesLeft <= 0) {
       MessageBox(NULL, _T("Failed to move cursor"), _T("MouseJump"), 0);
-      return defaultDelay(PATIENT_CANCEL);
+      return defaultDelay(TASK_CANCEL);
     }
 
-    return defaultDelay(PATIENT_RETRY);
+    return defaultDelay(TASK_RETRY);
   }
 };
 
-class PatientSetCursorPos: public PatientCursorMover {
+class SetCursorPosTask: public CursorMovingTask {
 private:
   POINT goalPos;
 protected:
@@ -1133,10 +1131,10 @@ protected:
     return goalPos;
   }
 public:
-  PatientSetCursorPos(int x, int y) : goalPos{x, y} {}
+  SetCursorPosTask(int x, int y) : goalPos{x, y} {}
 };
 
-class PatientMoveCursorBy: public PatientCursorMover {
+class MoveCursorByTask: public CursorMovingTask {
 private:
   POINT offset;
 protected:
@@ -1147,10 +1145,10 @@ protected:
     };
   }
 public:
-  PatientMoveCursorBy(int xOffset, int yOffset) : offset{xOffset, yOffset} {}
+  MoveCursorByTask(int xOffset, int yOffset) : offset{xOffset, yOffset} {}
 };
 
-class PatientMoveToDragStart: public PatientCursorMover {
+class MoveToDragStartTask: public CursorMovingTask {
 private:
   const DragInfo &dragInfo;
 protected:
@@ -1158,10 +1156,10 @@ protected:
     return dragInfo.dragStart;
   }
 public:
-  PatientMoveToDragStart(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
+  MoveToDragStartTask(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
 };
 
-class PatientMoveToDragEnd: public PatientCursorMover {
+class MoveToDragEndTask: public CursorMovingTask {
 private:
   const DragInfo &dragInfo;
 protected:
@@ -1169,10 +1167,10 @@ protected:
     return dragInfo.dragEnd;
   }
 public:
-  PatientMoveToDragEnd(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
+  MoveToDragEndTask(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
 };
 
-class PatientNudge: public PatientCursorMover {
+class NudgeTask: public CursorMovingTask {
 private:
   const DragInfo &dragInfo;
 protected:
@@ -1189,18 +1187,18 @@ protected:
     };
   }
 public:
-  PatientNudge(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
+  NudgeTask(const DragInfo &dragInfo) : dragInfo(dragInfo) {}
 };
 
-class PatientToggleDragging: public PatientAction {
+class ToggleDraggingTask: public Task {
 private:
   HWND window;
   DragInfo &dragInfo;
 public:
-  PatientToggleDragging(HWND window, DragInfo &dragInfo) :
+  ToggleDraggingTask(HWND window, DragInfo &dragInfo) :
     window(window), dragInfo(dragInfo)
   {}
-  PatientResult operator() () {
+  TaskResult operator() () {
     dragInfo.dragging = !dragInfo.dragging;
     if (dragInfo.dragging) {
       GetCursorPos(&dragInfo.dragStart);
@@ -1209,56 +1207,56 @@ public:
 
     SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
 
-    return defaultDelay(PATIENT_DONE);
+    return defaultDelay(TASK_DONE);
   }
 };
 
-class PatientSetDragEnd: public PatientAction {
+class SetDragEndTask: public Task {
 private:
   HWND window;
   DragInfo &dragInfo;
   POINT goalPos;
 public:
-  PatientSetDragEnd(HWND window, DragInfo &dragInfo, int x, int y) :
+  SetDragEndTask(HWND window, DragInfo &dragInfo, int x, int y) :
     window(window), dragInfo(dragInfo), goalPos{x, y}
   {}
-  PatientResult operator() () {
+  TaskResult operator() () {
     dragInfo.dragEnd = goalPos;
     SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
-    return defaultDelay(PATIENT_DONE);
+    return defaultDelay(TASK_DONE);
   }
 };
 
-class PatientMoveDragEndBy: public PatientAction {
+class MoveDragEndByTask: public Task {
 private:
   HWND window;
   DragInfo &dragInfo;
   POINT offset;
 public:
-  PatientMoveDragEndBy(
+  MoveDragEndByTask(
     HWND window, DragInfo &dragInfo, int xOffset, int yOffset
   ) :
     window(window), dragInfo(dragInfo), offset{xOffset, yOffset}
   {}
-  PatientResult operator() () {
+  TaskResult operator() () {
     dragInfo.dragEnd.x += offset.x;
     dragInfo.dragEnd.y += offset.y;
     SendMessage(window, DRAG_INFO_CHANGED, 0, 0);
-    return defaultDelay(PATIENT_DONE);
+    return defaultDelay(TASK_DONE);
   }
 };
 
-class PatientWait: public PatientAction {
+class WaitTask: public Task {
 private:
   int delay;
 public:
-  PatientWait(int delay) : delay(delay) {}
-  PatientResult operator() () {
-    return {PATIENT_DONE, delay};
+  WaitTask(int delay) : delay(delay) {}
+  TaskResult operator() () {
+    return {TASK_DONE, delay};
   }
 };
 
-class PatientClick: public PatientAction {
+class ClickTask: public Task {
 private:
   int button;
   bool press;
@@ -1279,13 +1277,13 @@ private:
     }
   }
 public:
-  PatientClick(int button, bool press) {
+  ClickTask(int button, bool press) {
     this->button = button;
     this->press = press;
     triesLeft = 5;
     triedYet = false;
   }
-  PatientResult operator() () {
+  TaskResult operator() () {
     if (!triedYet) {
       triedYet = true;
 
@@ -1297,7 +1295,7 @@ public:
     UINT keycode = getKeycode();
 
     if ((GetAsyncKeyState(keycode) < 0) == press) {
-      return defaultDelay(PATIENT_DONE);
+      return defaultDelay(TASK_DONE);
     }
 
     INPUT click;
@@ -1311,79 +1309,79 @@ public:
     SendInput(1, &click, sizeof(INPUT));
 
     if ((GetAsyncKeyState(keycode) < 0) == press) {
-      return defaultDelay(PATIENT_DONE);
+      return defaultDelay(TASK_DONE);
     }
 
     triesLeft--;
     if (triesLeft <= 0) {
       MessageBox(NULL, _T("Failed to send click"), _T("MouseJump"), 0);
-      return defaultDelay(PATIENT_CANCEL);
+      return defaultDelay(TASK_CANCEL);
     }
 
-    return defaultDelay(PATIENT_RETRY);
+    return defaultDelay(TASK_RETRY);
   }
 };
 
-class PatientCloseWindow : public PatientAction {
+class CloseWindowTask : public Task {
 private:
   HWND window;
 public:
-  PatientCloseWindow(HWND window) {
+  CloseWindowTask(HWND window) {
     this->window = window;
   }
-  PatientResult operator() () {
+  TaskResult operator() () {
     SendMessage(window, WM_CLOSE, 0, 0);
-    return defaultDelay(PATIENT_DONE);
+    return defaultDelay(TASK_DONE);
   }
 };
 
-class PatientIgnoreFutureEvents : public PatientAction {
+class IgnoreFutureTasks : public Task {
 public:
-  PatientIgnoreFutureEvents() {}
-  PatientResult operator() () {
-    return {PATIENT_CANCEL, 60000}; // one minute is basically forever
+  IgnoreFutureTasks() {}
+  TaskResult operator() () {
+    return {TASK_CANCEL, 60000}; // one minute is basically forever
   }
 };
 
-class PatientConsumer : public concurrency::agent {
+class TaskConsumer : public concurrency::agent {
 private:
-  concurrency::ISource<PatientAction*>& pendingActions;
+  concurrency::ISource<Task*>& pendingTasks;
 public:
-  PatientConsumer(concurrency::ISource<PatientAction*>& pendingActions) :
-    pendingActions(pendingActions)
+  TaskConsumer(concurrency::ISource<Task*>& pendingTasks) :
+    pendingTasks(pendingTasks)
   {}
 protected:
   void run() {
     chrono::high_resolution_clock::time_point cancelEnd =
       chrono::high_resolution_clock::time_point::min();
-    while (PatientAction* action = concurrency::receive(pendingActions)) {
+    while (Task* task = concurrency::receive(pendingTasks)) {
       if (
         chrono::high_resolution_clock::time_point::min() < cancelEnd &&
         chrono::high_resolution_clock::now() < cancelEnd
       ) {
-        delete action;
+        delete task;
         continue;
       }
 
       cancelEnd = chrono::high_resolution_clock::time_point::min();
 
-      PatientResult result;
-      while ((result = (*action)()).status == PATIENT_RETRY) {
+      TaskResult result;
+      while ((result = (*task)()).status == TASK_RETRY) {
         if (result.delay > 0) {
           this_thread::sleep_for(chrono::milliseconds(result.delay));
         }
       }
 
-      delete action;
+      delete task;
 
       if (result.delay > 0) {
         switch (result.status) {
-        case PATIENT_CANCEL:
+        case TASK_CANCEL:
           cancelEnd =
             chrono::high_resolution_clock::now() +
             chrono::milliseconds(result.delay);
           break;
-        case PATIENT_DONE:
+        case TASK_DONE:
           this_thread::sleep_for(chrono::milliseconds(result.delay));
           break;
         }
@@ -1398,35 +1396,31 @@ protected:
 // which seems to block other programs from sending mouse input while it's
 // running. To get around this, I use a producer-consumer pattern to queue up
 // mouse actions and retry them in a separte thread until they work.
-concurrency::unbounded_buffer<PatientAction*> pendingActions;
-concurrency::ITarget<PatientAction*>& target = pendingActions;
-PatientConsumer consumer(pendingActions);
+concurrency::unbounded_buffer<Task*> pendingTasks;
+concurrency::ITarget<Task*>& target = pendingTasks;
+TaskConsumer consumer(pendingTasks);
 
-void sendAction(PatientAction *action) {
-  concurrency::send(target, (PatientAction*)action);
+void sendTask(Task *task) {
+  concurrency::send(target, (Task*)task);
 }
 
 void click(HWND window, DragInfo &dragInfo, int button) {
-  sendAction(new PatientCloseWindow(window));
-  sendAction(new PatientClick(button, false));
-  sendAction(
-    new PatientIf(dragInfo, DRAGGING, new PatientMoveToDragStart(dragInfo))
+  sendTask(new CloseWindowTask(window));
+  sendTask(new ClickTask(button, false));
+  sendTask(new IfTask(dragInfo, DRAGGING, new MoveToDragStartTask(dragInfo)));
+  sendTask(new ClickTask(button, true));
+  sendTask(new IfTask(dragInfo, DRAGGING, new NudgeTask(dragInfo)));
+  sendTask(new IfTask(dragInfo, DRAGGING, new WaitTask(100)));
+  sendTask(new IfTask(dragInfo, DRAGGING, new MoveToDragEndTask(dragInfo)));
+  sendTask(new IfTask(dragInfo, DRAGGING, new WaitTask(100)));
+  sendTask(
+    new IfTask(dragInfo, DOUBLE_CLICKING, new ClickTask(button, false))
   );
-  sendAction(new PatientClick(button, true));
-  sendAction(new PatientIf(dragInfo, DRAGGING, new PatientNudge(dragInfo)));
-  sendAction(new PatientIf(dragInfo, DRAGGING, new PatientWait(100)));
-  sendAction(
-    new PatientIf(dragInfo, DRAGGING, new PatientMoveToDragEnd(dragInfo))
+  sendTask(
+    new IfTask(dragInfo, DOUBLE_CLICKING, new ClickTask(button, true))
   );
-  sendAction(new PatientIf(dragInfo, DRAGGING, new PatientWait(100)));
-  sendAction(
-    new PatientIf(dragInfo, DOUBLE_CLICKING, new PatientClick(button, false))
-  );
-  sendAction(
-    new PatientIf(dragInfo, DOUBLE_CLICKING, new PatientClick(button, true))
-  );
-  sendAction(new PatientClick(button, false));
-  sendAction(new PatientIgnoreFutureEvents());
+  sendTask(new ClickTask(button, false));
+  sendTask(new IgnoreFutureTasks());
 }
 
 HMONITOR monitor;
@@ -1435,16 +1429,13 @@ Model model;
 DragInfo dragInfo;
 
 void moveCursorBy(HWND window, int xOffset, int yOffset) {
-  sendAction(
-    new PatientIf(
-      dragInfo, CLICKING,
-      new PatientMoveCursorBy(xOffset, yOffset)
-    )
+  sendTask(
+    new IfTask(dragInfo, CLICKING, new MoveCursorByTask(xOffset, yOffset))
   );
-  sendAction(
-    new PatientIf(
+  sendTask(
+    new IfTask(
       dragInfo, DOUBLE_CLICKING | DRAGGING,
-      new PatientMoveDragEndBy(window, dragInfo, xOffset, yOffset)
+      new MoveDragEndByTask(window, dragInfo, xOffset, yOffset)
     )
   );
   if (model.showBubbles) {
@@ -1486,12 +1477,12 @@ LRESULT CALLBACK WndProc(
     break;
   case WM_KEYDOWN:
     if (wParam == model.keymap.exit) {
-      sendAction(new PatientCloseWindow(window));
-      sendAction(new PatientIgnoreFutureEvents());
+      sendTask(new CloseWindowTask(window));
+      sendTask(new IgnoreFutureTasks());
     } else if (wParam == model.keymap.clear) {
       showAllBubbles(window);
     } else if (wParam == model.keymap.drag) {
-      sendAction(new PatientToggleDragging(window, dragInfo));
+      sendTask(new ToggleDraggingTask(window, dragInfo));
       showAllBubbles(window);
     } else if (wParam == model.keymap.left) {
       moveCursorBy(window, -model.keymap.hStride, 0);
@@ -1532,16 +1523,13 @@ LRESULT CALLBACK WndProc(
             if (jumpPoints.size() == 1) {
               int x = view.start.x + jumpPoints[0].X;
               int y = view.start.y + jumpPoints[0].Y;
-              sendAction(
-                new PatientIf(
-                  dragInfo, CLICKING,
-                  new PatientSetCursorPos(x, y)
-                )
+              sendTask(
+                new IfTask(dragInfo, CLICKING, new SetCursorPosTask(x, y))
               );
-              sendAction(
-                new PatientIf(
+              sendTask(
+                new IfTask(
                   dragInfo, DOUBLE_CLICKING | DRAGGING,
-                  new PatientSetDragEnd(window, dragInfo, x, y)
+                  new SetDragEndTask(window, dragInfo, x, y)
                 )
               );
 
@@ -1667,7 +1655,7 @@ int CALLBACK WinMain(
 
   GdiplusShutdown(gdiplusToken);
 
-  concurrency::send(target, (PatientAction*)NULL);
+  concurrency::send(target, (Task*)NULL);
   concurrency::agent::wait(&consumer);
 
   return (int)message.wParam;
