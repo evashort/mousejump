@@ -1009,13 +1009,13 @@ void showView(View view, HWND window) {
   UpdateLayeredWindow(
     window,
     NULL, // don't care about displays that use a color palette
-    &view.start,
+    NULL,
     &bitmapSize,
     view.deviceContext, // copies the active bitmap from this device context
     &origin, // copy bits starting from this location on the bitmap
-    0, // no chromakey color
+    RGB(255, 255, 225), // no chromakey color
     &blendFunction, // boilerplate
-    ULW_ALPHA // per-pixel alpha instead of chromakey
+    ULW_COLORKEY // per-pixel alpha instead of chromakey
   );
 }
 
