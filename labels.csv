@@ -1,0 +1,58 @@
+DOG
+LOL
+HI
+OMG
+X
+Z
+BAD
+ING
+OK
+FOR
+THE
+BUT
+SO
+CAN
+YOU
+ME
+IF
+INT
+WHO
+WHY
+HER
+HEN
+HEA
+AM
+AL
+AI
+"P""I"
+MO""M,"
+NO"
+COM
+CON
+COP
+COB
+COR
+COW
+CAL
+CAM,
+CAR,ABC
+CAP
+EX
+EM
+EN
+ED
+TAN
+TAB
+TAR
+TAX
+TAP
+"🧉"","
+"AB
+C      D"
+,"Turns off processing of prefix characters. Normally, DrawTextEx interprets
+the ampersand (&) mnemonic-prefix character as a directive to underscore the
+character that follows, and the double-ampersand (&&) mnemonic-prefix
+characters as a directive to print a single ampersand. By specifying
+T_NOPREFIX, this processing is turned off. Compare with DT_HIDEPREFIX and
+DT_PREFIXONLY"
+"MAN"
