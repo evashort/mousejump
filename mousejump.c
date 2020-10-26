@@ -571,67 +571,6 @@ LPWSTR getTextBoxText(HWND textBox) {
     return textBoxTextOut.text;
 }
 
-struct { LPWSTR text; int capacity; } textCopyOut = { .text = NULL };
-LPWSTR getTextCopy(LPCWSTR text) {
-    int oldCapacity = textCopyOut.text ? textCopyOut.capacity : 0;
-    textCopyOut.capacity = nextPowerOf2(wcslen(text) + 1);
-    if (textCopyOut.capacity > oldCapacity) {
-        if (textCopyOut.text) { free(textCopyOut.text); }
-        textCopyOut.text = (LPWSTR)malloc(
-            textCopyOut.capacity * sizeof(WCHAR)
-        );
-    }
-
-    wcsncpy(textCopyOut.text, text, textCopyOut.capacity);
-    return textCopyOut.text;
-}
-
-typedef struct { LPWSTR text; LOGFONT font; } TextBoxMinSizeIn;
-TextBoxMinSizeIn textBoxMinSizeIn = { .text = NULL };
-SIZE textBoxMinSizeOut;
-SIZE getTextBoxMinSize(HWND textBox, LPCWSTR text) {
-    static const WCHAR emptyString[1] = L"";
-    HFONT font = (HFONT)SendMessage(textBox, WM_GETFONT, 0, 0);
-
-    TextBoxMinSizeIn in;
-    GetObject(font, sizeof(in.font), &in.font);
-    if (
-        textBoxMinSizeIn.text
-            && !memcmp(&in.font, &textBoxMinSizeIn.font, sizeof(in.font))
-            && !wcscmp(text ? text : emptyString, textBoxMinSizeIn.text)
-    ) {
-        return textBoxMinSizeOut;
-    }
-
-    in.text = text ? getTextCopy(text) : emptyString;
-    textBoxMinSizeIn = in;
-
-    HDC device = GetDC(textBox);
-    HFONT oldFont = SelectObject(device, font);
-
-    RECT rect = { 0, 0, 0, 0 };
-    DrawText(
-        device, in.text, -1, &rect, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
-    );
-
-    SelectObject(device, oldFont);
-    ReleaseDC(textBox, device);
-
-    // 1px cursor, 1px padding left, 2px padding right, left and right margin
-    LRESULT margins = SendMessage(textBox, EM_GETMARGINS, 0, 0);
-    rect.right += 4 + LOWORD(margins) + HIWORD(margins);
-    rect.bottom += 2; // 1px padding top, 1px padding bottom
-    AdjustWindowRectEx(
-        &rect,
-        GetWindowLongPtr(textBox, GWL_STYLE),
-        FALSE, // bMenu
-        GetWindowLongPtr(textBox, GWL_EXSTYLE)
-    );
-    textBoxMinSizeOut.cx = rect.right - rect.left;
-    textBoxMinSizeOut.cy = rect.bottom - rect.top;
-    return textBoxMinSizeOut;
-}
-
 #pragma endregion
 
 void destroyCache() {
@@ -654,13 +593,11 @@ void destroyCache() {
     if (dropdownBitmapOut) { DeleteObject(dropdownBitmapOut); }
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
     if (textBoxTextOut.text) { free(textBoxTextOut.text); }
-    if (textCopyOut.text) { free(textCopyOut.text); }
 }
 
 typedef struct {
     HWND window;
     HWND dialog;
-    BOOL textBoxActive;
     COLORREF colorKey;
     double offsetXPt;
     double offsetYPt;
@@ -685,7 +622,9 @@ typedef struct {
     double textBoxWidthPt;
     double dropdownWidthPt;
     double clientHeightPt;
-    BOOL hideInterface;
+    BOOL showCaption;
+    SIZE minTextBoxSize;
+    BOOL inMenuLoop;
     LPWSTR text;
 } Model;
 
@@ -968,13 +907,94 @@ BOOL CALLBACK SetFontNoRedraw(HWND child, LPARAM font){
     return TRUE;
 }
 
-Model *getModel(HWND dialog) {
-    return (Model*)GetWindowLongPtr(
-        GetWindow(dialog, GW_OWNER), GWLP_USERDATA
+Model *getModel(HWND window) {
+    Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
+    if (model) { return model; }
+    HWND owner = GetWindowOwner(window);
+    if (owner) {
+        model = (Model*)GetWindowLongPtr(owner, GWLP_USERDATA);
+        SetWindowLongPtr(window, GWLP_USERDATA, (LONG)model);
+    }
+
+    return model;
+}
+
+BOOL shouldShowDropdown(HWND dialog, Model *model) {
+    return model->showCaption || model->inMenuLoop
+        || GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX);
+}
+
+SIZE getMinDialogClientSize(HWND dialog) {
+    Model *model = getModel(dialog);
+    SIZE clientSize = model->minTextBoxSize;
+    if (clientSize.cy == 0) { return clientSize; }
+    UINT dpi = GetDpiForWindow(dialog);
+    int textBoxWidth = ptToIntPx(model->textBoxWidthPt, dpi);
+    clientSize.cx = max(clientSize.cx, textBoxWidth);
+    if (shouldShowDropdown(dialog, model)) {
+        clientSize.cx += ptToIntPx(model->dropdownWidthPt, dpi);
+    }
+
+    int clientHeight = ptToIntPx(model->clientHeightPt, dpi);
+    clientSize.cy = max(clientSize.cy, clientHeight);
+    return clientSize;
+}
+
+typedef struct {
+    SIZE clientSize;
+    BOOL showCaption;
+    BOOL showMenuBar;
+} MinDialogSizeIn;
+MinDialogSizeIn minDialogSizeIn = { .clientSize = { 0, 0 } };
+SIZE minDialogSizeOut;
+SIZE getMinDialogSize(HWND dialog) {
+    Model *model = getModel(dialog);
+    MinDialogSizeIn in = {
+        .clientSize = getMinDialogClientSize(dialog),
+        .showCaption = model->showCaption,
+        .showMenuBar = GetMenu(dialog) != NULL,
+    };
+    if (in.clientSize.cy == 0) { return in.clientSize; }
+    if (!memcmp(&in, &minDialogSizeIn, sizeof(in))) {
+        return minDialogSizeOut;
+    }
+    debugIncrement(model->window);
+
+    minDialogSizeIn = in;
+    RECT frame = { 0, 0, in.clientSize.cx, in.clientSize.cy };
+    AdjustWindowRectEx(
+        &frame,
+        GetWindowLongPtr(dialog, GWL_STYLE),
+        in.showMenuBar,
+        GetWindowLongPtr(dialog, GWL_EXSTYLE)
+    );
+    minDialogSizeOut.cx = frame.right - frame.left;
+    minDialogSizeOut.cy = frame.bottom - frame.top;
+    return minDialogSizeOut;
+}
+
+void applyMinDialogSize(HWND dialog) {
+    RECT newFrame = {0, 0, 0, 0};
+    *(LPSIZE)&newFrame.right = getMinDialogSize(dialog);
+    if (newFrame.bottom == 0) { return; }
+    RECT frame;
+    GetWindowRect(dialog, &frame);
+    OffsetRect(&frame, -frame.left, -frame.top);
+    if (getModel(dialog)->showCaption) {
+        newFrame.right = max(newFrame.right, frame.right);
+    }
+
+    if (!memcmp(&frame, &newFrame, sizeof(frame))) { return; }
+    SetWindowPos(
+        dialog,
+        NULL,
+        0, 0,
+        newFrame.right, newFrame.bottom,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
     );
 }
 
-const UINT WM_APP_APPLYMINMAXINFO = WM_APP + 0;
+const UINT WM_APP_FITTOTEXT = WM_APP + 0;
 const int ENABLE_DROPDOWN_TIMER = 1;
 LRESULT CALLBACK DlgProc(
     HWND dialog,
@@ -984,11 +1004,12 @@ LRESULT CALLBACK DlgProc(
 ) {
     if (message == WM_INITDIALOG) {
         Model *model = getModel(dialog);
+        model->inMenuLoop = FALSE;
         MENUITEMINFO menuItemInfo = {
             .cbSize = sizeof(MENUITEMINFO),
             .fMask = MIIM_STATE,
             .fState =
-                model->hideInterface ? MFS_CHECKED : MFS_UNCHECKED,
+                model->showCaption ? MFS_UNCHECKED : MFS_CHECKED,
         };
         SetMenuItemInfo(
             getDropdownMenu(),
@@ -997,10 +1018,10 @@ LRESULT CALLBACK DlgProc(
             &menuItemInfo
         );
         LONG_PTR style = GetWindowLongPtr(dialog, GWL_STYLE);
-        if (model->hideInterface) {
-            style &= ~WS_THICKFRAME & ~WS_CAPTION;
-        } else {
+        if (model->showCaption) {
             style |= WS_THICKFRAME | WS_CAPTION;
+        } else {
+            style &= ~WS_THICKFRAME & ~WS_CAPTION;
         }
 
         SetWindowLongPtr(dialog, GWL_STYLE, style);
@@ -1034,18 +1055,35 @@ LRESULT CALLBACK DlgProc(
             MAKELPARAM(0, 0)
         );
 
-        PostMessage(dialog, WM_APP_APPLYMINMAXINFO, 0, 0);
+        PostMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
         return TRUE;
-    } else if (message == WM_APP_APPLYMINMAXINFO) {
-        RECT frame;
-        GetWindowRect(dialog, &frame);
-        SetWindowPos(
-            dialog,
-            NULL,
-            0, 0,
-            frame.right - frame.left, frame.bottom - frame.top,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+    } else if (message == WM_APP_FITTOTEXT) {
+        HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+        HDC device = GetDC(textBox);
+        HFONT font = (HFONT)SendMessage(textBox, WM_GETFONT, 0, 0);
+        HFONT oldFont = SelectObject(device, font);
+        RECT rect = { 0, 0, 0, 0 };
+        Model *model = getModel(dialog);
+        DrawText(
+            device, model->text, -1, &rect,
+            DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
         );
+        SelectObject(device, oldFont);
+        ReleaseDC(textBox, device);
+
+        // 1px cursor, 1px padding left, 2px padding right, left and right margin
+        LRESULT margins = SendMessage(textBox, EM_GETMARGINS, 0, 0);
+        rect.right += 4 + LOWORD(margins) + HIWORD(margins);
+        rect.bottom += 2; // 1px padding top, 1px padding bottom
+        AdjustWindowRectEx(
+            &rect,
+            GetWindowLongPtr(textBox, GWL_STYLE),
+            FALSE, // bMenu
+            GetWindowLongPtr(textBox, GWL_EXSTYLE)
+        );
+        model->minTextBoxSize.cx = rect.right - rect.left;
+        model->minTextBoxSize.cy = rect.bottom - rect.top;
+        applyMinDialogSize(dialog);
         return TRUE;
     } else if (message == WM_SIZE) {
         RECT client;
@@ -1053,56 +1091,31 @@ LRESULT CALLBACK DlgProc(
         Model *model = getModel(dialog);
         UINT dpi = GetDpiForWindow(dialog);
         int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
-        if (model->hideInterface && model->textBoxActive) {
-            client.right += dropdownWidth;
+        if (shouldShowDropdown(dialog, model)) {
+            client.right -= dropdownWidth;
         }
 
         SetWindowPos(
             GetDlgItem(dialog, IDC_TEXTBOX),
-            NULL, 0, 0, client.right - dropdownWidth, client.bottom, 0
+            NULL, 0, 0, client.right, client.bottom, 0
         );
         SetWindowPos(
             GetDlgItem(dialog, IDC_DROPDOWN),
             NULL,
-            client.right - dropdownWidth, 0,
+            client.right, 0,
             dropdownWidth, client.bottom,
             0
         );
         return TRUE;
     } else if (message == WM_GETMINMAXINFO) {
-        Model *model = getModel(dialog);
-        HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-        SIZE textBoxMinSize = getTextBoxMinSize(textBox, model->text);
-        UINT dpi = GetDpiForWindow(dialog);
-        int dropdownWidthPx = ptToIntPx(model->dropdownWidthPt, dpi);
-        if (model->hideInterface && model->textBoxActive) {
-            dropdownWidthPx = 0;
+        if (getModel(dialog)->showCaption) {
+            LPMINMAXINFO minMaxInfo = (LPMINMAXINFO)lParam;
+            SIZE minSize = getMinDialogSize(dialog);
+            minMaxInfo->ptMinTrackSize.x = minSize.cx;
+            minMaxInfo->ptMinTrackSize.y = minSize.cy;
+            minMaxInfo->ptMaxTrackSize.y = minSize.cy;
         }
 
-        RECT frame = {
-            .left = 0,
-            .top = 0,
-            .right = max(
-                ptToIntPx(model->textBoxWidthPt, dpi), textBoxMinSize.cx
-            ) + dropdownWidthPx,
-            .bottom = max(
-                ptToIntPx(model->clientHeightPt, dpi), textBoxMinSize.cy
-            ),
-        };
-        AdjustWindowRectEx(
-            &frame,
-            GetWindowLongPtr(dialog, GWL_STYLE),
-            GetMenu(dialog) != NULL,//== getDropdownMenu(),
-            GetWindowLongPtr(dialog, GWL_EXSTYLE)
-        );
-        LPMINMAXINFO minMaxInfo = (LPMINMAXINFO)lParam;
-        minMaxInfo->ptMinTrackSize.x = frame.right - frame.left;
-        if (model->hideInterface) {
-            minMaxInfo->ptMaxTrackSize.x = frame.right - frame.left;
-        }
-
-        minMaxInfo->ptMinTrackSize.y = frame.bottom - frame.top;
-        minMaxInfo->ptMaxTrackSize.y = frame.bottom - frame.top;
         return 0;
     } else if (message == WM_DPICHANGED) {
         SendMessage(
@@ -1154,17 +1167,13 @@ LRESULT CALLBACK DlgProc(
     } else if (message == WM_SYSCOMMAND) {
         if ((wParam & 0xFFF0) == SC_KEYMENU) {
             SetMenu(dialog, getDropdownMenu());
-            SendMessage(dialog, WM_APP_APPLYMINMAXINFO, 0, 0);
+            applyMinDialogSize(dialog);
             return 0;
         }
     } else if (message == WM_ENTERMENULOOP) {
-        Model *model = getModel(dialog);
-        if (model->hideInterface && model->textBoxActive) {
-            model->textBoxActive = FALSE;
-            SendMessage(dialog, WM_APP_APPLYMINMAXINFO, 0, 0);
-        } else {
-            model->textBoxActive = FALSE;
-        }
+        getModel(dialog)->inMenuLoop = TRUE;
+        applyMinDialogSize(dialog);
+        return TRUE;
     } else if (message == WM_EXITMENULOOP) {
         HWND button = GetDlgItem(dialog, IDC_DROPDOWN);
         if (Button_GetCheck(button)) {
@@ -1173,6 +1182,7 @@ LRESULT CALLBACK DlgProc(
             Button_Enable(button, FALSE);
         }
 
+        getModel(dialog)->inMenuLoop = FALSE;
         SetTimer(dialog, ENABLE_DROPDOWN_TIMER, 0, NULL);
         return TRUE;
     } else if (message == WM_TIMER) {
@@ -1182,14 +1192,8 @@ LRESULT CALLBACK DlgProc(
             if (GetFocus() == NULL) { SetFocus(button); }
             SetWindowRedraw(button, TRUE);
             KillTimer(dialog, wParam);
-
-            Model *model = getModel(dialog);
-            model->textBoxActive = GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX);
-            if ((model->textBoxActive && model->hideInterface) || GetMenu(dialog)) {
-                SetMenu(dialog, NULL);
-                SendMessage(dialog, WM_APP_APPLYMINMAXINFO, 0, 0);
-            }
-
+            SetMenu(dialog, NULL);
+            applyMinDialogSize(dialog);
             return TRUE;
         }
     } else if (message == WM_COMMAND) {
@@ -1246,7 +1250,7 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
-                model->hideInterface = !model->hideInterface;
+                model->showCaption = !model->showCaption;
                 DWORD selectionStart, selectionStop;
                 SendMessage(
                     GetDlgItem(dialog, IDC_TEXTBOX),
@@ -1256,7 +1260,7 @@ LRESULT CALLBACK DlgProc(
                 );
                 SetMenu(dialog, NULL);
                 DestroyWindow(dialog);
-                model->textBoxActive = TRUE;
+                model->minTextBoxSize.cx = model->minTextBoxSize.cy = 0;
                 model->dialog = CreateDialog(
                     GetModuleHandle(NULL), L"TOOL", model->window, DlgProc
                 );
@@ -1273,19 +1277,12 @@ LRESULT CALLBACK DlgProc(
                 HIWORD(wParam) == EN_SETFOCUS
                     || HIWORD(wParam) == EN_KILLFOCUS
             ) {
-                Model *model = getModel(dialog);
-                if (model->textBoxActive != (HIWORD(wParam) == EN_SETFOCUS)) {
-                    model->textBoxActive = HIWORD(wParam) == EN_SETFOCUS;
-                    if (model->hideInterface) {
-                        SendMessage(dialog, WM_APP_APPLYMINMAXINFO, 0, 0);
-                    }
-                }
-
+                applyMinDialogSize(dialog);
                 return TRUE;
             } else if (HIWORD(wParam) == EN_UPDATE) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                 getModel(dialog)->text = getTextBoxText(textBox);
-                SendMessage(dialog, WM_APP_APPLYMINMAXINFO, 0, 0);
+                SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
                 return TRUE;
             }
         }
@@ -1301,9 +1298,7 @@ LRESULT CALLBACK DlgProc(
     return FALSE;
 }
 
-int TranslateAcceleratorCustom(
-    HWND dialog, HACCEL acceleratorHandle, MSG *message
-) {
+int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
     if (message->message == WM_KEYDOWN) {
         if (message->wParam == VK_SPACE && !getModifiers()) {
             if (GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX)) {
@@ -1333,7 +1328,7 @@ int TranslateAcceleratorCustom(
             }
         }
     }
-    return TranslateAccelerator(dialog, acceleratorHandle, message);
+    return TranslateAccelerator(dialog, getAcceleratorTable(), message);
 }
 
 int CALLBACK WinMain(
@@ -1346,7 +1341,6 @@ int CALLBACK WinMain(
 
     double PI = 3.1415926535897932384626433832795;
     Model model = {
-        .textBoxActive = TRUE,
         .colorKey = RGB(255, 0, 255),
         .offsetXPt = 0,
         .offsetYPt = 0,
@@ -1369,21 +1363,22 @@ int CALLBACK WinMain(
         .textBoxWidthPt = 15,
         .dropdownWidthPt = 15,
         .clientHeightPt = 21,
-        .hideInterface = FALSE,
+        .showCaption = TRUE,
+        .minTextBoxSize = { 0, 0 },
+        .inMenuLoop = FALSE,
         .text = L"",
     };
 
     WNDCLASS windowClass = {
         .lpfnWndProc   = WndProc,
         .hInstance     = hInstance,
-        .hIcon         = LoadIcon(hInstance, (LPCWSTR)101), // TODO: free?
+        .hIcon         = LoadIcon(hInstance, (LPCWSTR)101),
         .hCursor       = LoadCursor(0, IDC_ARROW),
         // https://www.guidgenerator.com/
         .lpszClassName = L"MouseJump,b354100c-e6a7-4d32-a0bb-643e35a82fb0",
     };
     RegisterClass(&windowClass);
 
-    // TODO: get size of active window BEFORE closing anything
     HWND oldWindow = NULL;
     do {
         oldWindow = FindWindowEx(
@@ -1415,11 +1410,7 @@ int CALLBACK WinMain(
     while (GetMessage(&message, NULL, 0, 0)) {
         // https://devblogs.microsoft.com/oldnewthing/20120416-00/?p=7853
         if (
-            !TranslateAcceleratorCustom(
-                model.dialog,
-                getAcceleratorTable(model.textBoxActive),
-                &message
-            )
+            !TranslateAcceleratorCustom(model.dialog, &message)
                 && !IsDialogMessage(model.dialog, &message)
         ) {
             TranslateMessage(&message);
