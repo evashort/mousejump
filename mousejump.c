@@ -499,7 +499,7 @@ HACCEL getAcceleratorTable() {
 
 typedef struct { ACCEL *value; int count; } AccelArray;
 AccelArray acceleratorsOut = { .value = NULL };
-AccelArray getAccelerators(textBoxActive) {
+AccelArray getAccelerators() {
     if (acceleratorsOut.value) { return acceleratorsOut; }
     acceleratorsOut.count = CopyAcceleratorTable(
         getAcceleratorTable(), NULL, 0
@@ -511,6 +511,38 @@ AccelArray getAccelerators(textBoxActive) {
         acceleratorsOut.count
     );
     return acceleratorsOut;
+}
+
+typedef struct { int left; int up; int right; int down; } ArrowKeyMap;
+ArrowKeyMap getArrowKeyMap(int left, int up, int right, int down) {
+    ArrowKeyMap keys = { 0, 0, 0, 0 };
+    AccelArray accelerators = getAccelerators();
+    for (int i = 0; i < accelerators.count; i++) {
+        ACCEL accelerator = accelerators.value[i];
+        if (accelerator.cmd == left) { keys.left = accelerator.key; }
+        else if (accelerator.cmd == up) { keys.up = accelerator.key; }
+        else if (accelerator.cmd == right) { keys.right = accelerator.key; }
+        else if (accelerator.cmd == down) { keys.down = accelerator.key; }
+    }
+
+    return keys;
+}
+
+ArrowKeyMap normalArrowKeyMapOut = { 0, 0, 0, 0 };
+ArrowKeyMap getNormalArrowKeyMap() {
+    if (normalArrowKeyMapOut.left) { return normalArrowKeyMapOut; }
+    return normalArrowKeyMapOut = getArrowKeyMap(
+        IDM_LEFT, IDM_UP, IDM_RIGHT, IDM_DOWN
+    );
+}
+
+ArrowKeyMap slowArrowKeyMapOut = { 0, 0, 0, 0 };
+ArrowKeyMap getSlowArrowKeyMap() {
+    if (slowArrowKeyMapOut.left) { return slowArrowKeyMapOut; }
+    return slowArrowKeyMapOut = getArrowKeyMap(
+        IDM_SLIGHTLY_LEFT, IDM_SLIGHTLY_UP,
+        IDM_SLIGHTLY_RIGHT, IDM_SLIGHTLY_DOWN
+    );
 }
 
 HBITMAP dropdownBitmapOut = NULL;
@@ -807,18 +839,6 @@ void redraw(HWND window) {
     DeleteDC(memory);
 }
 
-const int SHIFT = 1, CONTROL = 2, ALT = 4, WIN = 8;
-const int PRESSED = 0x8000;
-int getModifiers() {
-    int modifiers = 0;
-    modifiers |= GetKeyState(VK_SHIFT) & PRESSED ? SHIFT : 0;
-    modifiers |= GetKeyState(VK_CONTROL) & PRESSED ? CONTROL : 0;
-    modifiers |= GetKeyState(VK_MENU) & PRESSED ? ALT : 0;
-    modifiers |=
-        (GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & PRESSED ? WIN : 0;
-    return modifiers;
-}
-
 LRESULT CALLBACK WndProc(
     HWND window,
     UINT message,
@@ -827,37 +847,6 @@ LRESULT CALLBACK WndProc(
 ) {
     if (message == WM_PAINT) {
         redraw(window);
-    } else if (message == WM_KEYDOWN) {
-        int modifiers = getModifiers();
-        if (
-            wParam == VK_ESCAPE || (
-                (wParam == 'W' || wParam == 'Q') && modifiers == CONTROL
-            )
-        ) {
-            SendMessage(window, WM_CLOSE, 0, 0);
-            return 0;
-        } else if (
-            (
-                wParam == VK_LEFT || wParam == VK_UP || wParam == VK_RIGHT
-                    || wParam == VK_DOWN
-            )
-                && (modifiers == 0 || modifiers == SHIFT)
-        ) {
-            Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
-            int xDirection = (GetKeyState(VK_RIGHT) & PRESSED) > 0;
-            xDirection -= (GetKeyState(VK_LEFT) & PRESSED) > 0;
-            int yDirection = (GetKeyState(VK_DOWN) & PRESSED) > 0;
-            yDirection -= (GetKeyState(VK_UP) & PRESSED) > 0;
-            if (xDirection || yDirection) {
-                UINT dpi = GetDpiForWindow(window);
-                double deltaPx =
-                    modifiers == SHIFT ? model->smallDeltaPx : model->deltaPx;
-                model->offsetXPt += pxToPt(deltaPx * xDirection, dpi);
-                model->offsetYPt += pxToPt(deltaPx * yDirection, dpi);
-                redraw(window);
-                return 0;
-            }
-        }
     } else if (message == WM_ACTIVATE) {
         if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
             HWND dialog = (HWND)GetWindowLongPtr(window, GWLP_USERDATA);
@@ -994,6 +983,7 @@ void applyMinDialogSize(HWND dialog) {
     );
 }
 
+const int PRESSED = 0x8000;
 const UINT WM_APP_FITTOTEXT = WM_APP + 0;
 const int ENABLE_DROPDOWN_TIMER = 1;
 LRESULT CALLBACK DlgProc(
@@ -1229,24 +1219,63 @@ LRESULT CALLBACK DlgProc(
                 );
 
                 return TRUE;
-            } else if (LOWORD(wParam) == IDM_LEFT) {
-                HWND window = GetWindow(dialog, GW_OWNER);
-                Model *model = (Model*)GetWindowLongPtr(
-                    window, GWLP_USERDATA
+            } else if (
+                LOWORD(wParam) == IDM_LEFT
+                    || LOWORD(wParam) == IDM_UP
+                    || LOWORD(wParam) == IDM_RIGHT
+                    || LOWORD(wParam) == IDM_DOWN
+            ) {
+                ArrowKeyMap keys = getNormalArrowKeyMap();
+                int xDirection = (
+                    LOWORD(wParam) == IDM_RIGHT
+                        || (GetKeyState(keys.right) & PRESSED)
+                ) - (
+                    LOWORD(wParam) == IDM_LEFT
+                        || (GetKeyState(keys.left) & PRESSED)
                 );
-                UINT dpi = GetDpiForWindow(window);
-                model->offsetXPt -= pxToPt(model->deltaPx, dpi);
-                AccelArray accelerators = getAccelerators();
-                int upKey = 0;
-                for (int i = 0; i < accelerators.count; i++) {
-                    if (accelerators.value[i].cmd == IDM_UP) {
-                        upKey = accelerators.value[i].key;
-                    }
-                }
-                if (GetKeyState(upKey) & PRESSED) {
-                    model->offsetYPt -= pxToPt(model->deltaPx, dpi);
-                }
-                RedrawWindow(window, NULL, NULL, RDW_INTERNALPAINT);
+                int yDirection = (
+                    LOWORD(wParam) == IDM_DOWN
+                        || (GetKeyState(keys.down) & PRESSED)
+                ) - (
+                    LOWORD(wParam) == IDM_UP
+                        || (GetKeyState(keys.up) & PRESSED)
+                );
+                Model *model = getModel(dialog);
+                UINT dpi = GetDpiForWindow(model->window);
+                model->offsetXPt += xDirection * pxToPt(model->deltaPx, dpi);
+                model->offsetYPt += yDirection * pxToPt(model->deltaPx, dpi);
+                RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
+                return TRUE;
+            } else if (
+                LOWORD(wParam) == IDM_SLIGHTLY_LEFT
+                    || LOWORD(wParam) == IDM_SLIGHTLY_UP
+                    || LOWORD(wParam) == IDM_SLIGHTLY_RIGHT
+                    || LOWORD(wParam) == IDM_SLIGHTLY_DOWN
+            ) {
+                ArrowKeyMap keys = getSlowArrowKeyMap();
+                int xDirection = (
+                    LOWORD(wParam) == IDM_SLIGHTLY_RIGHT
+                        || (GetKeyState(keys.right) & PRESSED)
+                ) - (
+                    LOWORD(wParam) == IDM_SLIGHTLY_LEFT
+                        || (GetKeyState(keys.left) & PRESSED)
+                );
+                int yDirection = (
+                    LOWORD(wParam) == IDM_SLIGHTLY_DOWN
+                        || (GetKeyState(keys.down) & PRESSED)
+                ) - (
+                    LOWORD(wParam) == IDM_SLIGHTLY_UP
+                        || (GetKeyState(keys.up) & PRESSED)
+                );
+                Model *model = getModel(dialog);
+                UINT dpi = GetDpiForWindow(model->window);
+                model->offsetXPt += xDirection * pxToPt(
+                    model->smallDeltaPx, dpi
+                );
+                model->offsetYPt += yDirection * pxToPt(
+                    model->smallDeltaPx, dpi
+                );
+                RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
                 return TRUE;
             } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
@@ -1296,6 +1325,17 @@ LRESULT CALLBACK DlgProc(
     }
 
     return FALSE;
+}
+
+const int SHIFT = 1, CONTROL = 2, ALT = 4, WIN = 8;
+int getModifiers() {
+    int modifiers = 0;
+    modifiers |= GetKeyState(VK_SHIFT) & PRESSED ? SHIFT : 0;
+    modifiers |= GetKeyState(VK_CONTROL) & PRESSED ? CONTROL : 0;
+    modifiers |= GetKeyState(VK_MENU) & PRESSED ? ALT : 0;
+    modifiers |=
+        (GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & PRESSED ? WIN : 0;
+    return modifiers;
 }
 
 int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
