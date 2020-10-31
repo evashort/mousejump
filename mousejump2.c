@@ -927,6 +927,16 @@ SIZE getMinDialogClientSize(HWND dialog) {
     return clientSize;
 }
 
+DWORD GetFinalStyle(HWND dialog) {
+    DWORD style = GetWindowLongPtr(dialog, GWL_STYLE);
+    Model *model = getModel(dialog);
+    if (getModel(dialog)->showCaption) {
+        return style | WS_THICKFRAME | WS_CAPTION;
+    } else {
+        return style & ~WS_THICKFRAME & ~WS_CAPTION;
+    }
+}
+
 typedef struct {
     SIZE clientSize;
     BOOL showCaption;
@@ -950,7 +960,7 @@ SIZE getMinDialogSize(HWND dialog) {
     RECT frame = { 0, 0, in.clientSize.cx, in.clientSize.cy };
     AdjustWindowRectEx(
         &frame,
-        GetWindowLongPtr(dialog, GWL_STYLE),
+        GetFinalStyle(dialog),
         in.showMenuBar,
         GetWindowLongPtr(dialog, GWL_EXSTYLE)
     );
@@ -1004,14 +1014,7 @@ LRESULT CALLBACK DlgProc(
             FALSE,
             &menuItemInfo
         );
-        LONG_PTR style = GetWindowLongPtr(dialog, GWL_STYLE);
-        if (model->showCaption) {
-            style |= WS_THICKFRAME | WS_CAPTION;
-        } else {
-            style &= ~WS_THICKFRAME & ~WS_CAPTION;
-        }
-
-        SetWindowLongPtr(dialog, GWL_STYLE, style);
+        SetWindowLongPtr(dialog, GWL_STYLE, GetFinalStyle(dialog));
         SendMessage(
             dialog,
             WM_SETFONT,
@@ -1154,7 +1157,6 @@ LRESULT CALLBACK DlgProc(
     } else if (message == WM_SYSCOMMAND) {
         if ((wParam & 0xFFF0) == SC_KEYMENU) {
             SetMenu(dialog, getDropdownMenu());
-            applyMinDialogSize(dialog);
             return 0;
         }
     } else if (message == WM_ENTERMENULOOP) {
