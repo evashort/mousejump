@@ -713,8 +713,20 @@ COLORREF getTextColor(COLORREF background) {
     }
 }
 
-void redraw(HWND window) {
+Model *getModel(HWND window) {
     Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
+    if (model) { return model; }
+    HWND owner = GetWindowOwner(window);
+    if (owner) {
+        model = (Model*)GetWindowLongPtr(owner, GWLP_USERDATA);
+        SetWindowLongPtr(window, GWLP_USERDATA, (LONG)model);
+    }
+
+    return model;
+}
+
+void redraw(HWND window) {
+    Model *model = getModel(window);
     RECT frame;
     GetWindowRect(window, &frame);
     RECT client = {
@@ -849,12 +861,10 @@ LRESULT CALLBACK WndProc(
         redraw(window);
     } else if (message == WM_ACTIVATE) {
         if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
-            HWND dialog = (HWND)GetWindowLongPtr(window, GWLP_USERDATA);
-            // The main window initially receives WM_ACTIVATE before the
-            // dialog is created.
-            if (dialog) {
-                SetActiveWindow(dialog);
-            }
+            Model *model = getModel(window);
+            // The main window initially receives WM_ACTIVATE before its user
+            // data is populated
+            if (model) { SetActiveWindow(model->dialog); }
             return 0;
         }
     } else if (message == WM_DPICHANGED) {
@@ -896,18 +906,6 @@ BOOL CALLBACK SetFontNoRedraw(HWND child, LPARAM font){
     return TRUE;
 }
 
-Model *getModel(HWND window) {
-    Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
-    if (model) { return model; }
-    HWND owner = GetWindowOwner(window);
-    if (owner) {
-        model = (Model*)GetWindowLongPtr(owner, GWLP_USERDATA);
-        SetWindowLongPtr(window, GWLP_USERDATA, (LONG)model);
-    }
-
-    return model;
-}
-
 BOOL shouldShowDropdown(HWND dialog, Model *model) {
     return model->showCaption || model->inMenuLoop
         || GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX);
@@ -947,7 +945,6 @@ SIZE getMinDialogSize(HWND dialog) {
     if (!memcmp(&in, &minDialogSizeIn, sizeof(in))) {
         return minDialogSizeOut;
     }
-    debugIncrement(model->window);
 
     minDialogSizeIn = in;
     RECT frame = { 0, 0, in.clientSize.cx, in.clientSize.cy };
