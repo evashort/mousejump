@@ -486,6 +486,81 @@ RECT *selectSelectionBitmap(HDC device, HDC memory, int count) {
     );
 }
 
+typedef struct { COLORREF color; int width; } BorderPenIn;
+BorderPenIn borderPenIn;
+HPEN borderPenOut;
+HPEN getBorderPen(COLORREF color, int width) {
+    BorderPenIn in = { .color = color, .width = width };
+    if (borderPenOut) {
+        if (!memcmp(&in, &borderPenIn, sizeof(in))) { return borderPenOut; }
+        DeletePen(borderPenOut);
+    }
+
+    borderPenIn = in;
+    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
+    return borderPenOut = ExtCreatePen(
+        PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_FLAT | PS_JOIN_MITER,
+        width, &brush, 0, NULL
+    );
+}
+
+typedef struct {
+    int borderPx;
+    int offsetPx;
+    int heightPx;
+    COLORREF keyColor;
+    COLORREF borderColor;
+    COLORREF backgroundColor;
+} EarBitmapIn;
+EarBitmapIn earBitmapIn;
+HBITMAP earBitmapOut = NULL;
+const double sqrt2 = 1.4142135623730950488016887242096;
+SIZE selectEarBitmap(
+    HDC device, HDC memory,
+    int borderPx, int offsetPx, int heightPx,
+    COLORREF keyColor, COLORREF borderColor, COLORREF backgroundColor
+) {
+    SIZE size = { offsetPx, heightPx };
+    EarBitmapIn in = {
+        .borderPx = borderPx,
+        .offsetPx = offsetPx,
+        .heightPx = heightPx,
+        .keyColor = keyColor,
+        .borderColor = borderColor,
+        .backgroundColor = backgroundColor,
+    };
+    if (earBitmapOut) {
+        if (!memcmp(&in, &earBitmapIn, sizeof(in))) {
+            SelectObject(memory, earBitmapOut);
+            return size;
+        }
+
+        DeleteObject(earBitmapOut);
+    }
+
+    earBitmapIn = in;
+    earBitmapOut = CreateCompatibleBitmap(device, offsetPx, heightPx);
+    SelectObject(memory, earBitmapOut);
+    RECT rect = { 0, 0, offsetPx, heightPx };
+    FillRect(memory, &rect, getKeyBrush(keyColor));
+    SelectObject(memory, getBorderPen(borderColor, borderPx));
+    SelectObject(memory, getLabelBrush(backgroundColor));
+    int borderDiagonalPx = (int)round(borderPx * sqrt2);
+    int xyOffset = borderPx / 2;
+    int yOffset = (borderDiagonalPx - 1) / 2;
+    POINT points[3] = {
+        { xyOffset, heightPx + xyOffset },
+        { xyOffset, xyOffset + yOffset },
+        { heightPx + xyOffset - yOffset, heightPx + xyOffset },
+    };
+    Polygon(memory, points, 3);
+    SelectObject(memory, getBorderPen(RGB(0, 0, 0), 1));
+    rect.left = borderPx;
+    rect.top = offsetPx;
+    FillRect(memory, &rect, getKeyBrush(keyColor));
+    return size;
+}
+
 #pragma region dialogHelpers
 
 HACCEL acceleratorTableOut = NULL;
@@ -620,6 +695,8 @@ void destroyCache() {
     }
 
     if (selectionBitmapOut.rects) { free(selectionBitmapOut.rects); }
+    if (borderPenOut) { DeletePen(borderPenOut); }
+    if (earBitmapOut) { DeleteObject(earBitmapOut); }
     if (acceleratorsOut.value) { free(acceleratorsOut.value); }
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
     if (dropdownBitmapOut) { DeleteObject(dropdownBitmapOut); }
@@ -651,6 +728,10 @@ typedef struct {
     double paddingBottomPt;
     COLORREF labelBackground;
     COLORREF selectionBackground;
+    double borderPt;
+    double earHeightPt;
+    double earElevationPt;
+    COLORREF borderColor;
     double textBoxWidthPt;
     double dropdownWidthPt;
     double clientHeightPt;
@@ -770,6 +851,19 @@ void redraw(HWND window) {
     RECT *selectionRects = selectSelectionBitmap(
         device, selectionMemory, bubbleCount
     );
+    HDC earMemory = CreateCompatibleDC(device);
+    int borderPx = ptToThinPx(model->borderPt, dpi);
+    int earElevationPx = ptToIntPx(model->earElevationPt, dpi);
+    SIZE earSize = selectEarBitmap(
+        device,
+        earMemory,
+        borderPx,
+        earElevationPx,
+        ptToIntPx(model->earHeightPt, dpi),
+        model->colorKey,
+        model->borderColor,
+        model->labelBackground
+    );
     // RECT labelBitmapRect = {
     //     ptToIntPx(model->offsetXPt, dpi) + 100,
     //     ptToIntPx(model->offsetYPt, dpi) + 400,
@@ -791,6 +885,17 @@ void redraw(HWND window) {
             .y = ptToIntPx(positionPt.y, dpi),
         };
         clampToRect(client, &positionPx);
+        BitBlt(
+            memory,
+            positionPx.x - borderPx,
+            positionPx.y - earElevationPx,
+            earSize.cx,
+            earSize.cy,
+            earMemory,
+            0,
+            0,
+            SRCCOPY
+        );
         BitBlt(
             memory,
             positionPx.x,
@@ -816,6 +921,7 @@ void redraw(HWND window) {
     }
     DeleteDC(selectionMemory);
     DeleteDC(labelMemory);
+    DeleteDC(earMemory);
     ReleaseDC(window, device);
     POINT origin = {0, 0};
     SIZE frameSize = { widthPx, heightPx };
@@ -844,6 +950,13 @@ void redraw(HWND window) {
             &dstRect, positionPx.x - dstRect.left, positionPx.y - dstRect.top
         );
         FillRect(memory, &dstRect, keyBrush);
+        RECT earRect = {
+            .left = positionPx.x - borderPx,
+            .top = positionPx.y - earElevationPx
+        };
+        earRect.right = earRect.left + earSize.cx;
+        earRect.bottom = earRect.top + earSize.cy;
+        FillRect(memory, &earRect, keyBrush);
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
@@ -927,7 +1040,7 @@ SIZE getMinDialogClientSize(HWND dialog) {
     return clientSize;
 }
 
-DWORD GetFinalStyle(HWND dialog) {
+DWORD getFinalStyle(HWND dialog) {
     DWORD style = GetWindowLongPtr(dialog, GWL_STYLE);
     Model *model = getModel(dialog);
     if (getModel(dialog)->showCaption) {
@@ -960,7 +1073,7 @@ SIZE getMinDialogSize(HWND dialog) {
     RECT frame = { 0, 0, in.clientSize.cx, in.clientSize.cy };
     AdjustWindowRectEx(
         &frame,
-        GetFinalStyle(dialog),
+        getFinalStyle(dialog),
         in.showMenuBar,
         GetWindowLongPtr(dialog, GWL_EXSTYLE)
     );
@@ -1014,7 +1127,7 @@ LRESULT CALLBACK DlgProc(
             FALSE,
             &menuItemInfo
         );
-        SetWindowLongPtr(dialog, GWL_STYLE, GetFinalStyle(dialog));
+        SetWindowLongPtr(dialog, GWL_STYLE, getFinalStyle(dialog));
         SendMessage(
             dialog,
             WM_SETFONT,
@@ -1399,6 +1512,10 @@ int CALLBACK WinMain(
         .paddingBottomPt = 0.75,
         .labelBackground = RGB(255, 255, 255),
         .selectionBackground = GetSysColor(COLOR_HIGHLIGHT),
+        .borderPt = .75,
+        .earHeightPt = 6,
+        .earElevationPt = 4,
+        .borderColor = RGB(0, 0, 0),
         .textBoxWidthPt = 15,
         .dropdownWidthPt = 15,
         .clientHeightPt = 21,
