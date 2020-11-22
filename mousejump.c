@@ -126,74 +126,59 @@ LPWSTR getLabelText() {
     return labelTextOut;
 }
 
-typedef struct {
-    int columns;
-    int rows;
-    LPWSTR *cells; // column-first order
-} CSV;
-CSV labelCSVOut = { .cells = NULL };
-CSV getLabelCSV() {
-    if (labelCSVOut.cells) { return labelCSVOut; }
-    LPWSTR text = getLabelText();
-    CSV csv = { .columns = 0, .rows = 0, .cells = NULL };
-    for (LPWSTR i = text; *i != L'\0'; csv.rows++) {
-        int columns = 0;
-        for (WCHAR terminator = L','; terminator == L','; columns++) {
-            for (
-                int quotes = 0;
-                *i != L'\0' && (
-                    quotes % 2 || (*i != L',' && *i != L'\r' && *i != L'\n')
-                );
-                i++
-            ) {
-                if (*i == L'"') { quotes++; }
-            }
-
-            terminator = *i;
-            if (terminator != L'\0') { i++; }
-            if (terminator == L'\r' && *i == L'\n') { i++; }
-        }
-
-        if (columns > csv.columns) { csv.columns = columns; }
-    }
-
-    csv.cells = (LPWSTR*)malloc(csv.columns * csv.rows * sizeof(LPWSTR*));
-    ZeroMemory(csv.cells, csv.columns * csv.rows * sizeof(LPWSTR*));
-    LPCWSTR *rowStart = csv.cells;
-    for (LPWSTR i = text; *i != L'\0'; rowStart++) {
-        LPCWSTR *cell = rowStart;
-        for (WCHAR terminator = L','; terminator == L','; cell += csv.rows) {
-            *cell = i;
-            int quotes = 0;
-            for (
-                ;
-                *i != L'\0' && (
-                    quotes % 2 || (*i != L',' && *i != L'\r' && *i != L'\n')
-                );
-                i++
-            ) {
-                i[-((quotes + 1) / 2)] = *i;
-                if (*i == L'"') { quotes++; }
-            }
-
-            terminator = *i;
-            i[-(quotes / 2) - (quotes > 0)] = L'\0';
-            if (terminator != L'\0') { i++; }
-            if (terminator == L'\r' && *i == L'\n') { i++; }
-        }
-    }
-
-    labelCSVOut = csv;
-    return csv;
+int compareStringPointersIgnoreCase(const wchar_t **a, const wchar_t **b) {
+    return _wcsicmp(*a, *b);\
 }
 
-#pragma endregion
-typedef struct { LPCWSTR *value; int count; } StringArray;
+typedef struct { LPWSTR *value; int count; } StringArray;
+StringArray labelsOut = { .value = NULL };
 StringArray getLabels() {
-    StringArray labels = { getLabelCSV().cells, getLabelCSV().rows };
-    return labels;
-}
+    if (labelsOut.value) { return labelsOut; }
+    labelsOut.count = 0;
+    LPWSTR labelText = getLabelText();
+    for (LPWSTR i = labelText; ; i++) {
+        if (*i == L'\r' && *(i + 1) == L'\n') { i++; }
+        if ((*i == L'\r' || *i == L'\n') && *(i + 1) == L'\0') { i++; }
+        if (*i == L'\r' || *i == L'\n' || *i == L'\0') {
+            labelsOut.count++;
+            if (*i == L'\0') { break; }
+        }
+    }
 
+    if (labelText[0] == L'\0') { labelsOut.count = 0; }
+    labelsOut.value = malloc(labelsOut.count * sizeof(LPCWSTR));
+    LPCWSTR *labelOut = labelsOut.value;
+    if (labelsOut.count) {
+        *labelOut = labelText;
+        labelOut++;
+    }
+
+    for (LPWSTR i = labelText; ; i++) {
+        if (*i == L'\r' && *(i + 1) == L'\n') {
+            *i = L'\0';
+            i++;
+        }
+
+        if ((*i == L'\r' || *i == L'\n') && *(i + 1) == L'\0') {
+            *i = L'\0';
+            i++;
+        }
+
+        if (*i == L'\r' || *i == L'\n' || *i == L'\0') {
+            if (*i == L'\0') { break; }
+            *labelOut = i + 1;
+            labelOut++;
+        }
+    }
+
+    qsort(
+        (void*)labelsOut.value,
+        labelsOut.count,
+        sizeof(LPWSTR),
+        compareStringPointersIgnoreCase
+    );
+    return labelsOut;
+}
 
 #pragma region selectLabelBitmap
 
@@ -684,7 +669,7 @@ void destroyCache() {
     if (keyBrushOut) { DeleteObject(keyBrushOut); }
     if (keyBitmapOut) { DeleteObject(keyBitmapOut); }
     if (labelTextOut) { free(labelTextOut); }
-    if (labelCSVOut.cells) { free(labelCSVOut.cells); }
+    if (labelsOut.value) { free(labelsOut.value); }
     if (labelFontOut) { DeleteObject(labelFontOut); }
     if (labelWidthsOut) { free(labelWidthsOut); }
     if (labelBrushOut) { DeleteObject(labelBrushOut); }
@@ -876,6 +861,8 @@ void redraw(HWND window) {
     //     labelBitmapRect.bottom - labelBitmapRect.top,
     //     labelMemory, 0, 0, SRCCOPY
     // );
+    int textLength = wcslen(model->text);
+    StringArray labels = getLabels();
     for (int i = 0; i < bubbleCount; i++) {
         Point positionPt = getBubblePositionPt(
             model, widthPt, heightPt, bubbleCount, i
@@ -885,39 +872,51 @@ void redraw(HWND window) {
             .y = ptToIntPx(positionPt.y, dpi),
         };
         clampToRect(client, &positionPx);
-        BitBlt(
-            memory,
-            positionPx.x - borderPx,
-            positionPx.y - earElevationPx,
-            earSize.cx,
-            earSize.cy,
-            earMemory,
-            0,
-            0,
-            SRCCOPY
-        );
-        BitBlt(
-            memory,
-            positionPx.x,
-            positionPx.y,
-            labelRects[i].right - labelRects[i].left,
-            labelRects[i].bottom - labelRects[i].top,
-            labelMemory,
-            labelRects[i].left,
-            labelRects[i].top,
-            SRCCOPY
-        );
-        BitBlt(
-            memory,
-            positionPx.x + paddingPx.left,
-            positionPx.y + paddingPx.top,
-            min(selectionRects[i].right - selectionRects[i].left, 0),
-            selectionRects[i].bottom - selectionRects[i].top,
-            selectionMemory,
-            selectionRects[i].left,
-            selectionRects[i].top,
-            SRCCOPY
-        );
+        if (!_wcsnicmp(model->text, labels.value[i], textLength)) {
+            BitBlt(
+                memory,
+                positionPx.x - borderPx,
+                positionPx.y - earElevationPx,
+                earSize.cx,
+                earSize.cy,
+                earMemory,
+                0,
+                0,
+                SRCCOPY
+            );
+            BitBlt(
+                memory,
+                positionPx.x,
+                positionPx.y,
+                labelRects[i].right - labelRects[i].left,
+                labelRects[i].bottom - labelRects[i].top,
+                labelMemory,
+                labelRects[i].left,
+                labelRects[i].top,
+                SRCCOPY
+            );
+            if (textLength) {
+                RECT textRect = { 0, 0, 0, 0 };
+                DrawText(
+                    labelMemory, labels.value[i], textLength, &textRect,
+                    DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
+                );
+                BitBlt(
+                    memory,
+                    positionPx.x + paddingPx.left,
+                    positionPx.y + paddingPx.top,
+                    min(
+                        selectionRects[i].right - selectionRects[i].left,
+                        textRect.right
+                    ),
+                    selectionRects[i].bottom - selectionRects[i].top,
+                    selectionMemory,
+                    selectionRects[i].left,
+                    selectionRects[i].top,
+                    SRCCOPY
+                );
+            }
+        }
     }
     DeleteDC(selectionMemory);
     DeleteDC(labelMemory);
@@ -1424,6 +1423,7 @@ LRESULT CALLBACK DlgProc(
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                 getModel(dialog)->text = getTextBoxText(textBox);
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
+                redraw(getModel(dialog)->window);
                 return TRUE;
             }
         }
