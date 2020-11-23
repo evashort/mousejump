@@ -180,6 +180,38 @@ StringArray getLabels() {
     return labelsOut;
 }
 
+int labelBinarySearch(
+    LPCWSTR *labels, WCHAR target, int lo, int hi, int offset
+) {
+    // return the index of the first label greater than or equal to target
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (_wcsnicmp(labels[mid] + offset, &target, 1) < 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    return lo;
+}
+
+int labelBinarySearch2(
+    LPCWSTR *labels, WCHAR target, int lo, int hi, int offset
+) {
+    // return the index of the first label greater than target
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (_wcsnicmp(labels[mid] + offset, &target, 1) <= 0) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    return lo;
+}
+
 #pragma region selectLabelBitmap
 
 typedef struct {
@@ -861,9 +893,25 @@ void redraw(HWND window) {
     //     labelBitmapRect.bottom - labelBitmapRect.top,
     //     labelMemory, 0, 0, SRCCOPY
     // );
-    int textLength = wcslen(model->text);
     StringArray labels = getLabels();
-    for (int i = 0; i < bubbleCount; i++) {
+    int start = 0;
+    int stop = labels.count;
+    int textLength = wcslen(model->text);
+    int matchLength = 0;
+    for (int i = 0; i < textLength; i++) {
+        int newStart = labelBinarySearch(
+            labels.value, model->text[i], start, stop, matchLength
+        );
+        int newStop = labelBinarySearch2(
+            labels.value, model->text[i], newStart, stop, matchLength
+        );
+        if (newStart < newStop) {
+            start = newStart;
+            stop = newStop;
+            matchLength++;
+        }
+    }
+    for (int i = start; i < stop; i++) {
         Point positionPt = getBubblePositionPt(
             model, widthPt, heightPt, bubbleCount, i
         );
@@ -872,50 +920,48 @@ void redraw(HWND window) {
             .y = ptToIntPx(positionPt.y, dpi),
         };
         clampToRect(client, &positionPx);
-        if (!_wcsnicmp(model->text, labels.value[i], textLength)) {
-            BitBlt(
-                memory,
-                positionPx.x - borderPx,
-                positionPx.y - earElevationPx,
-                earSize.cx,
-                earSize.cy,
-                earMemory,
-                0,
-                0,
-                SRCCOPY
+        BitBlt(
+            memory,
+            positionPx.x - borderPx,
+            positionPx.y - earElevationPx,
+            earSize.cx,
+            earSize.cy,
+            earMemory,
+            0,
+            0,
+            SRCCOPY
+        );
+        BitBlt(
+            memory,
+            positionPx.x,
+            positionPx.y,
+            labelRects[i].right - labelRects[i].left,
+            labelRects[i].bottom - labelRects[i].top,
+            labelMemory,
+            labelRects[i].left,
+            labelRects[i].top,
+            SRCCOPY
+        );
+        if (matchLength) {
+            RECT textRect = { 0, 0, 0, 0 };
+            DrawText(
+                labelMemory, labels.value[i], matchLength, &textRect,
+                DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
             );
             BitBlt(
                 memory,
-                positionPx.x,
-                positionPx.y,
-                labelRects[i].right - labelRects[i].left,
-                labelRects[i].bottom - labelRects[i].top,
-                labelMemory,
-                labelRects[i].left,
-                labelRects[i].top,
+                positionPx.x + paddingPx.left,
+                positionPx.y + paddingPx.top,
+                min(
+                    selectionRects[i].right - selectionRects[i].left,
+                    textRect.right
+                ),
+                selectionRects[i].bottom - selectionRects[i].top,
+                selectionMemory,
+                selectionRects[i].left,
+                selectionRects[i].top,
                 SRCCOPY
             );
-            if (textLength) {
-                RECT textRect = { 0, 0, 0, 0 };
-                DrawText(
-                    labelMemory, labels.value[i], textLength, &textRect,
-                    DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
-                );
-                BitBlt(
-                    memory,
-                    positionPx.x + paddingPx.left,
-                    positionPx.y + paddingPx.top,
-                    min(
-                        selectionRects[i].right - selectionRects[i].left,
-                        textRect.right
-                    ),
-                    selectionRects[i].bottom - selectionRects[i].top,
-                    selectionMemory,
-                    selectionRects[i].left,
-                    selectionRects[i].top,
-                    SRCCOPY
-                );
-            }
         }
     }
     DeleteDC(selectionMemory);
