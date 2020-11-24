@@ -212,6 +212,36 @@ int labelBinarySearch2(
     return lo;
 }
 
+typedef struct {
+    int start;
+    int stop;
+    int matchLength;
+} LabelRange;
+
+LabelRange getLabelRange(LPCWSTR text) {
+    StringArray labels = getLabels();
+    int start = 0;
+    int stop = labels.count;
+    int textLength = wcslen(text);
+    int matchLength = 0;
+    for (int i = 0; i < textLength; i++) {
+        int newStart = labelBinarySearch(
+            labels.value, text[i], start, stop, matchLength
+        );
+        int newStop = labelBinarySearch2(
+            labels.value, text[i], newStart, stop, matchLength
+        );
+        if (newStart < newStop) {
+            start = newStart;
+            stop = newStop;
+            matchLength++;
+        }
+    }
+
+    LabelRange result = { start, stop, matchLength };
+    return result;
+}
+
 #pragma region selectLabelBitmap
 
 typedef struct {
@@ -894,24 +924,8 @@ void redraw(HWND window) {
     //     labelMemory, 0, 0, SRCCOPY
     // );
     StringArray labels = getLabels();
-    int start = 0;
-    int stop = labels.count;
-    int textLength = wcslen(model->text);
-    int matchLength = 0;
-    for (int i = 0; i < textLength; i++) {
-        int newStart = labelBinarySearch(
-            labels.value, model->text[i], start, stop, matchLength
-        );
-        int newStop = labelBinarySearch2(
-            labels.value, model->text[i], newStart, stop, matchLength
-        );
-        if (newStart < newStop) {
-            start = newStart;
-            stop = newStop;
-            matchLength++;
-        }
-    }
-    for (int i = start; i < stop; i++) {
+    LabelRange labelRange = getLabelRange(model->text);
+    for (int i = labelRange.start; i < labelRange.stop; i++) {
         Point positionPt = getBubblePositionPt(
             model, widthPt, heightPt, bubbleCount, i
         );
@@ -923,7 +937,7 @@ void redraw(HWND window) {
         BitBlt(
             memory,
             positionPx.x - borderPx,
-            positionPx.y - earElevationPx,
+            positionPx.y,
             earSize.cx,
             earSize.cy,
             earMemory,
@@ -934,7 +948,7 @@ void redraw(HWND window) {
         BitBlt(
             memory,
             positionPx.x,
-            positionPx.y,
+            positionPx.y + earElevationPx,
             labelRects[i].right - labelRects[i].left,
             labelRects[i].bottom - labelRects[i].top,
             labelMemory,
@@ -942,16 +956,19 @@ void redraw(HWND window) {
             labelRects[i].top,
             SRCCOPY
         );
-        if (matchLength) {
+        if (labelRange.matchLength) {
             RECT textRect = { 0, 0, 0, 0 };
             DrawText(
-                labelMemory, labels.value[i], matchLength, &textRect,
+                labelMemory,
+                labels.value[i],
+                labelRange.matchLength,
+                &textRect,
                 DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
             );
             BitBlt(
                 memory,
                 positionPx.x + paddingPx.left,
-                positionPx.y + paddingPx.top,
+                positionPx.y + earElevationPx + paddingPx.top,
                 min(
                     selectionRects[i].right - selectionRects[i].left,
                     textRect.right
@@ -992,12 +1009,14 @@ void redraw(HWND window) {
         clampToRect(client, &positionPx);
         RECT dstRect = labelRects[i];
         OffsetRect(
-            &dstRect, positionPx.x - dstRect.left, positionPx.y - dstRect.top
+            &dstRect,
+            positionPx.x - dstRect.left,
+            positionPx.y + earElevationPx - dstRect.top
         );
         FillRect(memory, &dstRect, keyBrush);
         RECT earRect = {
             .left = positionPx.x - borderPx,
-            .top = positionPx.y - earElevationPx
+            .top = positionPx.y
         };
         earRect.right = earRect.left + earSize.cx;
         earRect.bottom = earRect.top + earSize.cy;
@@ -1469,7 +1488,35 @@ LRESULT CALLBACK DlgProc(
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                 getModel(dialog)->text = getTextBoxText(textBox);
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
-                redraw(getModel(dialog)->window);
+                return TRUE;
+            } else if (HIWORD(wParam) == EN_CHANGE) {
+                Model *model = getModel(dialog);
+                RECT frame;
+                GetWindowRect(model->window, &frame);
+                UINT dpi = GetDpiForWindow(model->window);
+                double widthPt = intPxToPt(frame.right - frame.left, dpi);
+                double heightPt = intPxToPt(frame.bottom - frame.top, dpi);
+                int bubbleCount = getBubbleCount(
+                    model, widthPt, heightPt, getLabels().count
+                );
+                LabelRange labelRange = getLabelRange(model->text);
+                if (labelRange.stop == labelRange.start + 1) {
+                    Point positionPt = getBubblePositionPt(
+                        model,
+                        widthPt,
+                        heightPt,
+                        bubbleCount,
+                        labelRange.start
+                    );
+                    POINT positionPx = {
+                        .x = ptToIntPx(positionPt.x, dpi),
+                        .y = ptToIntPx(positionPt.y, dpi),
+                    };
+                    ClientToScreen(model->window, &positionPx);
+                    SetCursorPos(positionPx.x, positionPx.y);
+                }
+
+                redraw(model->window);
                 return TRUE;
             }
         }
