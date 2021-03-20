@@ -181,28 +181,14 @@ StringArray getLabels() {
 }
 
 int labelBinarySearch(
-    LPCWSTR *labels, WCHAR target, int lo, int hi, int offset
+    LPCWSTR *labels, WCHAR target, int lo, int hi, int offset, BOOL right
 ) {
-    // return the index of the first label greater than or equal to target
+    // returns an index in the range [lo, hi]
+    // right=0: index of the first label greater than or equal to target
+    // right=1: index of the first label greater than target
     while (lo < hi) {
         int mid = (lo + hi) / 2;
-        if (_wcsnicmp(labels[mid] + offset, &target, 1) < 0) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-
-    return lo;
-}
-
-int labelBinarySearch2(
-    LPCWSTR *labels, WCHAR target, int lo, int hi, int offset
-) {
-    // return the index of the first label greater than target
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (_wcsnicmp(labels[mid] + offset, &target, 1) <= 0) {
+        if (_wcsnicmp(labels[mid] + offset, &target, 1) < right) {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -226,10 +212,10 @@ LabelRange getLabelRange(LPCWSTR text) {
     int matchLength = 0;
     for (int i = 0; i < textLength; i++) {
         int newStart = labelBinarySearch(
-            labels.value, text[i], start, stop, matchLength
+            labels.value, text[i], start, stop, matchLength, 0
         );
-        int newStop = labelBinarySearch2(
-            labels.value, text[i], newStart, stop, matchLength
+        int newStop = labelBinarySearch(
+            labels.value, text[i], newStart, stop, matchLength, 1
         );
         if (newStart < newStop) {
             start = newStart;
@@ -936,7 +922,7 @@ void redraw(HWND window) {
         clampToRect(client, &positionPx);
         BitBlt(
             memory,
-            positionPx.x - borderPx,
+            positionPx.x,
             positionPx.y,
             earSize.cx,
             earSize.cy,
@@ -947,7 +933,7 @@ void redraw(HWND window) {
         );
         BitBlt(
             memory,
-            positionPx.x,
+            positionPx.x + borderPx,
             positionPx.y + earElevationPx,
             labelRects[i].right - labelRects[i].left,
             labelRects[i].bottom - labelRects[i].top,
@@ -967,7 +953,7 @@ void redraw(HWND window) {
             );
             BitBlt(
                 memory,
-                positionPx.x + paddingPx.left,
+                positionPx.x + borderPx + paddingPx.left,
                 positionPx.y + earElevationPx + paddingPx.top,
                 min(
                     selectionRects[i].right - selectionRects[i].left,
@@ -1010,12 +996,12 @@ void redraw(HWND window) {
         RECT dstRect = labelRects[i];
         OffsetRect(
             &dstRect,
-            positionPx.x - dstRect.left,
+            positionPx.x + borderPx - dstRect.left,
             positionPx.y + earElevationPx - dstRect.top
         );
         FillRect(memory, &dstRect, keyBrush);
         RECT earRect = {
-            .left = positionPx.x - borderPx,
+            .left = positionPx.x,
             .top = positionPx.y
         };
         earRect.right = earRect.left + earSize.cx;
@@ -1027,6 +1013,8 @@ void redraw(HWND window) {
 
     DeleteDC(memory);
 }
+
+BOOL skipHitTest = FALSE;
 
 LRESULT CALLBACK WndProc(
     HWND window,
@@ -1044,6 +1032,8 @@ LRESULT CALLBACK WndProc(
             if (model) { SetActiveWindow(model->dialog); }
             return 0;
         }
+    } else if (message == WM_NCHITTEST && skipHitTest) {
+        return HTTRANSPARENT;
     } else if (message == WM_DPICHANGED) {
         // https://docs.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged
         LPRECT bounds = (LPRECT)lParam;
@@ -1170,6 +1160,7 @@ void applyMinDialogSize(HWND dialog) {
 const int PRESSED = 0x8000;
 const UINT WM_APP_FITTOTEXT = WM_APP + 0;
 const int ENABLE_DROPDOWN_TIMER = 1;
+const int ACTIVATE_WINDOW_TIMER = 2;
 LRESULT CALLBACK DlgProc(
     HWND dialog,
     UINT message,
@@ -1361,7 +1352,13 @@ LRESULT CALLBACK DlgProc(
             SetMenu(dialog, NULL);
             applyMinDialogSize(dialog);
             return TRUE;
+        } else if (wParam == ACTIVATE_WINDOW_TIMER) {
+            KillTimer(dialog, wParam);
+            SetForegroundWindow(dialog);
+            return TRUE;
         }
+    } else if (message == WM_NCHITTEST && skipHitTest) {
+        return HTTRANSPARENT;
     } else if (message == WM_COMMAND) {
         if (HIWORD(wParam) == 0 || HIWORD(wParam) == 1) {
             if (LOWORD(wParam) == 2) {
@@ -1452,6 +1449,42 @@ LRESULT CALLBACK DlgProc(
                     model->smallDeltaPx, dpi
                 );
                 RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
+                return TRUE;
+            } else if (LOWORD(wParam) == IDM_CLICK) {
+                POINT cursor;
+                GetCursorPos(&cursor);
+                skipHitTest = TRUE;
+                HWND target = WindowFromPoint(cursor);
+                skipHitTest = FALSE;
+                if (target) { SetForegroundWindow(target); }
+
+                INPUT click[2] = {
+                    {
+                        .type = INPUT_MOUSE,
+                        .mi = {
+                            .dx = 0,
+                            .dy = 0,
+                            .mouseData = 0,
+                            .dwFlags = MOUSEEVENTF_LEFTDOWN,
+                            .time = 0,
+                            .dwExtraInfo = 0,
+                        },
+                    },
+                    {
+                        .type = INPUT_MOUSE,
+                        .mi = {
+                            .dx = 0,
+                            .dy = 0,
+                            .mouseData = 0,
+                            .dwFlags = MOUSEEVENTF_LEFTUP,
+                            .time = 0,
+                            .dwExtraInfo = 0,
+                        },
+                    },
+                };
+                SendInput(2, click, sizeof(INPUT));
+                SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
                 return TRUE;
             } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
