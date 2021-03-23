@@ -200,7 +200,6 @@ int labelBinarySearch(
 
 typedef struct {
     int start;
-    int stop;
     int matchLength;
 } LabelRange;
 
@@ -224,7 +223,7 @@ LabelRange getLabelRange(LPCWSTR text) {
         }
     }
 
-    LabelRange result = { start, stop, matchLength };
+    LabelRange result = { start, matchLength };
     return result;
 }
 
@@ -772,6 +771,8 @@ typedef struct {
     SIZE minTextBoxSize;
     BOOL inMenuLoop;
     LPWSTR text;
+    LabelRange labelRange;
+    POINT initialCursorPos;
 } Model;
 
 typedef struct {
@@ -911,7 +912,17 @@ void redraw(HWND window) {
     // );
     StringArray labels = getLabels();
     LabelRange labelRange = getLabelRange(model->text);
-    for (int i = labelRange.start; i < labelRange.stop; i++) {
+    for (int i = labelRange.start; i < bubbleCount; i++) {
+        if (
+            _wcsnicmp(
+                labels.value[labelRange.start],
+                labels.value[i],
+                labelRange.matchLength
+            )
+        ) {
+            break;
+        }
+
         Point positionPt = getBubblePositionPt(
             model, widthPt, heightPt, bubbleCount, i
         );
@@ -1519,11 +1530,13 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (HIWORD(wParam) == EN_UPDATE) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+
                 getModel(dialog)->text = getTextBoxText(textBox);
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
                 Model *model = getModel(dialog);
+                LabelRange labelRange = getLabelRange(model->text);
                 RECT frame;
                 GetWindowRect(model->window, &frame);
                 UINT dpi = GetDpiForWindow(model->window);
@@ -1532,8 +1545,25 @@ LRESULT CALLBACK DlgProc(
                 int bubbleCount = getBubbleCount(
                     model, widthPt, heightPt, getLabels().count
                 );
-                LabelRange labelRange = getLabelRange(model->text);
-                if (labelRange.stop == labelRange.start + 1) {
+                if (labelRange.start >= bubbleCount) {
+                    labelRange.start = 0;
+                    labelRange.matchLength = 0;
+                }
+
+                if (
+                    !memcmp(
+                        &labelRange, &model->labelRange, sizeof(labelRange)
+                    )
+                ) {
+                    return FALSE;
+                }
+
+                if (labelRange.matchLength <= 0) {
+                    SetCursorPos(
+                        model->initialCursorPos.x,
+                        model->initialCursorPos.y
+                    );
+                } else {
                     Point positionPt = getBubblePositionPt(
                         model,
                         widthPt,
@@ -1546,9 +1576,14 @@ LRESULT CALLBACK DlgProc(
                         .y = ptToIntPx(positionPt.y, dpi),
                     };
                     ClientToScreen(model->window, &positionPx);
+                    if (model->labelRange.matchLength <= 0) {
+                        GetCursorPos(&model->initialCursorPos);
+                    }
+
                     SetCursorPos(positionPx.x, positionPx.y);
                 }
 
+                model->labelRange = labelRange;
                 redraw(model->window);
                 return TRUE;
             }
@@ -1649,6 +1684,8 @@ int CALLBACK WinMain(
         .minTextBoxSize = { 0, 0 },
         .inMenuLoop = FALSE,
         .text = L"",
+        .labelRange = { 0, 0 },
+        .initialCursorPos = { 0, 0 },
     };
 
     WNDCLASS windowClass = {
@@ -1688,6 +1725,9 @@ int CALLBACK WinMain(
     SetWindowLongPtr(model.window, GWLP_USERDATA, (LONG)&model);
     model.dialog = CreateDialog(hInstance, L"TOOL", model.window, DlgProc);
     redraw(model.window);
+
+    GetCursorPos(&model.initialCursorPos);
+
     MSG message;
     while (GetMessage(&message, NULL, 0, 0)) {
         // https://devblogs.microsoft.com/oldnewthing/20120416-00/?p=7853
