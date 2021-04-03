@@ -181,15 +181,13 @@ StringArray getSortedLabels(int count) {
     sortedLabelsIn = count;
     StringArray labels = getLabels();
     sortedLabelsOut.count = min(count, labels.count);
-    if (sortedLabelsOut.value) { free(sortedLabelsOut.value); }
-    if (sortedLabelsOut.count <= 0) {
-        sortedLabelsOut.value = NULL;
-        return sortedLabelsOut;
-    }
-
-    sortedLabelsOut.value = malloc(sortedLabelsOut.count * sizeof(LPWSTR));
-    memcpy(
+    sortedLabelsOut.value = realloc(
         sortedLabelsOut.value,
+        sortedLabelsOut.count * sizeof(LPWSTR)
+    );
+    memcpy_s(
+        sortedLabelsOut.value,
+        sortedLabelsOut.count * sizeof(LPWSTR),
         labels.value,
         sortedLabelsOut.count * sizeof(LPWSTR)
     );
@@ -291,18 +289,13 @@ int *labelWidthsOut = NULL;
 int *getLabelWidths(HDC device, int count) {
     LabelWidthsIn in = { .count = count };
     GetObject(GetCurrentObject(device, OBJ_FONT), sizeof(in.font), &in.font);
-    if (labelWidthsOut) {
-        if (!memcmp(&in, &labelWidthsIn, sizeof(in))) {
-            return labelWidthsOut;
-        }
-
-        free(labelWidthsOut);
+    if (labelWidthsOut && !memcmp(&in, &labelWidthsIn, sizeof(in))) {
+        return labelWidthsOut;
     }
 
     labelWidthsIn = in;
     StringArray labels = getSortedLabels(count);
-    if (labels.count <= 0) { return labelWidthsOut = NULL; }
-    labelWidthsOut = malloc(labels.count * sizeof(int));
+    labelWidthsOut = realloc(labelWidthsOut, labels.count * sizeof(int));
     for (int i = 0; i < labels.count; i++) {
         RECT rect = { 0, 0 };
         DrawText(
@@ -423,29 +416,21 @@ RECT *selectLabelBitmapHelp(
         .background = GetBkColor(memory)
     };
     GetObject(GetCurrentObject(memory, OBJ_FONT), sizeof(in.font), &in.font);
-    if (labelBitmapOut->bitmap && labelBitmapOut->rects) {
+    if (labelBitmapOut->bitmap) {
         if (!memcmp(&in, labelBitmapIn, sizeof(in))) {
             SelectObject(memory, labelBitmapOut->bitmap);
             return labelBitmapOut->rects;
         }
 
         DeleteObject(labelBitmapOut->bitmap);
-        free(labelBitmapOut->rects);
-        in.count = count;
     }
 
     *labelBitmapIn = in;
-    StringArray labels = getSortedLabels(count);
-    if (labels.count <= 0) {
-        labelBitmapOut->bitmap = NULL;
-        return labelBitmapOut->rects = NULL;
-    }
-
     int xPadding = max(paddingPx.left, paddingPx.right);
     int yPadding = max(paddingPx.top, paddingPx.bottom);
-
-    int width = 500;
+    StringArray labels = getSortedLabels(count);
     int *labelWidths = getLabelWidths(memory, count);
+    int width = 500;
     for (int i = 0; i < labels.count; i++) {
         width = max(width, labelWidths[i] + 2 * xPadding);
     }
@@ -493,7 +478,9 @@ RECT *selectLabelBitmapHelp(
         }
     }
 
-    labelBitmapOut->rects = malloc(labels.count * sizeof(RECT));
+    labelBitmapOut->rects = realloc(
+        labelBitmapOut->rects, labels.count * sizeof(RECT)
+    );
     x = xPadding;
     int y = yPadding;
     for (int i = 0; i < labels.count; i++) {
@@ -722,9 +709,8 @@ LPWSTR getTextBoxText(HWND textBox) {
     int oldCapacity = textBoxTextOut.text ? textBoxTextOut.capacity : 0;\
     textBoxTextOut.capacity = nextPowerOf2(GetWindowTextLength(textBox) + 1);
     if (textBoxTextOut.capacity > oldCapacity) {
-        if (textBoxTextOut.text) { free(textBoxTextOut.text); }
-        textBoxTextOut.text = (LPWSTR)malloc(
-            textBoxTextOut.capacity * sizeof(WCHAR)
+        textBoxTextOut.text = (LPWSTR)realloc(
+            textBoxTextOut.text, textBoxTextOut.capacity * sizeof(WCHAR)
         );
     }
 
@@ -735,36 +721,37 @@ LPWSTR getTextBoxText(HWND textBox) {
 #pragma endregion
 
 void destroyCache() {
-    if (keyBrushOut) { DeleteObject(keyBrushOut); }
-    if (keyBitmapOut) { DeleteObject(keyBitmapOut); }
-    if (labelTextOut) { free(labelTextOut); }
-    if (labelsOut.value) { free(labelsOut.value); }
-    if (sortedLabelsOut.value) { free(sortedLabelsOut.value); }
-    if (labelFontOut) { DeleteObject(labelFontOut); }
-    if (labelWidthsOut) { free(labelWidthsOut); }
-    if (labelBrushOut) { DeleteObject(labelBrushOut); }
-    if (labelBitmapOut.bitmap) { DeleteObject(labelBitmapOut.bitmap); }
-    if (labelBitmapOut.rects) { free(labelBitmapOut.rects); }
-    if (selectionBitmapOut.bitmap) {
-        DeleteObject(selectionBitmapOut.bitmap);
-    }
-
-    if (selectionBitmapOut.rects) { free(selectionBitmapOut.rects); }
+    DeleteObject(keyBrushOut);
+    DeleteObject(keyBitmapOut);
+    free(labelTextOut);
+    free(labelsOut.value);
+    free(sortedLabelsOut.value);
+    DeleteObject(labelFontOut);
+    free(labelWidthsOut);
+    DeleteObject(labelBrushOut);
+    DeleteObject(labelBitmapOut.bitmap);
+    free(labelBitmapOut.rects);
+    DeleteObject(selectionBitmapOut.bitmap);
+    free(selectionBitmapOut.rects);
     if (borderPenOut) { DeletePen(borderPenOut); }
-    if (earBitmapOut) { DeleteObject(earBitmapOut); }
-    if (acceleratorsOut.value) { free(acceleratorsOut.value); }
+    DeleteObject(earBitmapOut);
+    free(acceleratorsOut.value);
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
-    if (dropdownBitmapOut) { DeleteObject(dropdownBitmapOut); }
+    DeleteObject(dropdownBitmapOut);
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
-    if (textBoxTextOut.text) { free(textBoxTextOut.text); }
+    free(textBoxTextOut.text);
 }
+
+typedef struct {
+    double x;
+    double y;
+} Point;
 
 typedef struct {
     HWND window;
     HWND dialog;
     COLORREF colorKey;
-    double offsetXPt;
-    double offsetYPt;
+    Point offsetPt;
     double deltaPx;
     double smallDeltaPx;
     int bubbleCount;
@@ -796,22 +783,222 @@ typedef struct {
     LPWSTR text;
 } Model;
 
-typedef struct {
-    double x;
-    double y;
-} Point;
+Point makePoint(double x, double y) { Point point = { x, y }; return point; }
+Point scale(Point v, double a) { return makePoint(a * v.x, a * v.y); }
+Point add(Point v1, Point v2) { return makePoint(v1.x + v2.x, v1.y + v2.y); }
+double dot(Point v1, Point v2) { return v1.x * v2.x + v1.y * v2.y; }
+Point leftTurn(Point v) { return makePoint(-v.y, v.x); }
+Point getNormal(Point v) { return scale(leftTurn(v), 1 / sqrt(dot(v, v))); }
+double determinant(Point v1, Point v2) { return dot(leftTurn(v1), v2); }
+Point matrixDot(Point column1, Point column2,  Point v) {
+    return add(scale(column1, v.x), scale(column2, v.y));
+}
+
+Point intersect(Point point1, Point normal1, Point point2, Point normal2) {
+    double denominator = determinant(normal1, normal2);
+    return leftTurn(
+        add(
+            scale(normal1, dot(point2, normal2) / denominator),
+            scale(normal2, -dot(point1, normal1) / denominator)
+        )
+    );
+}
+
+int minN(int *candidates, int count) {
+    int result = candidates[0];
+    for (int i = 1; i < count; i++) { result = min(result, candidates[i]); }
+    return result;
+}
+
+int maxN(int *candidates, int count) {
+    int result = candidates[0];
+    for (int i = 1; i < count; i++) { result = max(result, candidates[i]); }
+    return result;
+}
 
 int getBubbleCount(Model *model, double widthPt, double heightPt) {
     return model->bubbleCount;
 }
 
+typedef struct { int i; BOOL right; double overlap; } EdgeCell;
+
+int compareEdgeCells(const EdgeCell *a, const EdgeCell *b) {
+    if (a->overlap > b->overlap) { return 1; }
+    if (a->overlap < b->overlap) { return -1; }
+    if (a->i > b->i) { return 1; }
+    if (a->i < b->i) { return -1; }
+    if (a->right > b->right) { return 1; }
+    if (a->right < b->right) { return -1; }
+    return 0;
+}
+
 Point getBubblePositionPt(
     Model *model, double widthPt, double heightPt, int count, int index
 ) {
-    Point result = {
-        .x = 50 * (index % 10) + model->offsetXPt,
-        .y = 30 * (index / 10) + model->offsetYPt,
+    // get the shape of all screen parallelograms (cells) without worrying
+    // about scale yet. shape1 and shape2 represent the edges that
+    // approximately correspond to the x and y axes respectively.
+    Point shape1 = makePoint(
+        cos(model->angle1) * model->aspect, sin(model->angle1)
+    );
+    Point shape2 = makePoint(
+        cos(model->angle2) * model->aspect, sin(model->angle2)
+    );
+    // area of screen parallelogram before scaling
+    double shapeArea = determinant(shape1, shape2);
+    // how much to scale each edge so that the number of cells on screen
+    // equals count
+    double shapeScale = sqrt(widthPt * heightPt / (count * shapeArea));
+    // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
+    // grid space (in other words, they are the columns of the inverse of the
+    // matrix whose columns are the edges of a screen parallelogram).
+    double inverseScale = 1 / (shapeArea * shapeScale);
+    Point inverse1 = scale(makePoint(shape2.y, -shape1.y), inverseScale);
+    Point inverse2 = scale(makePoint(-shape2.x, shape1.x), inverseScale);
+    Point gridOffset = matrixDot(
+        inverse1, inverse2, scale(model->offsetPt, -1)
+    );
+    // the grid parallelogram is the entire screen area projected into grid
+    // space
+    Point gridEdge1 = scale(inverse1, widthPt);
+    Point gridEdge2 = scale(inverse2, heightPt);
+    // normals radiate out from the grid parallelogram
+    Point gridNormal1 = scale(getNormal(inverse1), -1);
+    Point gridNormal2 = getNormal(inverse2);
+    Point gridNormals[5] = {
+        gridNormal1,
+        gridNormal2,
+        scale(gridNormal1, -1),
+        scale(gridNormal2, -1),
+        gridNormal1, // for convenience
     };
+    // the inflated grid parallelogram is created by shifting each edge of the
+    // grid parallelogram by borderRadius grid units in the direction of its
+    // normal, to encompass grid cells on the border (edge cells).
+    double borderRadius = 0.5;
+    // pick an arbitrary point on each edge of the inflated grid parallelogram
+    Point gridPoints[5] = {
+        add(gridOffset, scale(gridNormal1, borderRadius)),
+        add(gridOffset, scale(gridNormal2, borderRadius)),
+        add(add(gridOffset, gridEdge2), scale(gridNormal1, -borderRadius)),
+        add(add(gridOffset, gridEdge1), scale(gridNormal2, -borderRadius)),
+        add(gridOffset, scale(gridNormal1, borderRadius)), // for convenience
+    };
+    int spineCandidates[4];
+    for (int i = 0; i < 4; i++) {
+        spineCandidates[i] = (int)ceil(
+            intersect(
+                gridPoints[i], gridNormals[i],
+                gridPoints[i + 1], gridNormals[i + 1]
+            ).y
+        );
+    }
+
+    int spineStart = minN(spineCandidates, 4);
+    int spineStop = maxN(spineCandidates, 4);
+    int *ribStarts = malloc(2 * (spineStop - spineStart) * sizeof(int));
+    int *ribStops = ribStarts + (spineStop - spineStart);
+    Point rowNormal = { 0, 1 };
+    Point cell = { 0, spineStart };
+    int actualCount = 0;
+    int edgeCellCapacity = 64;
+    EdgeCell *edgeCells = malloc(edgeCellCapacity * sizeof(EdgeCell));
+    int edgeCellCount = 0;
+    for (int i = 0; i < spineStop - spineStart; i++) {
+        cell.y = spineStart + i;
+        double xEntry = -INFINITY;
+        double xExit = INFINITY;
+        for (int j = 0; j < 4; j++) {
+            if (gridNormals[j].x == 0) { continue; }
+            double x = intersect(
+                gridPoints[j], gridNormals[j], cell, rowNormal
+            ).x;
+            if (gridNormals[j].x < 0) { xEntry = max(xEntry, x); }
+            if (gridNormals[j].x > 0) { xExit = min(xExit, x); }
+        }
+
+        double xCenter = (int)ceil(0.5 * (xEntry + xExit));
+        ribStarts[i] = (int)ceil(xEntry);
+        ribStops[i] = (int)ceil(xExit);
+        actualCount += ribStops[i] - ribStarts[i];
+        int direction = 1;
+        for (
+            cell.x = ribStarts[i];
+            direction > 0 ? cell.x < xCenter : cell.x >= xCenter;
+            cell.x += direction
+        ) {
+            // overlap: approximate fraction of the cell that overlaps the
+            // grid parallelogram. if the center of the cell is on the outer
+            // edge of the border, overlap is zero. If it's on the inner edge,
+            // overlap is one.
+            double overlap = INFINITY;
+            for (int j = 0; j < 4; j++) {
+                overlap = min(
+                    overlap,
+                    dot(add(gridPoints[j], scale(cell, -1)), gridNormals[j])
+                        / (2 * borderRadius)
+                );
+            }
+
+            if (overlap >= 1) {
+                if (direction == 1) {
+                    cell.x = ribStops[i];
+                    direction = -1;
+                    continue;
+                } else { break; }
+            }
+
+            if (edgeCellCount >= edgeCellCapacity) {
+                edgeCells = realloc(edgeCells, edgeCellCapacity *= 2);
+            }
+
+            edgeCells[edgeCellCount].i = i;
+            edgeCells[edgeCellCount].right = direction == -1;
+            edgeCells[edgeCellCount].overlap = overlap;
+            edgeCellCount++;
+        }
+    }
+
+    qsort(edgeCells, edgeCellCount, sizeof(EdgeCell), compareEdgeCells);
+    if (actualCount - count > edgeCellCount) {
+        // my theory is that a borderRadius of 0.5 should be enough to prevent
+        // this error from ever occuring
+        MessageBox(
+            model->dialog,
+            L"Not enough edge cells. "
+            L"A developer should increase borderRadius.",
+            L"MouseJump error",
+            MB_ICONERROR
+        );
+        exit(1);
+    }
+
+    for (int j = 0; j < actualCount - count; j++) {
+        if (edgeCells[j].right) {
+            ribStops[edgeCells[j].i] -= 1;
+        } else {
+            ribStarts[edgeCells[j].i] += 1;
+        }
+    }
+
+    free(edgeCells);
+    int cellsSeen = 0;
+    Point grid;
+    for (int i = 0; i < spineStop - spineStart; i++) {
+        grid.y = spineStart + i;
+        int width = ribStops[i] - ribStarts[i];
+        if (cellsSeen + width > index) {
+            grid.x = ribStarts[i] + index - cellsSeen;
+            break;
+        }
+
+        cellsSeen += width;
+    }
+
+    free(ribStarts);
+    Point edge1 = scale(shape1, shapeScale);
+    Point edge2 = scale(shape2, shapeScale);
+    Point result = add(matrixDot(edge1, edge2, grid), model->offsetPt);
     return result;
 }
 
@@ -860,8 +1047,7 @@ Model *getModel(HWND window) {
 }
 
 typedef struct {
-    double offsetXPt;
-    double offsetYPt;
+    Point offsetPt;
     UINT dpi;
     int widthPx;
     int heightPx;
@@ -874,7 +1060,7 @@ Graphics getGraphics(HWND window) {
     RECT frame;
     GetWindowRect(window, &frame);
     int widthPx = frame.right - frame.left;
-    int heightPx = frame.right - frame.left;
+    int heightPx = frame.bottom - frame.top;
     UINT dpi = GetDpiForWindow(window);
     double widthPt = intPxToPt(widthPx, dpi);
     double heightPt = intPxToPt(heightPx, dpi);
@@ -895,8 +1081,7 @@ Graphics getGraphics(HWND window) {
     };
     ClientToScreen(model->window, &cursorPos);
     Graphics graphics = {
-        .offsetXPt = model->offsetXPt,
-        .offsetYPt = model->offsetYPt,
+        .offsetPt = model->offsetPt,
         .dpi = dpi,
         .widthPx = widthPx,
         .heightPx = heightPx,
@@ -986,10 +1171,10 @@ void redraw(HWND window) {
         model->labelBackground
     );
     // RECT labelBitmapRect = {
-    //     ptToIntPx(model->offsetXPt, graphics.dpi) + 100,
-    //     ptToIntPx(model->offsetYPt, graphics.dpi) + 400,
-    //     ptToIntPx(model->offsetXPt, graphics.dpi) + 100 + 600,
-    //     ptToIntPx(model->offsetYPt, graphics.dpi) + 400 + 400,
+    //     ptToIntPx(model->offsetPt.x, graphics.dpi) + 100,
+    //     ptToIntPx(model->offsetPt.y, graphics.dpi) + 400,
+    //     ptToIntPx(model->offsetPt.x, graphics.dpi) + 100 + 600,
+    //     ptToIntPx(model->offsetPt.y, graphics.dpi) + 400 + 400,
     // };
     // BitBlt(
     //     memory, labelBitmapRect.left, labelBitmapRect.top,
@@ -1506,8 +1691,8 @@ LRESULT CALLBACK DlgProc(
                 );
                 Model *model = getModel(dialog);
                 UINT dpi = GetDpiForWindow(model->window);
-                model->offsetXPt += xDirection * pxToPt(model->deltaPx, dpi);
-                model->offsetYPt += yDirection * pxToPt(model->deltaPx, dpi);
+                model->offsetPt.x += xDirection * pxToPt(model->deltaPx, dpi);
+                model->offsetPt.y += yDirection * pxToPt(model->deltaPx, dpi);
                 RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
                 return TRUE;
             } else if (
@@ -1533,10 +1718,10 @@ LRESULT CALLBACK DlgProc(
                 );
                 Model *model = getModel(dialog);
                 UINT dpi = GetDpiForWindow(model->window);
-                model->offsetXPt += xDirection * pxToPt(
+                model->offsetPt.x += xDirection * pxToPt(
                     model->smallDeltaPx, dpi
                 );
-                model->offsetYPt += yDirection * pxToPt(
+                model->offsetPt.y += yDirection * pxToPt(
                     model->smallDeltaPx, dpi
                 );
                 RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
@@ -1685,8 +1870,7 @@ int CALLBACK WinMain(
     double PI = 3.1415926535897932384626433832795;
     Model model = {
         .colorKey = RGB(255, 0, 255),
-        .offsetXPt = 0,
-        .offsetYPt = 0,
+        .offsetPt = { 0, 0 },
         .deltaPx = 12,
         .smallDeltaPx = 1,
         .bubbleCount = 50,
