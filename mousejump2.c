@@ -62,6 +62,8 @@ LPCWSTR str(int number) {
 
 #pragma endregion
 
+#define PI 3.1415926535897932384626433832795
+
 #pragma region keyBitmap
 
 COLORREF keyBrushIn;
@@ -698,8 +700,8 @@ HFONT getSystemFont(UINT dpi) {
     return systemFontOut = CreateFontIndirect(&metrics.lfMessageFont);
 }
 
-int nextPowerOf2(int n) {
-    int result = 1;
+int nextPowerOf2(int n, int start) {
+    int result = start;
     while (result < n) { result <<= 1; }
     return result;
 }
@@ -707,7 +709,10 @@ int nextPowerOf2(int n) {
 struct { LPWSTR text; int capacity; } textBoxTextOut = { .text = NULL };
 LPWSTR getTextBoxText(HWND textBox) {
     int oldCapacity = textBoxTextOut.text ? textBoxTextOut.capacity : 0;\
-    textBoxTextOut.capacity = nextPowerOf2(GetWindowTextLength(textBox) + 1);
+    textBoxTextOut.capacity = nextPowerOf2(
+        GetWindowTextLength(textBox) + 1,
+        64
+    );
     if (textBoxTextOut.capacity > oldCapacity) {
         textBoxTextOut.text = (LPWSTR)realloc(
             textBoxTextOut.text, textBoxTextOut.capacity * sizeof(WCHAR)
@@ -720,69 +725,7 @@ LPWSTR getTextBoxText(HWND textBox) {
 
 #pragma endregion
 
-void destroyCache() {
-    DeleteObject(keyBrushOut);
-    DeleteObject(keyBitmapOut);
-    free(labelTextOut);
-    free(labelsOut.value);
-    free(sortedLabelsOut.value);
-    DeleteObject(labelFontOut);
-    free(labelWidthsOut);
-    DeleteObject(labelBrushOut);
-    DeleteObject(labelBitmapOut.bitmap);
-    free(labelBitmapOut.rects);
-    DeleteObject(selectionBitmapOut.bitmap);
-    free(selectionBitmapOut.rects);
-    if (borderPenOut) { DeletePen(borderPenOut); }
-    DeleteObject(earBitmapOut);
-    free(acceleratorsOut.value);
-    if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
-    DeleteObject(dropdownBitmapOut);
-    if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
-    free(textBoxTextOut.text);
-}
-
-typedef struct {
-    double x;
-    double y;
-} Point;
-
-typedef struct {
-    HWND window;
-    HWND dialog;
-    COLORREF colorKey;
-    Point offsetPt;
-    double deltaPx;
-    double smallDeltaPx;
-    int bubbleCount;
-    double marginLeftPt;
-    double marginTopPt;
-    double marginRightPt;
-    double marginBottomPt;
-    double aspect;
-    double angle1;
-    double angle2;
-    double fontHeightPt;
-    WCHAR fontFamily[LF_FACESIZE];
-    double paddingLeftPt;
-    double paddingTopPt;
-    double paddingRightPt;
-    double paddingBottomPt;
-    COLORREF labelBackground;
-    COLORREF selectionBackground;
-    double borderPt;
-    double earHeightPt;
-    double earElevationPt;
-    COLORREF borderColor;
-    double textBoxWidthPt;
-    double dropdownWidthPt;
-    double clientHeightPt;
-    BOOL showCaption;
-    SIZE minTextBoxSize;
-    BOOL inMenuLoop;
-    LPWSTR text;
-} Model;
-
+typedef struct { double x; double y; } Point;
 Point makePoint(double x, double y) { Point point = { x, y }; return point; }
 Point scale(Point v, double a) { return makePoint(a * v.x, a * v.y); }
 Point add(Point v1, Point v2) { return makePoint(v1.x + v2.x, v1.y + v2.y); }
@@ -804,6 +747,30 @@ Point intersect(Point point1, Point normal1, Point point2, Point normal2) {
     );
 }
 
+typedef struct { double angle1; double angle2; double aspect; } CellShapeIn;
+CellShapeIn cellShapeIn = { 0, PI, 1 };
+typedef struct { Point shape1; Point shape2; } CellShapeOut;
+CellShapeOut cellShapeOut = { { 1, 0 }, { 0, 1 } };
+void getCellShape(
+    double angle1, double angle2, double aspect,
+    Point *shape1, Point *shape2
+) {
+    CellShapeIn in = { angle1, angle2, aspect };
+    if (memcmp(&in, &cellShapeIn, sizeof(in))) {
+        cellShapeIn = in;
+        cellShapeOut.shape1 = makePoint(cos(angle1) * aspect, sin(angle1));
+        cellShapeOut.shape2 = makePoint(cos(angle2) * aspect, sin(angle2));
+        double shapeScale = 1 / sqrt(
+            determinant(cellShapeOut.shape1, cellShapeOut.shape2)
+        );
+        cellShapeOut.shape1 = scale(cellShapeOut.shape1, shapeScale);
+        cellShapeOut.shape2 = scale(cellShapeOut.shape2, shapeScale);
+    }
+
+    *shape1 = cellShapeOut.shape1;
+    *shape2 = cellShapeOut.shape2;
+}
+
 int minN(int *candidates, int count) {
     int result = candidates[0];
     for (int i = 1; i < count; i++) { result = min(result, candidates[i]); }
@@ -814,10 +781,6 @@ int maxN(int *candidates, int count) {
     int result = candidates[0];
     for (int i = 1; i < count; i++) { result = max(result, candidates[i]); }
     return result;
-}
-
-int getBubbleCount(Model *model, double widthPt, double heightPt) {
-    return model->bubbleCount;
 }
 
 typedef struct { int i; BOOL right; double overlap; } EdgeCell;
@@ -832,32 +795,55 @@ int compareEdgeCells(const EdgeCell *a, const EdgeCell *b) {
     return 0;
 }
 
-Point getBubblePositionPt(
-    Model *model, double widthPt, double heightPt, int count, int index
+struct { int capacity; EdgeCell *edgeCells; } edgeCellsOut = { 0, NULL };
+EdgeCell *getEdgeCells(int count) {
+    if (count > edgeCellsOut.capacity) {
+        edgeCellsOut.capacity = nextPowerOf2(count, 64);
+        edgeCellsOut.edgeCells = realloc(
+            edgeCellsOut.edgeCells,
+            edgeCellsOut.capacity * sizeof(EdgeCell)
+        );
+    }
+
+    return edgeCellsOut.edgeCells;
+}
+
+typedef struct {
+    int spineStart;
+    int spineStop;
+    int *ribStarts;
+    int *ribStops;
+} Spine;
+struct {
+    Spine oldSpine;
+    Spine newSpine;
+    int oldCapacity;
+    int newCapacity;
+} spinesOut = {
+    .oldSpine = { 0, 0, NULL, NULL },
+    .newSpine = { 0, 0, NULL, NULL },
+    .oldCapacity = 0,
+    .newCapacity = 0,
+};
+Spine getSpines(
+    double angle1, double angle2, double aspect, Point offsetPt,
+    double widthPt, double heightPt, int count, HWND dialog,
+    Spine *oldSpine, Spine *newSpine
 ) {
     // get the shape of all screen parallelograms (cells) without worrying
     // about scale yet. shape1 and shape2 represent the edges that
     // approximately correspond to the x and y axes respectively.
-    Point shape1 = makePoint(
-        cos(model->angle1) * model->aspect, sin(model->angle1)
-    );
-    Point shape2 = makePoint(
-        cos(model->angle2) * model->aspect, sin(model->angle2)
-    );
-    // area of screen parallelogram before scaling
-    double shapeArea = determinant(shape1, shape2);
-    // how much to scale each edge so that the number of cells on screen
-    // equals count
-    double shapeScale = sqrt(widthPt * heightPt / (count * shapeArea));
+    // in the windows API in general and in this function specifically, the
+    // positive y direction is downward.
+    Point shape1, shape2;
+    getCellShape(angle1, angle2, aspect, &shape1, &shape2);
+    double inverseScale = sqrt(count / (widthPt * heightPt));
     // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
     // grid space (in other words, they are the columns of the inverse of the
     // matrix whose columns are the edges of a screen parallelogram).
-    double inverseScale = 1 / (shapeArea * shapeScale);
     Point inverse1 = scale(makePoint(shape2.y, -shape1.y), inverseScale);
     Point inverse2 = scale(makePoint(-shape2.x, shape1.x), inverseScale);
-    Point gridOffset = matrixDot(
-        inverse1, inverse2, scale(model->offsetPt, -1)
-    );
+    Point gridOffset = matrixDot(inverse1, inverse2, scale(offsetPt, -1));
     // the grid parallelogram is the entire screen area projected into grid
     // space
     Point gridEdge1 = scale(inverse1, widthPt);
@@ -896,13 +882,19 @@ Point getBubblePositionPt(
 
     int spineStart = minN(spineCandidates, 4);
     int spineStop = maxN(spineCandidates, 4);
-    int *ribStarts = malloc(2 * (spineStop - spineStart) * sizeof(int));
+    int *ribStarts = spinesOut.oldSpine.ribStarts;
+    int spineCapacity = max(
+        spinesOut.oldCapacity,
+        nextPowerOf2(2 * (spineStop - spineStart), 64)
+    );
+    if (spineCapacity > spinesOut.oldCapacity) {
+        ribStarts = realloc(ribStarts, spineCapacity * sizeof(int));
+    }
+
     int *ribStops = ribStarts + (spineStop - spineStart);
     Point rowNormal = { 0, 1 };
     Point cell = { 0, spineStart };
     int actualCount = 0;
-    int edgeCellCapacity = 64;
-    EdgeCell *edgeCells = malloc(edgeCellCapacity * sizeof(EdgeCell));
     int edgeCellCount = 0;
     for (int i = 0; i < spineStop - spineStart; i++) {
         cell.y = spineStart + i;
@@ -948,10 +940,7 @@ Point getBubblePositionPt(
                 } else { break; }
             }
 
-            if (edgeCellCount >= edgeCellCapacity) {
-                edgeCells = realloc(edgeCells, edgeCellCapacity *= 2);
-            }
-
+            EdgeCell *edgeCells = getEdgeCells(edgeCellCount + 1);
             edgeCells[edgeCellCount].i = i;
             edgeCells[edgeCellCount].right = direction == -1;
             edgeCells[edgeCellCount].overlap = overlap;
@@ -959,12 +948,13 @@ Point getBubblePositionPt(
         }
     }
 
+    EdgeCell *edgeCells = getEdgeCells(edgeCellCount);
     qsort(edgeCells, edgeCellCount, sizeof(EdgeCell), compareEdgeCells);
     if (actualCount - count > edgeCellCount) {
         // my theory is that a borderRadius of 0.5 should be enough to prevent
         // this error from ever occuring
         MessageBox(
-            model->dialog,
+            dialog,
             L"Not enough edge cells. "
             L"A developer should increase borderRadius.",
             L"MouseJump error",
@@ -981,24 +971,120 @@ Point getBubblePositionPt(
         }
     }
 
-    free(edgeCells);
+    spinesOut.oldSpine = spinesOut.newSpine;
+    spinesOut.oldCapacity = spinesOut.newCapacity;
+    *oldSpine = spinesOut.oldSpine;
+
+    spinesOut.newSpine.spineStart = spineStart;
+    spinesOut.newSpine.spineStop = spineStop;
+    spinesOut.newSpine.ribStarts = ribStarts;
+    spinesOut.newSpine.ribStops = ribStops;
+    spinesOut.newCapacity = spineCapacity;
+    *newSpine = spinesOut.newSpine;
+}
+
+void destroyCache() {
+    DeleteObject(keyBrushOut);
+    DeleteObject(keyBitmapOut);
+    free(labelTextOut);
+    free(labelsOut.value);
+    free(sortedLabelsOut.value);
+    DeleteObject(labelFontOut);
+    free(labelWidthsOut);
+    DeleteObject(labelBrushOut);
+    DeleteObject(labelBitmapOut.bitmap);
+    free(labelBitmapOut.rects);
+    DeleteObject(selectionBitmapOut.bitmap);
+    free(selectionBitmapOut.rects);
+    if (borderPenOut) { DeletePen(borderPenOut); }
+    DeleteObject(earBitmapOut);
+    free(acceleratorsOut.value);
+    if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
+    DeleteObject(dropdownBitmapOut);
+    if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
+    free(textBoxTextOut.text);
+    free(edgeCellsOut.edgeCells);
+    free(spinesOut.oldSpine.ribStarts);
+    free(spinesOut.newSpine.ribStarts);
+}
+
+typedef struct {
+    HWND window;
+    HWND dialog;
+    COLORREF colorKey;
+    Point offsetPt;
+    double deltaPx;
+    double smallDeltaPx;
+    int bubbleCount;
+    double marginLeftPt;
+    double marginTopPt;
+    double marginRightPt;
+    double marginBottomPt;
+    double aspect;
+    double angle1;
+    double angle2;
+    double fontHeightPt;
+    WCHAR fontFamily[LF_FACESIZE];
+    double paddingLeftPt;
+    double paddingTopPt;
+    double paddingRightPt;
+    double paddingBottomPt;
+    COLORREF labelBackground;
+    COLORREF selectionBackground;
+    double borderPt;
+    double earHeightPt;
+    double earElevationPt;
+    COLORREF borderColor;
+    double textBoxWidthPt;
+    double dropdownWidthPt;
+    double clientHeightPt;
+    BOOL showCaption;
+    SIZE minTextBoxSize;
+    BOOL inMenuLoop;
+    LPWSTR text;
+} Model;
+
+int getBubbleCount(Model *model, double widthPt, double heightPt) {
+    return model->bubbleCount;
+}
+
+Point getBubblePositionPt(
+    Model *model, double widthPt, double heightPt, int count, int index
+) {
+    // get the shape of all screen parallelograms (cells) without worrying
+    // about scale yet. shape1 and shape2 represent the edges that
+    // approximately correspond to the x and y axes respectively.
+    // in the windows API in general and in this function specifically, the
+    // positive y direction is downward.
+    Point shape1, shape2;
+    getCellShape(
+        model->angle1, model->angle2, model->aspect, &shape1, &shape2
+    );
+    Spine oldSpine, newSpine;
+    getSpines(
+        model->angle1, model->angle2, model->aspect, model->offsetPt,
+        widthPt, heightPt, count, model->dialog, &oldSpine, &newSpine
+    );
     int cellsSeen = 0;
     Point grid;
-    for (int i = 0; i < spineStop - spineStart; i++) {
-        grid.y = spineStart + i;
-        int width = ribStops[i] - ribStarts[i];
+    for (int i = 0; i < newSpine.spineStop - newSpine.spineStart; i++) {
+        grid.y = newSpine.spineStart + i;
+        int width = newSpine.ribStops[i] - newSpine.ribStarts[i];
         if (cellsSeen + width > index) {
-            grid.x = ribStarts[i] + index - cellsSeen;
+            grid.x = newSpine.ribStarts[i] + index - cellsSeen;
             break;
         }
 
         cellsSeen += width;
     }
 
-    free(ribStarts);
-    Point edge1 = scale(shape1, shapeScale);
-    Point edge2 = scale(shape2, shapeScale);
-    Point result = add(matrixDot(edge1, edge2, grid), model->offsetPt);
+    // how much to scale each edge so that the number of cells on screen
+    // equals count
+    double shapeScale = sqrt(widthPt * heightPt / count);
+    Point result = add(
+        scale(matrixDot(shape1, shape2, grid), shapeScale),
+        model->offsetPt
+    );
     return result;
 }
 
@@ -1867,7 +1953,6 @@ int CALLBACK WinMain(
 {
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 
-    double PI = 3.1415926535897932384626433832795;
     Model model = {
         .colorKey = RGB(255, 0, 255),
         .offsetPt = { 0, 0 },
