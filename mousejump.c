@@ -725,7 +725,7 @@ LPWSTR getTextBoxText(HWND textBox) {
 
 #pragma endregion
 
-typedef struct { double x; double y; } Point;
+typedef struct { double x, y; } Point;
 Point makePoint(double x, double y) { Point point = { x, y }; return point; }
 Point scale(Point v, double a) { return makePoint(a * v.x, a * v.y); }
 Point add(Point v1, Point v2) { return makePoint(v1.x + v2.x, v1.y + v2.y); }
@@ -747,28 +747,28 @@ Point intersect(Point point1, Point normal1, Point point2, Point normal2) {
     );
 }
 
-typedef struct { double angle1; double angle2; double aspect; } CellShapeIn;
-CellShapeIn cellShapeIn = { 0, PI, 1 };
-typedef struct { Point shape1; Point shape2; } CellShapeOut;
-CellShapeOut cellShapeOut = { { 1, 0 }, { 0, 1 } };
-void getCellShape(
-    double angle1, double angle2, double aspect,
+typedef struct { double angle1, angle2, aspect, area; } CellEdgesIn;
+CellEdgesIn cellEdgesIn = { 0, PI, 1, 1 };
+typedef struct { Point shape1; Point shape2; } CellEdgesOut;
+CellEdgesOut cellEdgesOut = { { 1, 0 }, { 0, 1 } };
+void getCellEdges(
+    double angle1, double angle2, double aspect, double area,
     Point *shape1, Point *shape2
 ) {
-    CellShapeIn in = { angle1, angle2, aspect };
-    if (memcmp(&in, &cellShapeIn, sizeof(in))) {
-        cellShapeIn = in;
-        cellShapeOut.shape1 = makePoint(cos(angle1) * aspect, sin(angle1));
-        cellShapeOut.shape2 = makePoint(cos(angle2) * aspect, sin(angle2));
-        double shapeScale = 1 / sqrt(
-            determinant(cellShapeOut.shape1, cellShapeOut.shape2)
+    CellEdgesIn in = { angle1, angle2, aspect };
+    if (memcmp(&in, &cellEdgesIn, sizeof(in))) {
+        cellEdgesIn = in;
+        cellEdgesOut.shape1 = makePoint(cos(angle1) * aspect, sin(angle1));
+        cellEdgesOut.shape2 = makePoint(cos(angle2) * aspect, sin(angle2));
+        double shapeScale = sqrt(
+            area / determinant(cellEdgesOut.shape1, cellEdgesOut.shape2)
         );
-        cellShapeOut.shape1 = scale(cellShapeOut.shape1, shapeScale);
-        cellShapeOut.shape2 = scale(cellShapeOut.shape2, shapeScale);
+        cellEdgesOut.shape1 = scale(cellEdgesOut.shape1, shapeScale);
+        cellEdgesOut.shape2 = scale(cellEdgesOut.shape2, shapeScale);
     }
 
-    *shape1 = cellShapeOut.shape1;
-    *shape2 = cellShapeOut.shape2;
+    *shape1 = cellEdgesOut.shape1;
+    *shape2 = cellEdgesOut.shape2;
 }
 
 int minN(int *candidates, int count) {
@@ -809,40 +809,28 @@ EdgeCell *getEdgeCells(int count) {
 }
 
 typedef struct {
-    int spineStart;
-    int spineStop;
-    int *ribStarts;
-    int *ribStops;
+    int spineStart, spineStop;
+    int *ribStarts, *ribStops;
 } Spine;
 struct {
-    Spine oldSpine;
-    Spine newSpine;
-    int oldCapacity;
-    int newCapacity;
-} spinesOut = {
+    Spine oldSpine, newSpine;
+    int oldCapacity, newCapacity;
+} spineOut = {
     .oldSpine = { 0, 0, NULL, NULL },
     .newSpine = { 0, 0, NULL, NULL },
     .oldCapacity = 0,
     .newCapacity = 0,
 };
-Spine getSpines(
-    double angle1, double angle2, double aspect, Point offsetPt,
-    double widthPt, double heightPt, int count, HWND dialog,
-    Spine *oldSpine, Spine *newSpine
+Spine getSpine(
+    Point edge1, Point edge2, Point offsetPt,
+    double widthPt, double heightPt, int count, HWND dialog
 ) {
-    // get the shape of all screen parallelograms (cells) without worrying
-    // about scale yet. shape1 and shape2 represent the edges that
-    // approximately correspond to the x and y axes respectively.
-    // in the windows API in general and in this function specifically, the
-    // positive y direction is downward.
-    Point shape1, shape2;
-    getCellShape(angle1, angle2, aspect, &shape1, &shape2);
-    double inverseScale = sqrt(count / (widthPt * heightPt));
+    double inverseScale = 1 / determinant(edge1, edge2);
     // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
     // grid space (in other words, they are the columns of the inverse of the
     // matrix whose columns are the edges of a screen parallelogram).
-    Point inverse1 = scale(makePoint(shape2.y, -shape1.y), inverseScale);
-    Point inverse2 = scale(makePoint(-shape2.x, shape1.x), inverseScale);
+    Point inverse1 = scale(makePoint(edge2.y, -edge1.y), inverseScale);
+    Point inverse2 = scale(makePoint(-edge2.x, edge1.x), inverseScale);
     Point gridOffset = matrixDot(inverse1, inverse2, scale(offsetPt, -1));
     // the grid parallelogram is the entire screen area projected into grid
     // space
@@ -882,12 +870,12 @@ Spine getSpines(
 
     int spineStart = minN(spineCandidates, 4);
     int spineStop = maxN(spineCandidates, 4);
-    int *ribStarts = spinesOut.oldSpine.ribStarts;
+    int *ribStarts = spineOut.oldSpine.ribStarts;
     int spineCapacity = max(
-        spinesOut.oldCapacity,
+        spineOut.oldCapacity,
         nextPowerOf2(2 * (spineStop - spineStart), 64)
     );
-    if (spineCapacity > spinesOut.oldCapacity) {
+    if (spineCapacity > spineOut.oldCapacity) {
         ribStarts = realloc(ribStarts, spineCapacity * sizeof(int));
     }
 
@@ -971,16 +959,16 @@ Spine getSpines(
         }
     }
 
-    spinesOut.oldSpine = spinesOut.newSpine;
-    spinesOut.oldCapacity = spinesOut.newCapacity;
-    *oldSpine = spinesOut.oldSpine;
+    spineOut.oldSpine = spineOut.newSpine;
+    spineOut.oldCapacity = spineOut.newCapacity;
 
-    spinesOut.newSpine.spineStart = spineStart;
-    spinesOut.newSpine.spineStop = spineStop;
-    spinesOut.newSpine.ribStarts = ribStarts;
-    spinesOut.newSpine.ribStops = ribStops;
-    spinesOut.newCapacity = spineCapacity;
-    *newSpine = spinesOut.newSpine;
+    spineOut.newSpine.spineStart = spineStart;
+    spineOut.newSpine.spineStop = spineStop;
+    spineOut.newSpine.ribStarts = ribStarts;
+    spineOut.newSpine.ribStops = ribStops;
+    spineOut.newCapacity = spineCapacity;
+
+    return spineOut.newSpine;
 }
 
 void destroyCache() {
@@ -1004,8 +992,8 @@ void destroyCache() {
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
     free(textBoxTextOut.text);
     free(edgeCellsOut.edgeCells);
-    free(spinesOut.oldSpine.ribStarts);
-    free(spinesOut.newSpine.ribStarts);
+    free(spineOut.oldSpine.ribStarts);
+    free(spineOut.newSpine.ribStarts);
 }
 
 typedef struct {
@@ -1056,35 +1044,28 @@ Point getBubblePositionPt(
     // approximately correspond to the x and y axes respectively.
     // in the windows API in general and in this function specifically, the
     // positive y direction is downward.
-    Point shape1, shape2;
-    getCellShape(
-        model->angle1, model->angle2, model->aspect, &shape1, &shape2
+    Point edge1, edge2;
+    getCellEdges(
+        model->angle1, model->angle2, model->aspect,
+        widthPt * heightPt / count, &edge1, &edge2
     );
-    Spine oldSpine, newSpine;
-    getSpines(
-        model->angle1, model->angle2, model->aspect, model->offsetPt,
-        widthPt, heightPt, count, model->dialog, &oldSpine, &newSpine
+    Spine spine = getSpine(
+        edge1, edge2, model->offsetPt, widthPt, heightPt, count, model->dialog
     );
     int cellsSeen = 0;
     Point grid;
-    for (int i = 0; i < newSpine.spineStop - newSpine.spineStart; i++) {
-        grid.y = newSpine.spineStart + i;
-        int width = newSpine.ribStops[i] - newSpine.ribStarts[i];
+    for (int i = 0; i < spine.spineStop - spine.spineStart; i++) {
+        grid.y = spine.spineStart + i;
+        int width = spine.ribStops[i] - spine.ribStarts[i];
         if (cellsSeen + width > index) {
-            grid.x = newSpine.ribStarts[i] + index - cellsSeen;
+            grid.x = spine.ribStarts[i] + index - cellsSeen;
             break;
         }
 
         cellsSeen += width;
     }
 
-    // how much to scale each edge so that the number of cells on screen
-    // equals count
-    double shapeScale = sqrt(widthPt * heightPt / count);
-    Point result = add(
-        scale(matrixDot(shape1, shape2, grid), shapeScale),
-        model->offsetPt
-    );
+    Point result = add(matrixDot(edge1, edge2, grid), model->offsetPt);
     return result;
 }
 
