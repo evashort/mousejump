@@ -809,7 +809,7 @@ EdgeCell *getEdgeCells(int count) {
 }
 
 typedef struct {
-    int spineStart, spineStop;
+    int start, stop;
     int *ribStarts, *ribStops;
 } Spine;
 struct {
@@ -822,8 +822,8 @@ struct {
     .newCapacity = 0,
 };
 Spine getSpine(
-    Point edge1, Point edge2, Point offsetPt,
-    double widthPt, double heightPt, int count, HWND dialog
+    Point edge1, Point edge2, Point offset, double width, double height,
+    int count, HWND dialog
 ) {
     double inverseScale = 1 / determinant(edge1, edge2);
     // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
@@ -831,11 +831,11 @@ Spine getSpine(
     // matrix whose columns are the edges of a screen parallelogram).
     Point inverse1 = scale(makePoint(edge2.y, -edge1.y), inverseScale);
     Point inverse2 = scale(makePoint(-edge2.x, edge1.x), inverseScale);
-    Point gridOffset = matrixDot(inverse1, inverse2, scale(offsetPt, -1));
+    Point gridOffset = matrixDot(inverse1, inverse2, scale(offset, -1));
     // the grid parallelogram is the entire screen area projected into grid
     // space
-    Point gridEdge1 = scale(inverse1, widthPt);
-    Point gridEdge2 = scale(inverse2, heightPt);
+    Point gridEdge1 = scale(inverse1, width);
+    Point gridEdge2 = scale(inverse2, height);
     // normals radiate out from the grid parallelogram
     Point gridNormal1 = scale(getNormal(inverse1), -1);
     Point gridNormal2 = getNormal(inverse2);
@@ -868,24 +868,24 @@ Spine getSpine(
         );
     }
 
-    int spineStart = minN(spineCandidates, 4);
-    int spineStop = maxN(spineCandidates, 4);
+    int start = minN(spineCandidates, 4);
+    int stop = maxN(spineCandidates, 4);
     int *ribStarts = spineOut.oldSpine.ribStarts;
     int spineCapacity = max(
         spineOut.oldCapacity,
-        nextPowerOf2(2 * (spineStop - spineStart), 64)
+        nextPowerOf2(2 * (stop - start), 64)
     );
     if (spineCapacity > spineOut.oldCapacity) {
         ribStarts = realloc(ribStarts, spineCapacity * sizeof(int));
     }
 
-    int *ribStops = ribStarts + (spineStop - spineStart);
+    int *ribStops = ribStarts + (stop - start);
     Point rowNormal = { 0, 1 };
-    Point cell = { 0, spineStart };
+    Point cell = { 0, start };
     int actualCount = 0;
     int edgeCellCount = 0;
-    for (int i = 0; i < spineStop - spineStart; i++) {
-        cell.y = spineStart + i;
+    for (int i = 0; i < stop - start; i++) {
+        cell.y = start + i;
         double xEntry = -INFINITY;
         double xExit = INFINITY;
         for (int j = 0; j < 4; j++) {
@@ -962,13 +962,72 @@ Spine getSpine(
     spineOut.oldSpine = spineOut.newSpine;
     spineOut.oldCapacity = spineOut.newCapacity;
 
-    spineOut.newSpine.spineStart = spineStart;
-    spineOut.newSpine.spineStop = spineStop;
+    spineOut.newSpine.start = start;
+    spineOut.newSpine.stop = stop;
     spineOut.newSpine.ribStarts = ribStarts;
     spineOut.newSpine.ribStops = ribStops;
     spineOut.newCapacity = spineCapacity;
 
     return spineOut.newSpine;
+}
+
+int getSpineCount(Spine spine) {
+    int count = 0;
+    for (int i = 0; i < spine.stop - spine.start; i++) {
+        count += spine.ribStops[i] - spine.ribStarts[i];
+    }
+
+    return count;
+}
+
+typedef struct {
+    Point edge1, edge2, offset;
+    double width, height;
+    int count;
+} BubblesIn;
+BubblesIn bubblesIn = { { 0, 0 }, { 0, 0 }, 0, 0, 0 };
+struct {
+    Spine spine;
+    Point *oldBubbles, *newBubbles;
+    int oldCapacity, newCapacity;
+} bubblesOut = { { 0, 0, NULL, NULL }, NULL, NULL, 0, 0 };
+Point *getBubbles(
+    Point edge1, Point edge2, Point offset, double width, double height,
+    int count, HWND dialog
+) {
+    BubblesIn in = { edge1, edge2, offset, width, height, count };
+    if (!memcmp(&in, &bubblesIn, sizeof(in))) {
+        return bubblesOut.newBubbles;
+    }
+
+    bubblesIn = in;
+    Spine spine = getSpine(
+        edge1, edge2, offset, width, height, count, dialog
+    );
+    Point *bubbles = bubblesOut.oldBubbles;
+    int capacity = max(bubblesOut.oldCapacity, nextPowerOf2(count, 64));
+    if (capacity > bubblesOut.oldCapacity) {
+        bubbles = realloc(bubbles, capacity * sizeof(Point));
+    }
+
+    Point *oldBubbles = bubblesOut.newBubbles;
+    Spine oldSpine = bubblesOut.spine;
+    int oldCount = getSpineCount(oldSpine);
+    int bubbleIndex = 0;
+    for (int i = 0; i < spine.stop - spine.start; i++) {
+        for (int x = spine.ribStarts[i]; x < spine.ribStops[i]; x++) {
+            bubbles[bubbleIndex].x = x;
+            bubbles[bubbleIndex].y = spine.start + i;
+            bubbleIndex++;
+        }
+    }
+
+    bubblesOut.spine = spine;
+    bubblesOut.oldBubbles = bubblesOut.newBubbles;
+    bubblesOut.oldCapacity = bubblesOut.newCapacity;
+    bubblesOut.newBubbles = bubbles;
+    bubblesOut.newCapacity = capacity;
+    return bubbles;
 }
 
 void destroyCache() {
@@ -994,6 +1053,8 @@ void destroyCache() {
     free(edgeCellsOut.edgeCells);
     free(spineOut.oldSpine.ribStarts);
     free(spineOut.newSpine.ribStarts);
+    free(bubblesOut.oldBubbles);
+    free(bubblesOut.newBubbles);
 }
 
 typedef struct {
@@ -1032,12 +1093,12 @@ typedef struct {
     LPWSTR text;
 } Model;
 
-int getBubbleCount(Model *model, double widthPt, double heightPt) {
+int getBubbleCount(Model *model, double width, double height) {
     return model->bubbleCount;
 }
 
 Point getBubblePositionPt(
-    Model *model, double widthPt, double heightPt, int count, int index
+    Model *model, double width, double height, int count, int index
 ) {
     // get the shape of all screen parallelograms (cells) without worrying
     // about scale yet. shape1 and shape2 represent the edges that
@@ -1046,26 +1107,16 @@ Point getBubblePositionPt(
     // positive y direction is downward.
     Point edge1, edge2;
     getCellEdges(
-        model->angle1, model->angle2, model->aspect,
-        widthPt * heightPt / count, &edge1, &edge2
+        model->angle1, model->angle2, model->aspect, width * height / count,
+        &edge1, &edge2
     );
-    Spine spine = getSpine(
-        edge1, edge2, model->offsetPt, widthPt, heightPt, count, model->dialog
+    Point *bubbles = getBubbles(
+        edge1, edge2, model->offsetPt, width, height, count, model->dialog
     );
-    int cellsSeen = 0;
-    Point grid;
-    for (int i = 0; i < spine.spineStop - spine.spineStart; i++) {
-        grid.y = spine.spineStart + i;
-        int width = spine.ribStops[i] - spine.ribStarts[i];
-        if (cellsSeen + width > index) {
-            grid.x = spine.ribStarts[i] + index - cellsSeen;
-            break;
-        }
-
-        cellsSeen += width;
-    }
-
-    Point result = add(matrixDot(edge1, edge2, grid), model->offsetPt);
+    Point result = add(
+        matrixDot(edge1, edge2, bubbles[index]),
+        model->offsetPt
+    );
     return result;
 }
 
