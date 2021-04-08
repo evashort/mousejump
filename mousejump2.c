@@ -252,16 +252,25 @@ LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
 #pragma region selectLabelBitmap
 
 typedef struct {
-    UINT dpi; double heightPt; WCHAR family[LF_FACESIZE];
+    UINT dpi;
+    double heightPt;
+    WCHAR family[LF_FACESIZE];
+    int systemFontChanges;
 } LabelFontIn;
 LabelFontIn labelFontIn;
 HFONT labelFontOut = NULL;
-HFONT getLabelFont(UINT dpi, double heightPt, WCHAR family[LF_FACESIZE]) {
+HFONT getLabelFont(
+    UINT dpi,
+    double heightPt,
+    WCHAR family[LF_FACESIZE],
+    int systemFontChanges
+) {
     LabelFontIn in;
     ZeroMemory(&in, sizeof(in));
     in.dpi = dpi;
     in.heightPt = heightPt;
     wcsncpy(in.family, family, LF_FACESIZE);
+    in.systemFontChanges = systemFontChanges;
     if (labelFontOut) {
         if (!memcmp(&in, &labelFontIn, sizeof(in))) { return labelFontOut; }
         DeleteObject(labelFontOut);
@@ -1225,6 +1234,7 @@ typedef struct {
     double angle2;
     double fontHeightPt;
     WCHAR fontFamily[LF_FACESIZE];
+    int systemFontChanges;
     double paddingLeftPt;
     double paddingTopPt;
     double paddingRightPt;
@@ -1318,6 +1328,7 @@ Model *getModel(HWND window) {
 typedef struct {
     Point offsetPt;
     UINT dpi;
+    int systemFontChanges;
     int widthPx;
     int heightPx;
     LabelRange labelRange;
@@ -1353,6 +1364,7 @@ Graphics getGraphics(HWND window) {
     ZeroMemory(&graphics, sizeof(graphics));
     graphics.offsetPt = model->offsetPt;
     graphics.dpi = dpi;
+    graphics.systemFontChanges = model->systemFontChanges;
     graphics.widthPx = widthPx;
     graphics.heightPx = heightPx;
     graphics.labelRange = getLabelRange(model->text, labels);
@@ -1363,6 +1375,7 @@ Graphics getGraphics(HWND window) {
 Graphics lastGraphics = {
     .offsetPt = { 0, 0 },
     .dpi = 0,
+    .systemFontChanges = 0,
     .widthPx = 0,
     .heightPx = 0,
     .labelRange = { 0, 0, 0, 0 },
@@ -1414,7 +1427,12 @@ void redraw(HWND window) {
     HDC labelMemory = CreateCompatibleDC(device);
     SelectObject(
         labelMemory,
-        getLabelFont(graphics.dpi, model->fontHeightPt, model->fontFamily)
+        getLabelFont(
+            graphics.dpi,
+            model->fontHeightPt,
+            model->fontFamily,
+            model->systemFontChanges
+        )
     );
     SetBkColor(labelMemory, model->labelBackground);
     SetTextColor(labelMemory, getTextColor(model->labelBackground));
@@ -1430,7 +1448,12 @@ void redraw(HWND window) {
     HDC selectionMemory = CreateCompatibleDC(device);
     SelectObject(
         selectionMemory,
-        getLabelFont(graphics.dpi, model->fontHeightPt, model->fontFamily)
+        getLabelFont(
+            graphics.dpi,
+            model->fontHeightPt,
+            model->fontFamily,
+            model->systemFontChanges
+        )
     );
     SetBkColor(selectionMemory, model->selectionBackground);
     SetTextColor(selectionMemory, getTextColor(model->selectionBackground));
@@ -1605,9 +1628,8 @@ LRESULT CALLBACK WndProc(
         redraw(window);
         return 0;
     } else if (message == WM_SETTINGCHANGE) {
-        if (wParam == SPI_SETNONCLIENTMETRICS && labelFontOut) {
-            DeleteObject(labelFontOut);
-            labelFontOut = NULL;
+        if (wParam == SPI_SETNONCLIENTMETRICS) {
+            getModel(window)->systemFontChanges++;
             redraw(window);
             return 0;
         }
@@ -2164,6 +2186,7 @@ int CALLBACK WinMain(
         .angle2 = 75 * PI / 180,
         .fontHeightPt = 0,
         .fontFamily = L"",
+        .systemFontChanges = 0,
         .paddingLeftPt = 0.75,
         .paddingTopPt = 0.75,
         .paddingRightPt = 0.75,
