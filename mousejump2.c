@@ -782,6 +782,7 @@ void getCellEdges(
     in.angle1 = angle1;
     in.angle2 = angle2;
     in.aspect = aspect;
+    in.area = area;
     if (memcmp(&in, &cellEdgesIn, sizeof(in))) {
         ZeroMemory(&cellEdgesIn, sizeof(in));
         cellEdgesIn = in;
@@ -1062,6 +1063,7 @@ Point *getBubbles(
 ) {
     BubblesIn in;
     ZeroMemory(&in, sizeof(in));
+    in.edge1 = edge1;
     in.edge2 = edge2;
     in.offset = offset;
     in.width = width;
