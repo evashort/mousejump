@@ -1,2 +1,4 @@
 *.exe
 *.obj
+sequenceCosts.csv
+ANC-token-count.zip
