@@ -85,11 +85,11 @@ void selectKeyBitmap(
     HDC device, HDC memory, int width, int height, COLORREF color
 ) {
     // please clear the bitmap when you are done with it!
-    KeyBitmapIn in = {
-        max(width, keyBitmapIn.width),
-        max(height, keyBitmapIn.height),
-        color
-    };
+    KeyBitmapIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.width = max(width, keyBitmapIn.width);
+    in.height = max(height, keyBitmapIn.height);
+    in.color = color;
     if (keyBitmapOut) {
         if (!memcmp(&in, &keyBitmapIn, sizeof(in))) {
             SelectObject(memory, keyBitmapOut);
@@ -257,13 +257,17 @@ typedef struct {
 LabelFontIn labelFontIn;
 HFONT labelFontOut = NULL;
 HFONT getLabelFont(UINT dpi, double heightPt, WCHAR family[LF_FACESIZE]) {
-    LabelFontIn in = { .dpi = dpi, .heightPt = heightPt };
+    LabelFontIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.dpi = dpi;
+    in.heightPt = heightPt;
     wcsncpy(in.family, family, LF_FACESIZE);
     if (labelFontOut) {
         if (!memcmp(&in, &labelFontIn, sizeof(in))) { return labelFontOut; }
         DeleteObject(labelFontOut);
     }
 
+    ZeroMemory(&labelFontIn, sizeof(in));
     labelFontIn = in;
     NONCLIENTMETRICS metrics;
     metrics.cbSize = sizeof(metrics);
@@ -289,12 +293,15 @@ typedef struct { LOGFONT font; int count; } LabelWidthsIn;
 LabelWidthsIn labelWidthsIn = { .count = 0 };
 int *labelWidthsOut = NULL;
 int *getLabelWidths(HDC device, int count) {
-    LabelWidthsIn in = { .count = count };
+    LabelWidthsIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.count = count;
     GetObject(GetCurrentObject(device, OBJ_FONT), sizeof(in.font), &in.font);
     if (labelWidthsOut && !memcmp(&in, &labelWidthsIn, sizeof(in))) {
         return labelWidthsOut;
     }
 
+    ZeroMemory(&labelWidthsIn, sizeof(in));
     labelWidthsIn = in;
     StringArray labels = getSortedLabels(count);
     labelWidthsOut = realloc(labelWidthsOut, labels.count * sizeof(int));
@@ -411,12 +418,12 @@ RECT *selectLabelBitmapHelp(
     HDC device, HDC memory, int count, RECT paddingPx,
     LabelBitmapIn *labelBitmapIn, LabelBitmapOut *labelBitmapOut
 ) {
-    LabelBitmapIn in = {
-        .count = count,
-        .paddingPx = paddingPx,
-        .foreground = GetTextColor(memory),
-        .background = GetBkColor(memory)
-    };
+    LabelBitmapIn in;
+    ZeroMemory(&labelFontIn, sizeof(in));
+    in.count = count;
+    in.paddingPx = paddingPx;
+    in.foreground = GetTextColor(memory);
+    in.background = GetBkColor(memory);
     GetObject(GetCurrentObject(memory, OBJ_FONT), sizeof(in.font), &in.font);
     if (labelBitmapOut->bitmap) {
         if (!memcmp(&in, labelBitmapIn, sizeof(in))) {
@@ -427,6 +434,7 @@ RECT *selectLabelBitmapHelp(
         DeleteObject(labelBitmapOut->bitmap);
     }
 
+    ZeroMemory(labelBitmapIn, sizeof(in));
     *labelBitmapIn = in;
     int xPadding = max(paddingPx.left, paddingPx.right);
     int yPadding = max(paddingPx.top, paddingPx.bottom);
@@ -533,12 +541,16 @@ typedef struct { COLORREF color; int width; } BorderPenIn;
 BorderPenIn borderPenIn;
 HPEN borderPenOut;
 HPEN getBorderPen(COLORREF color, int width) {
-    BorderPenIn in = { .color = color, .width = width };
+    BorderPenIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.color = color;
+    in.width = width;
     if (borderPenOut) {
         if (!memcmp(&in, &borderPenIn, sizeof(in))) { return borderPenOut; }
         DeletePen(borderPenOut);
     }
 
+    ZeroMemory(&borderPenIn, sizeof(in));
     borderPenIn = in;
     LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
     return borderPenOut = ExtCreatePen(
@@ -564,14 +576,14 @@ SIZE selectEarBitmap(
     COLORREF keyColor, COLORREF borderColor, COLORREF backgroundColor
 ) {
     SIZE size = { offsetPx, heightPx };
-    EarBitmapIn in = {
-        .borderPx = borderPx,
-        .offsetPx = offsetPx,
-        .heightPx = heightPx,
-        .keyColor = keyColor,
-        .borderColor = borderColor,
-        .backgroundColor = backgroundColor,
-    };
+    EarBitmapIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.borderPx = borderPx;
+    in.offsetPx = offsetPx;
+    in.heightPx = heightPx;
+    in.keyColor = keyColor;
+    in.borderColor = borderColor;
+    in.backgroundColor = backgroundColor;
     if (earBitmapOut) {
         if (!memcmp(&in, &earBitmapIn, sizeof(in))) {
             SelectObject(memory, earBitmapOut);
@@ -581,6 +593,7 @@ SIZE selectEarBitmap(
         DeleteObject(earBitmapOut);
     }
 
+    ZeroMemory(&earBitmapIn, sizeof(in));
     earBitmapIn = in;
     earBitmapOut = CreateCompatibleBitmap(device, offsetPx, heightPx);
     SelectObject(memory, earBitmapOut);
@@ -755,8 +768,13 @@ void getCellEdges(
     double angle1, double angle2, double aspect, double area,
     Point *shape1, Point *shape2
 ) {
-    CellEdgesIn in = { angle1, angle2, aspect };
+    CellEdgesIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.angle1 = angle1;
+    in.angle2 = angle2;
+    in.aspect = aspect;
     if (memcmp(&in, &cellEdgesIn, sizeof(in))) {
+        ZeroMemory(&cellEdgesIn, sizeof(in));
         cellEdgesIn = in;
         cellEdgesOut.shape1 = makePoint(cos(angle1) * aspect, sin(angle1));
         cellEdgesOut.shape2 = makePoint(cos(angle2) * aspect, sin(angle2));
@@ -806,6 +824,30 @@ EdgeCell *getEdgeCells(int count) {
     }
 
     return edgeCellsOut.edgeCells;
+}
+
+double getParallelogramOverlap(
+    Point cell, Point *edgePoints, Point *normals, double borderRadius
+) {
+    // returns the approximate fraction of the grid cell that overlaps the
+    // given parallelogram.
+    // cell: center of the grid cell
+    // edgePoints: one point on each of the 4 sides
+    // normals: normals for each of the 4 sides
+    // borderRadius: half the width of the border. this is an inner border,
+    //               meaning it does not extend outside the given edges.
+    // if the center of the cell is on the outer edge of the border, overlap
+    // is zero. If it's on the inner edge, overlap is one.
+    double overlap = INFINITY;
+    for (int i = 0; i < 4; i++) {
+        overlap = min(
+            overlap,
+            dot(add(edgePoints[i], scale(cell, -1)), normals[i])
+                / (2 * borderRadius)
+        );
+    }
+
+    return overlap;
 }
 
 typedef struct {
@@ -898,40 +940,26 @@ Spine getSpine(
         }
 
         double xCenter = (int)ceil(0.5 * (xEntry + xExit));
-        ribStarts[i] = (int)ceil(xEntry);
-        ribStops[i] = (int)ceil(xExit);
+        ribStarts[i] = min(xCenter, (int)ceil(xEntry));
+        ribStops[i] = max(xCenter, (int)ceil(xExit));
         actualCount += ribStops[i] - ribStarts[i];
-        int direction = 1;
-        for (
-            cell.x = ribStarts[i];
-            direction > 0 ? cell.x < xCenter : cell.x >= xCenter;
-            cell.x += direction
-        ) {
-            // overlap: approximate fraction of the cell that overlaps the
-            // grid parallelogram. if the center of the cell is on the outer
-            // edge of the border, overlap is zero. If it's on the inner edge,
-            // overlap is one.
-            double overlap = INFINITY;
-            for (int j = 0; j < 4; j++) {
-                overlap = min(
-                    overlap,
-                    dot(add(gridPoints[j], scale(cell, -1)), gridNormals[j])
-                        / (2 * borderRadius)
-                );
-            }
+        for (cell.x = ribStarts[i]; cell.x < xCenter; cell.x++) {
+            double overlap = getParallelogramOverlap(
+                cell, gridPoints, gridNormals, borderRadius
+            );
+            if (overlap >= 1) { break; }
+            EdgeCell edgeCell = { i, FALSE, overlap };
+            getEdgeCells(edgeCellCount + 1)[edgeCellCount] = edgeCell;
+            edgeCellCount++;
+        }
 
-            if (overlap >= 1) {
-                if (direction == 1) {
-                    cell.x = ribStops[i];
-                    direction = -1;
-                    continue;
-                } else { break; }
-            }
-
-            EdgeCell *edgeCells = getEdgeCells(edgeCellCount + 1);
-            edgeCells[edgeCellCount].i = i;
-            edgeCells[edgeCellCount].right = direction == -1;
-            edgeCells[edgeCellCount].overlap = overlap;
+        for (cell.x = ribStops[i] - 1; cell.x >= xCenter; cell.x--) {
+            double overlap = getParallelogramOverlap(
+                cell, gridPoints, gridNormals, borderRadius
+            );
+            if (overlap >= 1) { break; }
+            EdgeCell edgeCell = { i, TRUE, overlap };
+            getEdgeCells(edgeCellCount + 1)[edgeCellCount] = edgeCell;
             edgeCellCount++;
         }
     }
@@ -971,13 +999,31 @@ Spine getSpine(
     return spineOut.newSpine;
 }
 
-int getSpineCount(Spine spine) {
-    int count = 0;
-    for (int i = 0; i < spine.stop - spine.start; i++) {
-        count += spine.ribStops[i] - spine.ribStarts[i];
-    }
+BOOL spineContains(Spine spine, Point point) {
+    return point.y >= spine.start
+        && point.y < spine.stop
+        && point.x >= spine.ribStarts[(int)point.y - spine.start]
+        && point.x < spine.ribStops[(int)point.y - spine.start];
+}
 
-    return count;
+typedef struct { int index; double score; } ScoredIndex;
+int compareScoredIndices(const ScoredIndex *a, const ScoredIndex *b) {
+    if (a->score > b->score) { return 1; }
+    if (a->score < b->score) { return -1; }
+    if (a->index > b->index) { return 1; }
+    if (a->index < b->index) { return -1; }
+    return 0;
+}
+
+typedef struct { Point point; double score; } ScoredPoint;
+int compareScoredPoints(const ScoredPoint *a, const ScoredPoint *b) {
+    if (a->score > b->score) { return 1; }
+    if (a->score < b->score) { return -1; }
+    if (a->point.y > b->point.y) { return 1; }
+    if (a->point.y < b->point.y) { return -1; }
+    if (a->point.x > b->point.x) { return 1; }
+    if (a->point.x < b->point.x) { return -1; }
+    return 0;
 }
 
 typedef struct {
@@ -987,46 +1033,150 @@ typedef struct {
 } BubblesIn;
 BubblesIn bubblesIn = { { 0, 0 }, { 0, 0 }, 0, 0, 0 };
 struct {
+    Point negativeOffset;
     Spine spine;
-    Point *oldBubbles, *newBubbles;
-    int oldCapacity, newCapacity;
-} bubblesOut = { { 0, 0, NULL, NULL }, NULL, NULL, 0, 0 };
+    Point *bubbles;
+    ScoredIndex *removed;
+    ScoredPoint *added;
+    int capacity;
+} bubblesOut = {
+    .negativeOffset = { 0, 0 },
+    .spine = { 0, 0, NULL, NULL },
+    .bubbles = NULL,
+    .removed = NULL,
+    .added = NULL,
+    .capacity = 0,
+};
 Point *getBubbles(
     Point edge1, Point edge2, Point offset, double width, double height,
     int count, HWND dialog
 ) {
-    BubblesIn in = { edge1, edge2, offset, width, height, count };
+    BubblesIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.edge2 = edge2;
+    in.offset = offset;
+    in.width = width;
+    in.height = height;
+    in.count = count;
     if (!memcmp(&in, &bubblesIn, sizeof(in))) {
-        return bubblesOut.newBubbles;
+        return bubblesOut.bubbles;
     }
 
+    ZeroMemory(&bubblesIn, sizeof(in));
     bubblesIn = in;
-    Spine spine = getSpine(
+
+    Point negativeOffset = bubblesOut.negativeOffset;
+    bubblesOut.negativeOffset = scale(offset, -1);
+    Point delta = add(offset, negativeOffset);
+
+    Spine oldSpine = bubblesOut.spine;
+    int oldCount = 0;
+    for (int i = 0; i < oldSpine.stop - oldSpine.start; i++) {
+        oldCount += oldSpine.ribStops[i] - oldSpine.ribStarts[i];
+    }
+
+    Spine spine = bubblesOut.spine = getSpine(
         edge1, edge2, offset, width, height, count, dialog
     );
-    Point *bubbles = bubblesOut.oldBubbles;
-    int capacity = max(bubblesOut.oldCapacity, nextPowerOf2(count, 64));
-    if (capacity > bubblesOut.oldCapacity) {
-        bubbles = realloc(bubbles, capacity * sizeof(Point));
+
+    Point *bubbles = bubblesOut.bubbles;
+    ScoredIndex *removed = bubblesOut.removed;
+    ScoredPoint *added = bubblesOut.added;
+    int capacity = max(bubblesOut.capacity, nextPowerOf2(count, 64));
+    if (capacity > bubblesOut.capacity) {
+        bubblesOut.capacity = capacity;
+        bubbles = bubblesOut.bubbles = realloc(
+            bubblesOut.bubbles, capacity * sizeof(Point)
+        );
+        removed = bubblesOut.removed = realloc(
+            bubblesOut.removed, capacity * sizeof(ScoredIndex)
+        );
+        added = bubblesOut.added = realloc(
+            bubblesOut.added, capacity * sizeof(ScoredPoint)
+        );
     }
 
-    Point *oldBubbles = bubblesOut.newBubbles;
-    Spine oldSpine = bubblesOut.spine;
-    int oldCount = getSpineCount(oldSpine);
-    int bubbleIndex = 0;
-    for (int i = 0; i < spine.stop - spine.start; i++) {
-        for (int x = spine.ribStarts[i]; x < spine.ribStops[i]; x++) {
-            bubbles[bubbleIndex].x = x;
-            bubbles[bubbleIndex].y = spine.start + i;
-            bubbleIndex++;
+    int removedCount = 0;
+    for (int i = 0; i < oldCount; i++) {
+        if (!spineContains(spine, bubbles[i])) {
+            Point screen = add(
+                matrixDot(edge1, edge2, bubbles[i]), negativeOffset
+            );
+            double time = INFINITY;
+            if (delta.x != 0) {
+                time = min(
+                    time, (width * (delta.x >= 0) - screen.x) / delta.x
+                );
+            } if (delta.y != 0) {
+                time = min(
+                    time, (height * (delta.y >= 0) - screen.y) / delta.y
+                );
+            }
+
+            removed[removedCount].index = i;
+            removed[removedCount].score = time;
+            removedCount++;
         }
     }
 
-    bubblesOut.spine = spine;
-    bubblesOut.oldBubbles = bubblesOut.newBubbles;
-    bubblesOut.oldCapacity = bubblesOut.newCapacity;
-    bubblesOut.newBubbles = bubbles;
-    bubblesOut.newCapacity = capacity;
+    qsort(removed, removedCount, sizeof(ScoredIndex), compareScoredIndices);
+
+    int addedCount = 0;
+    for (int y = spine.start; y < spine.stop; y++) {
+        int ribStart = spine.ribStarts[y - spine.start];
+        int ribStop = spine.ribStops[y - spine.start];
+        int holeStart = 0;
+        int holeStop = 0;
+        if (y >= oldSpine.start && y < oldSpine.stop) {
+            holeStart = oldSpine.ribStarts[y - oldSpine.start];
+            holeStop = oldSpine.ribStops[y - oldSpine.start];
+        }
+
+        for (int x = ribStart; x < ribStop; x++) {
+            if (x >= holeStart && x < holeStop) {
+                x = holeStop - 1;
+                continue;
+            }
+
+            Point bubble = { x, y };
+            Point screen = add(
+                matrixDot(edge1, edge2, bubble), negativeOffset
+            );
+            double time = -INFINITY;
+            if (delta.x != 0) {
+                time = max(
+                    time, (width * (delta.x < 0) - screen.x) / delta.x
+                );
+            } if (delta.y != 0) {
+                time = max(
+                    time, (height * (delta.y < 0) - screen.y) / delta.y
+                );
+            }
+
+            added[addedCount].point = bubble;
+            added[addedCount].score = time;
+            addedCount++;
+        }
+    }
+
+    qsort(added, addedCount, sizeof(ScoredPoint), compareScoredPoints);
+
+    // if the number of labels has increased, shuffle the new ones
+    for (int i = removedCount; i < addedCount; i++) {
+        removed[i].index = i;
+    }
+
+    for (int i = removedCount; i < addedCount - 1; i++) {
+        int j = i + rand() % (addedCount - i);
+        int tmp = removed[i].index;
+        removed[i].index = removed[j].index;
+        removed[j].index = tmp;
+    }
+
+    for (int i = 0; i < addedCount; i++) {
+        bubbles[removed[i].index] = added[i].point;
+    }
+
     return bubbles;
 }
 
@@ -1053,8 +1203,9 @@ void destroyCache() {
     free(edgeCellsOut.edgeCells);
     free(spineOut.oldSpine.ribStarts);
     free(spineOut.newSpine.ribStarts);
-    free(bubblesOut.oldBubbles);
-    free(bubblesOut.newBubbles);
+    free(bubblesOut.bubbles);
+    free(bubblesOut.added);
+    free(bubblesOut.removed);
 }
 
 typedef struct {
@@ -1198,21 +1349,30 @@ Graphics getGraphics(HWND window) {
         .y = ptToIntPx(cursorPosPt.y, dpi),
     };
     ClientToScreen(model->window, &cursorPos);
-    Graphics graphics = {
-        .offsetPt = model->offsetPt,
-        .dpi = dpi,
-        .widthPx = widthPx,
-        .heightPx = heightPx,
-        .labelRange = getLabelRange(model->text, labels),
-        .cursorPos = cursorPos,
-    };
+    Graphics graphics;
+    ZeroMemory(&graphics, sizeof(graphics));
+    graphics.offsetPt = model->offsetPt;
+    graphics.dpi = dpi;
+    graphics.widthPx = widthPx;
+    graphics.heightPx = heightPx;
+    graphics.labelRange = getLabelRange(model->text, labels);
+    graphics.cursorPos = cursorPos;
     return graphics;
 }
 
-Graphics lastGraphics;
-POINT naturalCursorPos = { .x = 0, .y = 0 };;
+Graphics lastGraphics = {
+    .offsetPt = { 0, 0 },
+    .dpi = 0,
+    .widthPx = 0,
+    .heightPx = 0,
+    .labelRange = { 0, 0, 0, 0 },
+    .cursorPos = { 0, 0 },
+};
+POINT naturalCursorPos = { .x = 0, .y = 0 };
 void redraw(HWND window) {
-    Graphics graphics = getGraphics(window);
+    Graphics graphics;
+    ZeroMemory(&graphics, sizeof(graphics));
+    graphics = getGraphics(window);
     if (!memcmp(&graphics, &lastGraphics, sizeof(graphics))) {
         return;
     }
@@ -1230,6 +1390,7 @@ void redraw(HWND window) {
         )
     ) {
         POINT cursorPos;
+        ZeroMemory(&cursorPos, sizeof(cursorPos));
         GetCursorPos(&cursorPos);
         BOOL isNatural = lastGraphics.labelRange.matchLength <= 0 || memcmp(
             &cursorPos, &lastGraphics.cursorPos, sizeof(cursorPos)
@@ -1242,6 +1403,7 @@ void redraw(HWND window) {
         }
     }
 
+    ZeroMemory(&lastGraphics, sizeof(graphics));
     lastGraphics = graphics;
     HDC device = GetDC(window);
     HDC memory = CreateCompatibleDC(device);
@@ -1507,16 +1669,17 @@ MinDialogSizeIn minDialogSizeIn = { .clientSize = { 0, 0 } };
 SIZE minDialogSizeOut;
 SIZE getMinDialogSize(HWND dialog) {
     Model *model = getModel(dialog);
-    MinDialogSizeIn in = {
-        .clientSize = getMinDialogClientSize(dialog),
-        .showCaption = model->showCaption,
-        .showMenuBar = GetMenu(dialog) != NULL,
-    };
+    MinDialogSizeIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.clientSize = getMinDialogClientSize(dialog);
+    in.showCaption = model->showCaption;
+    in.showMenuBar = GetMenu(dialog) != NULL;
     if (in.clientSize.cy == 0) { return in.clientSize; }
     if (!memcmp(&in, &minDialogSizeIn, sizeof(in))) {
         return minDialogSizeOut;
     }
 
+    ZeroMemory(&minDialogSizeIn, sizeof(in));
     minDialogSizeIn = in;
     RECT frame = { 0, 0, in.clientSize.cx, in.clientSize.cy };
     AdjustWindowRectEx(
@@ -1531,10 +1694,12 @@ SIZE getMinDialogSize(HWND dialog) {
 }
 
 void applyMinDialogSize(HWND dialog) {
-    RECT newFrame = {0, 0, 0, 0};
+    RECT newFrame;
+    ZeroMemory(&newFrame, sizeof(newFrame));
     *(LPSIZE)&newFrame.right = getMinDialogSize(dialog);
     if (newFrame.bottom == 0) { return; }
     RECT frame;
+    ZeroMemory(&frame, sizeof(frame));
     GetWindowRect(dialog, &frame);
     OffsetRect(&frame, -frame.left, -frame.top);
     if (getModel(dialog)->showCaption) {
@@ -1984,6 +2149,7 @@ int CALLBACK WinMain(
     int nCmdShow)
 {
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+    srand(478956);
 
     Model model = {
         .colorKey = RGB(255, 0, 255),
