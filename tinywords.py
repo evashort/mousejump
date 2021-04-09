@@ -8,7 +8,7 @@ import shutil
 from zipfile import ZipFile
 
 def getSequenceCosts(
-    weights={'part': 1, 'start': 0.6, 'end': 0.3, 'full': 1, 'short': 2},
+    weights={'part': 1, 'start': 0.1, 'end': 0.05, 'full': 1, 'short': 50},
     path=Path("sequenceCosts.csv")
 ):
     canUseFile = False
@@ -22,7 +22,7 @@ def getSequenceCosts(
             canUseFile = loadedWeights == weights \
                 and costHeader == ['sequence', 'cost']
 
-    if not canUseFile:
+    if True:#not canUseFile:
         weightItems = list(weights.items())
         weightNames, weightVector = zip(
             *(
@@ -50,6 +50,11 @@ def getSequenceCosts(
                 )
             ) + charCost * len(sequence)
 
+        sequenceCosts = {
+            getCase(sequence): cost
+            for sequence, cost in sequenceCosts.items()
+        }
+
         with path.open('w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f, lineterminator='\n')
             writer.writerows(zip(*weightItems))
@@ -67,6 +72,15 @@ def getSequenceCosts(
         assert costHeader == ['sequence', 'cost']
         for sequence, cost in reader:
             yield sequence, float(cost)
+
+def getCase(word):
+    if any(i in 'lj' for i in word[1:]):
+        return word.upper()
+
+    if word[:1] in 'ljftr':
+        return word.title()
+
+    return word
 
 def getSequenceCountVectors(
     countNames,

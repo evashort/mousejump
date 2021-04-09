@@ -2180,7 +2180,7 @@ int CALLBACK WinMain(
         .offsetPt = { 0, 0 },
         .deltaPx = 12,
         .smallDeltaPx = 1,
-        .bubbleCount = 50,
+        .bubbleCount = 1200,
         .marginLeftPt = 0,
         .marginTopPt = 0,
         .aspect = 4 / 3,
