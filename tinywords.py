@@ -111,6 +111,19 @@ def getSequenceCountVectors(
                     if length == len(word):
                         countVector[FULL] += count
 
+    for length in lengths:
+        startVector = sequenceCountVectors[['v', 'of', 'hip'][length - 1]]
+        stopVector = sequenceCountVectors[['v', 'mk', 'pwn'][length - 1]]
+        numberStart, numberStop = 10 ** (length - 1), 10 ** length
+        for i in range(numberStart, numberStop):
+            phase = math.exp(
+                -10 * (i - numberStart) / (numberStop - numberStart)
+            )
+            sequenceCountVectors[str(i)] = [
+                phase * startCount + (1 - phase) * stopCount
+                for startCount, stopCount in zip(startVector, stopVector)
+            ]
+
     return sequenceCountVectors
 
 def getWordCounts():
