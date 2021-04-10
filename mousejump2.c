@@ -604,24 +604,38 @@ SIZE selectEarBitmap(
 
     ZeroMemory(&earBitmapIn, sizeof(in));
     earBitmapIn = in;
-    earBitmapOut = CreateCompatibleBitmap(device, offsetPx, heightPx);
+    earBitmapOut = CreateCompatibleBitmap(device, 2 * offsetPx, 2 * heightPx);
     SelectObject(memory, earBitmapOut);
-    RECT rect = { 0, 0, offsetPx, heightPx };
+    RECT rect = { 0, 0, 2 * offsetPx, 2 * heightPx };
     FillRect(memory, &rect, getKeyBrush(keyColor));
     SelectObject(memory, getBorderPen(borderColor, borderPx));
     SelectObject(memory, getLabelBrush(backgroundColor));
     int borderDiagonalPx = (int)round(borderPx * sqrt2);
     int xyOffset = borderPx / 2;
     int yOffset = (borderDiagonalPx - 1) / 2;
-    POINT points[3] = {
-        { xyOffset, heightPx + xyOffset },
-        { xyOffset, xyOffset + yOffset },
-        { heightPx + xyOffset - yOffset, heightPx + xyOffset },
-    };
-    Polygon(memory, points, 3);
-    SelectObject(memory, getBorderPen(RGB(0, 0, 0), 1));
+    for (int i = 0; i < 4; i++) {
+        POINT points[3] = {
+            { xyOffset, heightPx + xyOffset },
+            { xyOffset, xyOffset + yOffset },
+            { heightPx + xyOffset - yOffset, heightPx + xyOffset },
+        };
+        if (i % 2) {
+            for (int j = 0; j < 3; j++) {
+                points[j].x = rect.right - 1 - points[j].x;
+            }
+        } if (i >= 2) {
+            for (int j = 0; j < 3; j++) {
+                points[j].y = rect.bottom - 1 - points[j].y;
+            }
+        }
+
+        Polygon(memory, points, 3);
+    }
+
     rect.left = borderPx;
     rect.top = offsetPx;
+    rect.right = 2 * offsetPx - borderPx;
+    rect.bottom = 2 * heightPx - offsetPx;
     FillRect(memory, &rect, getKeyBrush(keyColor));
     return size;
 }
