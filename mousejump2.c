@@ -1241,10 +1241,7 @@ typedef struct {
     double deltaPx;
     double smallDeltaPx;
     int bubbleCount;
-    double marginLeftPt;
-    double marginTopPt;
-    double marginRightPt;
-    double marginBottomPt;
+    double gridMargin;
     double aspect;
     double angle1;
     double angle2;
@@ -1261,6 +1258,8 @@ typedef struct {
     double earHeightPt;
     double earElevationPt;
     COLORREF borderColor;
+    double mirrorWidthPt;
+    double mirrorHeightPt;
     double textBoxWidthPt;
     double dropdownWidthPt;
     double clientHeightPt;
@@ -1508,6 +1507,8 @@ void redraw(HWND window) {
         Point positionPt = getBubblePositionPt(
             model, widthPt, heightPt, labels.count, i
         );
+        BOOL xFlip = widthPt - positionPt.x <= model->mirrorWidthPt;
+        BOOL yFlip = heightPt - positionPt.y <= model->mirrorHeightPt;
         POINT positionPx = {
             .x = ptToIntPx(positionPt.x, graphics.dpi),
             .y = ptToIntPx(positionPt.y, graphics.dpi),
@@ -1515,19 +1516,24 @@ void redraw(HWND window) {
         clampToRect(client, &positionPx);
         BitBlt(
             memory,
-            positionPx.x,
-            positionPx.y,
+            positionPx.x + xFlip * (1 - earSize.cx),
+            positionPx.y + yFlip * (1 - earSize.cy),
             earSize.cx,
             earSize.cy,
             earMemory,
-            0,
-            0,
+            xFlip * earSize.cx,
+            yFlip * earSize.cy,
             SRCCOPY
         );
         BitBlt(
             memory,
-            positionPx.x + borderPx,
-            positionPx.y + earElevationPx,
+            positionPx.x + borderPx + xFlip * (
+                1 - 2 * borderPx + labelRects[i].left - labelRects[i].right
+            ),
+            positionPx.y + earElevationPx + yFlip * (
+                1 - 2 * earElevationPx
+                    + labelRects[i].top - labelRects[i].bottom
+            ),
             labelRects[i].right - labelRects[i].left,
             labelRects[i].bottom - labelRects[i].top,
             labelMemory,
@@ -1546,8 +1552,14 @@ void redraw(HWND window) {
             );
             BitBlt(
                 memory,
-                positionPx.x + borderPx + paddingPx.left,
-                positionPx.y + earElevationPx + paddingPx.top,
+                positionPx.x + borderPx + paddingPx.left + xFlip * (
+                    1 - 2 * borderPx
+                        + labelRects[i].left - labelRects[i].right
+                ),
+                positionPx.y + earElevationPx + paddingPx.top + yFlip * (
+                    1 - 2 * earElevationPx
+                        + labelRects[i].top - labelRects[i].bottom
+                ),
                 min(
                     selectionRects[i].right - selectionRects[i].left,
                     textRect.right
@@ -1583,6 +1595,8 @@ void redraw(HWND window) {
         Point positionPt = getBubblePositionPt(
             model, widthPt, heightPt, labels.count, i
         );
+        BOOL xFlip = widthPt - positionPt.x <= model->mirrorWidthPt;
+        BOOL yFlip = heightPt - positionPt.y <= model->mirrorHeightPt;
         POINT positionPx = {
             .x = ptToIntPx(positionPt.x, graphics.dpi),
             .y = ptToIntPx(positionPt.y, graphics.dpi),
@@ -1591,13 +1605,19 @@ void redraw(HWND window) {
         RECT dstRect = labelRects[i];
         OffsetRect(
             &dstRect,
-            positionPx.x + borderPx - dstRect.left,
-            positionPx.y + earElevationPx - dstRect.top
+            positionPx.x + (
+                xFlip ? 1 - borderPx - dstRect.right
+                    : borderPx - dstRect.left
+            ),
+            positionPx.y + (
+                yFlip ? 1 - earElevationPx - dstRect.bottom
+                    : earElevationPx - dstRect.top
+            )
         );
         FillRect(memory, &dstRect, keyBrush);
         RECT earRect = {
-            .left = positionPx.x,
-            .top = positionPx.y
+            .left = positionPx.x + xFlip * (1 - earSize.cx),
+            .top = positionPx.y + yFlip * (1 - earSize.cy)
         };
         earRect.right = earRect.left + earSize.cx;
         earRect.bottom = earRect.top + earSize.cy;
@@ -2195,8 +2215,7 @@ int CALLBACK WinMain(
         .deltaPx = 12,
         .smallDeltaPx = 1,
         .bubbleCount = 1200,
-        .marginLeftPt = 0,
-        .marginTopPt = 0,
+        .gridMargin = 1,
         .aspect = 4 / 3,
         .angle1 = 15 * PI / 180,
         .angle2 = 75 * PI / 180,
@@ -2213,6 +2232,8 @@ int CALLBACK WinMain(
         .earHeightPt = 6,
         .earElevationPt = 4,
         .borderColor = RGB(0, 0, 0),
+        .mirrorWidthPt = 100,
+        .mirrorHeightPt = 100,
         .textBoxWidthPt = 15,
         .dropdownWidthPt = 15,
         .clientHeightPt = 21,
