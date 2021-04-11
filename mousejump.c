@@ -851,7 +851,12 @@ EdgeCell *getEdgeCells(int count) {
 }
 
 double getParallelogramOverlap(
-    Point cell, Point *edgePoints, Point *normals, double borderRadius
+    Point cell,
+    Point *edgePoints,
+    Point *normals,
+    double borderRadius,
+    int iStart,
+    int iStop
 ) {
     // returns the approximate fraction of the grid cell that overlaps the
     // given parallelogram.
@@ -863,7 +868,7 @@ double getParallelogramOverlap(
     // if the center of the cell is on the outer edge of the border, overlap
     // is zero. If it's on the inner edge, overlap is one.
     double overlap = INFINITY;
-    for (int i = 0; i < 4; i++) {
+    for (int i = iStart; i < iStop; i++) {
         overlap = min(
             overlap,
             dot(add(edgePoints[i], scale(cell, -1)), normals[i])
@@ -889,7 +894,7 @@ struct {
 };
 Spine getSpine(
     Point edge1, Point edge2, Point offset, double width, double height,
-    int count, HWND dialog
+    int count, HWND dialog, Spine oldSpine, Point delta
 ) {
     double inverseScale = 1 / determinant(edge1, edge2);
     // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
@@ -945,6 +950,21 @@ Spine getSpine(
         ribStarts = realloc(ribStarts, spineCapacity * sizeof(int));
     }
 
+    // the cliff is the range of screen edges, indexed counterclockwise with
+    // top = 0, that labels are moving towards and "falling off of".
+    int cliffIndices[3][3] = {
+        {1, 0, 7},
+        {2, 0, 6},
+        {3, 4, 5},
+    };
+    int cliffIndex = cliffIndices[
+        1 + (delta.y > 0) - (delta.y < 0)
+    ][
+        1 + (delta.x > 0) - (delta.x < 0)
+    ];
+    int cliffStart = cliffIndex / 2;
+    int cliffStop = (cliffIndex + 3) / 2;
+
     int *ribStops = ribStarts + (stop - start);
     Point rowNormal = { 0, 1 };
     Point cell = { 0, start };
@@ -967,9 +987,28 @@ Spine getSpine(
         ribStarts[i] = min(xCenter, (int)ceil(xEntry));
         ribStops[i] = max(xCenter, (int)ceil(xExit));
         actualCount += ribStops[i] - ribStarts[i];
+
+        int oldI = i + start - oldSpine.start;
+        int oldRibStart = 0;
+        int oldRibStop = 0;
+        if (oldI >= 0 && oldI < oldSpine.stop - oldSpine.start) {
+            oldRibStart = oldSpine.ribStarts[oldI];
+            oldRibStop = oldSpine.ribStops[oldI];
+        }
+
         for (cell.x = ribStarts[i]; cell.x < xCenter; cell.x++) {
+            int iStart = 0;
+            int iStop = 4;
+            if (cell.x >= oldRibStart && cell.x < oldRibStop) {
+                // only remove cells from the previous spine if they fell off
+                // the cliff. this prevents churn near the screen edges
+                // parallel to the direction of motion.
+                iStart = cliffStart;
+                iStop = cliffStop;
+            }
+
             double overlap = getParallelogramOverlap(
-                cell, gridPoints, gridNormals, borderRadius
+                cell, gridPoints, gridNormals, borderRadius, iStart, iStop
             );
             if (overlap >= 1) { break; }
             EdgeCell edgeCell = { i, FALSE, overlap };
@@ -978,8 +1017,15 @@ Spine getSpine(
         }
 
         for (cell.x = ribStops[i] - 1; cell.x >= xCenter; cell.x--) {
+            int iStart = 0;
+            int iStop = 4;
+            if (cell.x >= oldRibStart && cell.x < oldRibStop) {
+                iStart = cliffStart;
+                iStop = cliffStop;
+            }
+
             double overlap = getParallelogramOverlap(
-                cell, gridPoints, gridNormals, borderRadius
+                cell, gridPoints, gridNormals, borderRadius, iStart, iStop
             );
             if (overlap >= 1) { break; }
             EdgeCell edgeCell = { i, TRUE, overlap };
@@ -1101,7 +1147,7 @@ Point *getBubbles(
     }
 
     Spine spine = bubblesOut.spine = getSpine(
-        edge1, edge2, offset, width, height, count, dialog
+        edge1, edge2, offset, width, height, count, dialog, oldSpine, delta
     );
 
     Point *bubbles = bubblesOut.bubbles;
