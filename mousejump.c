@@ -879,10 +879,14 @@ double getParallelogramOverlap(
     return overlap;
 }
 
-typedef struct {
-    int start, stop;
-    int *ribStarts, *ribStops;
-} Spine;
+typedef struct { int start, stop; int *ribStarts, *ribStops; } Spine;
+BOOL spineContains(Spine spine, Point point) {
+    return point.y >= spine.start
+        && point.y < spine.stop
+        && point.x >= spine.ribStarts[(int)point.y - spine.start]
+        && point.x < spine.ribStops[(int)point.y - spine.start];
+}
+
 struct {
     Spine oldSpine, newSpine;
     int oldCapacity, newCapacity;
@@ -894,7 +898,7 @@ struct {
 };
 Spine getSpine(
     Point edge1, Point edge2, Point offset, double width, double height,
-    int count, HWND dialog, Spine oldSpine, Point delta
+    int count, Spine oldSpine, int cliffStart, int cliffStop, HWND dialog
 ) {
     double inverseScale = 1 / determinant(edge1, edge2);
     // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
@@ -950,21 +954,6 @@ Spine getSpine(
         ribStarts = realloc(ribStarts, spineCapacity * sizeof(int));
     }
 
-    // the cliff is the range of screen edges, indexed counterclockwise with
-    // top = 0, that labels are moving towards and "falling off of".
-    int cliffIndices[3][3] = {
-        {1, 0, 7},
-        {2, 0, 6},
-        {3, 4, 5},
-    };
-    int cliffIndex = cliffIndices[
-        1 + (delta.y > 0) - (delta.y < 0)
-    ][
-        1 + (delta.x > 0) - (delta.x < 0)
-    ];
-    int cliffStart = cliffIndex / 2;
-    int cliffStop = (cliffIndex + 3) / 2;
-
     int *ribStops = ribStarts + (stop - start);
     Point rowNormal = { 0, 1 };
     Point cell = { 0, start };
@@ -987,24 +976,13 @@ Spine getSpine(
         ribStarts[i] = min(xCenter, (int)ceil(xEntry));
         ribStops[i] = max(xCenter, (int)ceil(xExit));
         actualCount += ribStops[i] - ribStarts[i];
-
-        int oldI = i + start - oldSpine.start;
-        int oldRibStart = 0;
-        int oldRibStop = 0;
-        if (oldI >= 0 && oldI < oldSpine.stop - oldSpine.start) {
-            oldRibStart = oldSpine.ribStarts[oldI];
-            oldRibStop = oldSpine.ribStops[oldI];
-        }
-
         for (cell.x = ribStarts[i]; cell.x < xCenter; cell.x++) {
-            int iStart = 0;
-            int iStop = 4;
-            if (cell.x >= oldRibStart && cell.x < oldRibStop) {
+            int iStart = 0, iStop = 4;
+            if (spineContains(oldSpine, cell)) {
                 // only remove cells from the previous spine if they fell off
                 // the cliff. this prevents churn near the screen edges
                 // parallel to the direction of motion.
-                iStart = cliffStart;
-                iStop = cliffStop;
+                iStart = cliffStart; iStop = cliffStop;
             }
 
             double overlap = getParallelogramOverlap(
@@ -1017,11 +995,9 @@ Spine getSpine(
         }
 
         for (cell.x = ribStops[i] - 1; cell.x >= xCenter; cell.x--) {
-            int iStart = 0;
-            int iStop = 4;
-            if (cell.x >= oldRibStart && cell.x < oldRibStop) {
-                iStart = cliffStart;
-                iStop = cliffStop;
+            int iStart = 0, iStop = 4;
+            if (spineContains(oldSpine, cell)) {
+                iStart = cliffStart; iStop = cliffStop;
             }
 
             double overlap = getParallelogramOverlap(
@@ -1037,8 +1013,10 @@ Spine getSpine(
     EdgeCell *edgeCells = getEdgeCells(edgeCellCount);
     qsort(edgeCells, edgeCellCount, sizeof(EdgeCell), compareEdgeCells);
     if (actualCount - count > edgeCellCount) {
-        // my theory is that a borderRadius of 0.5 should be enough to prevent
-        // this error from ever occuring
+        // I convinced myself that a borderRadius of 0.5 should be enough to
+        // prevent this error from ever occuring, but that was before the
+        // cliffStart and cliffStop parameters were added to reduce label
+        // churn.
         MessageBox(
             dialog,
             L"Not enough edge cells. "
@@ -1067,13 +1045,6 @@ Spine getSpine(
     spineOut.newCapacity = spineCapacity;
 
     return spineOut.newSpine;
-}
-
-BOOL spineContains(Spine spine, Point point) {
-    return point.y >= spine.start
-        && point.y < spine.stop
-        && point.x >= spine.ribStarts[(int)point.y - spine.start]
-        && point.x < spine.ribStops[(int)point.y - spine.start];
 }
 
 typedef struct { int index; double score; } ScoredIndex;
@@ -1133,12 +1104,34 @@ Point *getBubbles(
         return bubblesOut.bubbles;
     }
 
-    ZeroMemory(&bubblesIn, sizeof(in));
-    bubblesIn = in;
-
     Point negativeOffset = bubblesOut.negativeOffset;
     bubblesOut.negativeOffset = scale(offset, -1);
     Point delta = add(offset, negativeOffset);
+
+    // the cliff is the range of screen edges, indexed counterclockwise
+    // with top = 0, that labels are moving towards and "falling off of".
+    int cliffStart = 0;
+    int cliffStop = 4;
+    // specify a cliff only if nothing but offset changed.
+    bubblesIn.offset = in.offset;
+    if (!memcmp(&in, &bubblesIn, sizeof(in))) {
+        int cliffIndices[3][3] = {
+            {1, 0, 7},
+            {2, 8, 6},
+            {3, 4, 5},
+        };
+        int cliffIndex = cliffIndices[
+            1 + (delta.y > 0) - (delta.y < 0)
+        ][
+            1 + (delta.x > 0) - (delta.x < 0)
+        ];
+        cliffStart = cliffIndex / 2;
+        cliffStop = (cliffIndex + 3) / 2; // values up to 5 are allowed
+        if (cliffIndex == 8) { cliffStart = cliffStop = 0; }
+    }
+
+    ZeroMemory(&bubblesIn, sizeof(in));
+    bubblesIn = in;
 
     Spine oldSpine = bubblesOut.spine;
     int oldCount = 0;
@@ -1147,7 +1140,8 @@ Point *getBubbles(
     }
 
     Spine spine = bubblesOut.spine = getSpine(
-        edge1, edge2, offset, width, height, count, dialog, oldSpine, delta
+        edge1, edge2, offset, width, height, count,
+        oldSpine, cliffStart, cliffStop, dialog
     );
 
     Point *bubbles = bubblesOut.bubbles;
