@@ -568,6 +568,75 @@ HPEN getBorderPen(COLORREF color, int width) {
     );
 }
 
+typedef struct { COLORREF color; int width; DWORD dashLength; } DashPenIn;
+DashPenIn dragPenIn;
+HPEN dragPenOut;
+HPEN getDragPen(COLORREF color, int width, DWORD dashLength) {
+    DashPenIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.color = color;
+    in.width = width;
+    in.dashLength = dashLength;
+    if (dragPenOut) {
+        if (!memcmp(&in, &dragPenIn, sizeof(in))) { return dragPenOut; }
+        DeletePen(dragPenOut);
+    }
+
+    ZeroMemory(&dragPenIn, sizeof(in));
+    dragPenIn = in;
+    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
+    return dragPenOut = ExtCreatePen(
+        PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT | PS_JOIN_MITER,
+        width, &brush, 1, &in.dashLength
+    );
+}
+
+DashPenIn dragPen2In;
+HPEN dragPen2Out;
+HPEN getDragPen2(COLORREF color, int width, DWORD dashLength) {
+    DashPenIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.color = color;
+    in.width = width;
+    in.dashLength = dashLength;
+    if (dragPen2Out) {
+        if (!memcmp(&in, &dragPen2In, sizeof(in))) { return dragPen2Out; }
+        DeletePen(dragPen2Out);
+    }
+
+    ZeroMemory(&dragPen2In, sizeof(in));
+    dragPen2In = in;
+    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
+    DWORD dashLengths[3] = {0, dashLength, 0};
+    return dragPen2Out = ExtCreatePen(
+        PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT | PS_JOIN_MITER,
+        width, &brush, 3, dashLengths
+    );
+}
+
+DashPenIn keyDashPenIn;
+HPEN keyDashPenOut;
+HPEN getKeyDashPen(COLORREF color, int width, DWORD dashLength) {
+    DashPenIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.color = color;
+    in.width = width;
+    in.dashLength = dashLength;
+    if (keyDashPenOut) {
+        if (!memcmp(&in, &keyDashPenIn, sizeof(in))) { return keyDashPenOut; }
+        DeletePen(keyDashPenOut);
+    }
+
+    ZeroMemory(&keyDashPenIn, sizeof(in));
+    keyDashPenIn = in;
+    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
+    DWORD dashLengths[2] = {dashLength, 0};
+    return keyDashPenOut = ExtCreatePen(
+        PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT | PS_JOIN_MITER,
+        width, &brush, 2, dashLengths
+    );
+}
+
 typedef struct {
     int borderPx;
     int offsetPx;
@@ -1259,6 +1328,9 @@ void destroyCache() {
     DeleteObject(selectionBitmapOut.bitmap);
     free(selectionBitmapOut.rects);
     if (borderPenOut) { DeletePen(borderPenOut); }
+    if (dragPenOut) { DeletePen(dragPenOut); }
+    if (dragPen2Out) { DeletePen(dragPen2Out); }
+    if (keyDashPenOut) { DeletePen(keyDashPenOut); }
     DeleteObject(earBitmapOut);
     free(acceleratorsOut.value);
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
@@ -1299,6 +1371,7 @@ typedef struct {
     double earHeightPt;
     double earElevationPt;
     COLORREF borderColor;
+    double dashPt;
     double mirrorWidthPt;
     double mirrorHeightPt;
     double textBoxWidthPt;
@@ -1308,6 +1381,9 @@ typedef struct {
     SIZE minTextBoxSize;
     BOOL inMenuLoop;
     LPWSTR text;
+    BOOL dragging;
+    HWND dragSource;
+    POINT dragStart;
 } Model;
 
 int getBubbleCount(Model *model, double width, double height) {
@@ -1661,6 +1737,26 @@ void redraw(HWND window) {
             );
         }
     }
+
+    POINT dragStart = model->dragStart;
+    int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
+    if (model->dragging && graphics.labelRange.matchLength > 0) {
+        ClientToScreen(model->dragSource, &dragStart);
+        ScreenToClient(window, &dragStart);
+        SelectObject(
+            memory,
+            getDragPen2(model->borderColor, borderPx, dashPx)
+        );
+        MoveToEx(memory, dragStart.x, dragStart.y, NULL);
+        LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
+        SelectObject(
+            memory,
+            getDragPen(model->labelBackground, borderPx, dashPx)
+        );
+        MoveToEx(memory, dragStart.x, dragStart.y, NULL);
+        LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
+    }
+
     DeleteDC(selectionMemory);
     DeleteDC(labelMemory);
     DeleteDC(earMemory);
@@ -1711,6 +1807,15 @@ void redraw(HWND window) {
         earRect.right = earRect.left + earSize.cx;
         earRect.bottom = earRect.top + earSize.cy;
         FillRect(memory, &earRect, keyBrush);
+    }
+
+    if (model->dragging && graphics.labelRange.matchLength > 0) {
+        SelectObject(
+            memory,
+            getKeyDashPen(model->colorKey, borderPx, dashPx)
+        );
+        MoveToEx(memory, dragStart.x, dragStart.y, NULL);
+        LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
@@ -2192,6 +2297,18 @@ LRESULT CALLBACK DlgProc(
                 SetDlgItemText(dialog, IDC_TEXTBOX, L"");
                 SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
                 return TRUE;
+            } else if (LOWORD(wParam) == IDM_START_DRAGGING) {
+                Model *model = getModel(dialog);
+                model->dragging = TRUE;
+                GetCursorPos(&model->dragStart);
+                skipHitTest = TRUE;
+                model->dragSource = WindowFromPoint(model->dragStart);
+                skipHitTest = FALSE;
+                if (model->dragSource) {
+                    ScreenToClient(model->dragSource, &model->dragStart);
+                }
+
+                SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
             } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
                 model->showCaption = !model->showCaption;
@@ -2322,6 +2439,7 @@ int CALLBACK WinMain(
         .earHeightPt = 6,
         .earElevationPt = 4,
         .borderColor = RGB(0, 0, 0),
+        .dashPt = 3,
         .mirrorWidthPt = 100,
         .mirrorHeightPt = 100,
         .textBoxWidthPt = 15,
@@ -2331,6 +2449,7 @@ int CALLBACK WinMain(
         .minTextBoxSize = { 0, 0 },
         .inMenuLoop = FALSE,
         .text = L"",
+        .dragging = FALSE,
     };
 
     WNDCLASS windowClass = {
