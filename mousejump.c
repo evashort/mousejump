@@ -64,19 +64,73 @@ LPCWSTR str(int number) {
 
 #define PI 3.1415926535897932384626433832795
 
-#pragma region keyBitmap
+#pragma region brushesAndPens
 
-COLORREF keyBrushIn;
-HBRUSH keyBrushOut = NULL;
-HBRUSH getKeyBrush(COLORREF color) {
-    if (keyBrushOut) {
-        if (color == keyBrushIn) { return keyBrushOut; }
-        DeleteObject(keyBrushOut);
+const int KEY_BRUSH_SLOT = 0;
+const int LABEL_BRUSH_SLOT = 1;
+#define BRUSH_SLOT_COUNT 2
+COLORREF brushesIn[BRUSH_SLOT_COUNT];
+HBRUSH brushesOut[BRUSH_SLOT_COUNT] = { NULL };
+HBRUSH getBrush(COLORREF color, int slot) {
+    if (brushesOut[slot]) {
+        if (color == brushesIn[slot]) { return brushesOut[slot]; }
+        DeleteObject(brushesOut[slot]);
     }
 
-    keyBrushIn = color;
-    return keyBrushOut = CreateSolidBrush(color);
+    return brushesOut[slot] = CreateSolidBrush(brushesIn[slot] = color);
 }
+
+const int BORDER_PEN_SLOT = 0;
+const int DRAG_PEN_SLOT = 1;
+const int ALT_DRAG_PEN_SLOT = 2;
+const int ERASE_DRAG_PEN_SLOT = 3;
+#define PEN_SLOT_COUNT 4
+
+const int SOLID_PEN_STYLE = 0;
+const int DASH_PEN_STYLE = 1;
+const int ALT_DASH_PEN_STYLE = 2;
+const int BOTH_DASH_PEN_STYLE = 3;
+typedef struct { COLORREF color; int width, style, dashLength; } PenIn;
+PenIn pensIn[PEN_SLOT_COUNT];
+HPEN pensOut[PEN_SLOT_COUNT] = { NULL };
+HPEN getPen(COLORREF color, int width, int style, int dashLength, int slot) {
+    PenIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.color = color;
+    in.width = width;
+    in.style = style;
+    in.dashLength = dashLength;
+    if (pensOut[slot]) {
+        if (!memcmp(&in, &pensOut[slot], sizeof(in))) {
+            return pensOut[slot];
+        }
+
+        DeletePen(pensOut[slot]);
+    }
+
+    ZeroMemory(&pensIn[slot], sizeof(in));
+    pensIn[slot] = in;
+    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
+    DWORD dashCount = 0;
+    DWORD dashLengths[3] = { dashLength, 0, 0 };
+    if (style == DASH_PEN_STYLE) { dashCount = 1; }
+    else if (style == ALT_DASH_PEN_STYLE) {
+        dashCount = 3;
+        dashLengths[0] = 0;
+        dashLengths[1] = dashLength;
+    } else if (style == BOTH_DASH_PEN_STYLE) { dashCount = 2; }
+    return pensOut[slot] = ExtCreatePen(
+        PS_GEOMETRIC | PS_ENDCAP_FLAT | PS_JOIN_MITER | (
+            style == SOLID_PEN_STYLE ? PS_SOLID : PS_USERSTYLE
+        ),
+        width,
+        &brush,
+        dashCount,
+        style == SOLID_PEN_STYLE ? NULL : dashLengths
+    );
+}
+
+#pragma endregion
 
 typedef struct { int width; int height; COLORREF color; } KeyBitmapIn;
 KeyBitmapIn keyBitmapIn = { .width = 0, .height = 0 };
@@ -106,12 +160,10 @@ void selectKeyBitmap(
     keyBitmapOut = CreateCompatibleBitmap(device, width, height);
     SelectObject(memory, keyBitmapOut);
     RECT rect = { 0, 0, in.width, in.height };
-    FillRect(memory, &rect, getKeyBrush(color));
+    FillRect(memory, &rect, getBrush(color, KEY_BRUSH_SLOT));
 }
 
-#pragma endregion
-
-#pragma region getLabels
+#pragma region labels
 
 LPWSTR labelTextOut = NULL;
 LPWSTR getLabelText() {
@@ -249,6 +301,8 @@ LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
     return result;
 }
 
+#pragma endregion
+
 #pragma region selectLabelBitmap
 
 typedef struct {
@@ -327,18 +381,6 @@ int *getLabelWidths(HDC device, int count) {
     }
 
     return labelWidthsOut;
-}
-
-COLORREF labelBrushIn;
-HBRUSH labelBrushOut = NULL;
-HBRUSH getLabelBrush(COLORREF color) {
-    if (labelBrushOut) {
-        if (color == labelBrushIn) { return labelBrushOut; }
-        DeleteObject(labelBrushOut);
-    }
-
-    labelBrushIn = color;
-    return labelBrushOut = CreateSolidBrush(color);
 }
 
 const int DESCENDER = 1;
@@ -471,7 +513,7 @@ RECT *selectLabelBitmapHelp(
     SelectObject(memory, labelBitmapOut->bitmap);
 
     if (yPadding > 0) {
-        HBRUSH brush = getLabelBrush(GetBkColor(memory));
+        HBRUSH brush = getBrush(GetBkColor(memory), LABEL_BRUSH_SLOT);
         for (int y = 0; y < height; y += metrics.tmHeight + yPadding) {
             RECT separator = { 0, y, width, y + yPadding };
             FillRect(memory, &separator, brush);
@@ -479,7 +521,7 @@ RECT *selectLabelBitmapHelp(
     }
 
     if (xPadding > 0) {
-        HBRUSH brush = getLabelBrush(GetBkColor(memory));
+        HBRUSH brush = getBrush(GetBkColor(memory), LABEL_BRUSH_SLOT);
         int x = 0;
         int y = yPadding;
         RECT separator = { x, y, x + xPadding, y + metrics.tmHeight };
@@ -546,97 +588,6 @@ RECT *selectSelectionBitmap(HDC device, HDC memory, int count) {
     );
 }
 
-typedef struct { COLORREF color; int width; } BorderPenIn;
-BorderPenIn borderPenIn;
-HPEN borderPenOut;
-HPEN getBorderPen(COLORREF color, int width) {
-    BorderPenIn in;
-    ZeroMemory(&in, sizeof(in));
-    in.color = color;
-    in.width = width;
-    if (borderPenOut) {
-        if (!memcmp(&in, &borderPenIn, sizeof(in))) { return borderPenOut; }
-        DeletePen(borderPenOut);
-    }
-
-    ZeroMemory(&borderPenIn, sizeof(in));
-    borderPenIn = in;
-    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
-    return borderPenOut = ExtCreatePen(
-        PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_FLAT | PS_JOIN_MITER,
-        width, &brush, 0, NULL
-    );
-}
-
-typedef struct { COLORREF color; int width; DWORD dashLength; } DashPenIn;
-DashPenIn dragPenIn;
-HPEN dragPenOut;
-HPEN getDragPen(COLORREF color, int width, DWORD dashLength) {
-    DashPenIn in;
-    ZeroMemory(&in, sizeof(in));
-    in.color = color;
-    in.width = width;
-    in.dashLength = dashLength;
-    if (dragPenOut) {
-        if (!memcmp(&in, &dragPenIn, sizeof(in))) { return dragPenOut; }
-        DeletePen(dragPenOut);
-    }
-
-    ZeroMemory(&dragPenIn, sizeof(in));
-    dragPenIn = in;
-    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
-    return dragPenOut = ExtCreatePen(
-        PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT | PS_JOIN_MITER,
-        width, &brush, 1, &in.dashLength
-    );
-}
-
-DashPenIn dragPen2In;
-HPEN dragPen2Out;
-HPEN getDragPen2(COLORREF color, int width, DWORD dashLength) {
-    DashPenIn in;
-    ZeroMemory(&in, sizeof(in));
-    in.color = color;
-    in.width = width;
-    in.dashLength = dashLength;
-    if (dragPen2Out) {
-        if (!memcmp(&in, &dragPen2In, sizeof(in))) { return dragPen2Out; }
-        DeletePen(dragPen2Out);
-    }
-
-    ZeroMemory(&dragPen2In, sizeof(in));
-    dragPen2In = in;
-    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
-    DWORD dashLengths[3] = {0, dashLength, 0};
-    return dragPen2Out = ExtCreatePen(
-        PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT | PS_JOIN_MITER,
-        width, &brush, 3, dashLengths
-    );
-}
-
-DashPenIn keyDashPenIn;
-HPEN keyDashPenOut;
-HPEN getKeyDashPen(COLORREF color, int width, DWORD dashLength) {
-    DashPenIn in;
-    ZeroMemory(&in, sizeof(in));
-    in.color = color;
-    in.width = width;
-    in.dashLength = dashLength;
-    if (keyDashPenOut) {
-        if (!memcmp(&in, &keyDashPenIn, sizeof(in))) { return keyDashPenOut; }
-        DeletePen(keyDashPenOut);
-    }
-
-    ZeroMemory(&keyDashPenIn, sizeof(in));
-    keyDashPenIn = in;
-    LOGBRUSH brush = { .lbStyle = BS_SOLID, .lbColor = color };
-    DWORD dashLengths[2] = {dashLength, 0};
-    return keyDashPenOut = ExtCreatePen(
-        PS_GEOMETRIC | PS_USERSTYLE | PS_ENDCAP_FLAT | PS_JOIN_MITER,
-        width, &brush, 2, dashLengths
-    );
-}
-
 typedef struct {
     int borderPx;
     int offsetPx;
@@ -676,9 +627,12 @@ SIZE selectEarBitmap(
     earBitmapOut = CreateCompatibleBitmap(device, 2 * offsetPx, 2 * heightPx);
     SelectObject(memory, earBitmapOut);
     RECT rect = { 0, 0, 2 * offsetPx, 2 * heightPx };
-    FillRect(memory, &rect, getKeyBrush(keyColor));
-    SelectObject(memory, getBorderPen(borderColor, borderPx));
-    SelectObject(memory, getLabelBrush(backgroundColor));
+    FillRect(memory, &rect, getBrush(keyColor, KEY_BRUSH_SLOT));
+    SelectObject(
+        memory,
+        getPen(borderColor, borderPx, SOLID_PEN_STYLE, 0, BORDER_PEN_SLOT)
+    );
+    SelectObject(memory, getBrush(backgroundColor, LABEL_BRUSH_SLOT));
     int borderDiagonalPx = (int)round(borderPx * sqrt2);
     int xyOffset = borderPx / 2;
     int yOffset = (borderDiagonalPx - 1) / 2;
@@ -705,7 +659,7 @@ SIZE selectEarBitmap(
     rect.top = offsetPx;
     rect.right = 2 * offsetPx - borderPx;
     rect.bottom = 2 * heightPx - offsetPx;
-    FillRect(memory, &rect, getKeyBrush(keyColor));
+    FillRect(memory, &rect, getBrush(keyColor, KEY_BRUSH_SLOT));
     return size;
 }
 
@@ -829,6 +783,8 @@ LPWSTR getTextBoxText(HWND textBox) {
 }
 
 #pragma endregion
+
+#pragma region bubbles
 
 typedef struct { double x, y; } Point;
 Point makePoint(double x, double y) { Point point = { x, y }; return point; }
@@ -1314,23 +1270,27 @@ Point *getBubbles(
     return bubbles;
 }
 
+#pragma endregion
+
 void destroyCache() {
-    DeleteObject(keyBrushOut);
+    for (int i = 0; i < BRUSH_SLOT_COUNT; i++) {
+        DeleteObject(brushesOut[i]);
+    }
+
+    for (int i = 0; i < PEN_SLOT_COUNT; i++) {
+        if (pensOut[i]) { DeletePen(pensOut[i]); }
+    }
+
     DeleteObject(keyBitmapOut);
     free(labelTextOut);
     free(labelsOut.value);
     free(sortedLabelsOut.value);
     DeleteObject(labelFontOut);
     free(labelWidthsOut);
-    DeleteObject(labelBrushOut);
     DeleteObject(labelBitmapOut.bitmap);
     free(labelBitmapOut.rects);
     DeleteObject(selectionBitmapOut.bitmap);
     free(selectionBitmapOut.rects);
-    if (borderPenOut) { DeletePen(borderPenOut); }
-    if (dragPenOut) { DeletePen(dragPenOut); }
-    if (dragPen2Out) { DeletePen(dragPen2Out); }
-    if (keyDashPenOut) { DeletePen(keyDashPenOut); }
     DeleteObject(earBitmapOut);
     free(acceleratorsOut.value);
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
@@ -1600,7 +1560,7 @@ void redraw(HWND window) {
     lastGraphics = graphics;
     HDC device = GetDC(window);
     HDC memory = CreateCompatibleDC(device);
-    HBRUSH keyBrush = getKeyBrush(model->colorKey);
+    HBRUSH keyBrush = getBrush(model->colorKey, KEY_BRUSH_SLOT);
     selectKeyBitmap(
         device, memory, graphics.widthPx, graphics.heightPx, model->colorKey
     );
@@ -1745,13 +1705,25 @@ void redraw(HWND window) {
         ScreenToClient(window, &dragStart);
         SelectObject(
             memory,
-            getDragPen2(model->borderColor, borderPx, dashPx)
+            getPen(
+                model->labelBackground,
+                borderPx,
+                DASH_PEN_STYLE,
+                dashPx,
+                DRAG_PEN_SLOT
+            )
         );
         MoveToEx(memory, dragStart.x, dragStart.y, NULL);
         LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
         SelectObject(
             memory,
-            getDragPen(model->labelBackground, borderPx, dashPx)
+            getPen(
+                model->borderColor,
+                borderPx,
+                ALT_DASH_PEN_STYLE,
+                dashPx,
+                ALT_DRAG_PEN_SLOT
+            )
         );
         MoveToEx(memory, dragStart.x, dragStart.y, NULL);
         LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
@@ -1812,7 +1784,13 @@ void redraw(HWND window) {
     if (model->dragging && graphics.labelRange.matchLength > 0) {
         SelectObject(
             memory,
-            getKeyDashPen(model->colorKey, borderPx, dashPx)
+            getPen(
+                model->colorKey,
+                borderPx,
+                BOTH_DASH_PEN_STYLE,
+                dashPx,
+                ERASE_DRAG_PEN_SLOT
+            )
         );
         MoveToEx(memory, dragStart.x, dragStart.y, NULL);
         LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
