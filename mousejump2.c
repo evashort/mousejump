@@ -1281,6 +1281,7 @@ typedef struct {
     double deltaPx;
     double smallDeltaPx;
     int bubbleCount;
+    double minCellArea;
     double gridMargin;
     double aspect;
     double angle1;
@@ -1310,12 +1311,60 @@ typedef struct {
 } Model;
 
 int getBubbleCount(Model *model, double width, double height) {
-    return model->bubbleCount;
+    return min(
+        model->bubbleCount,
+        width * height / model->minCellArea + 2 * model->gridMargin * (
+            2 * model->gridMargin + (width + height * model->aspect) / sqrt(
+                model->aspect * model->minCellArea
+            )
+        )
+    );
+}
+
+double sqrtAspectIn = 0;
+double sqrtAspectOut = 0;
+double getSqrtAspect(double aspect) {
+    if (aspect == sqrtAspectIn) { return sqrtAspectOut; }
+    return sqrtAspectOut = sqrt(aspect);
+}
+
+typedef struct { double width, height, margin; int count; } SqrtCellAreaIn;
+SqrtCellAreaIn sqrtCellAreaIn = { 0, 0, 0, 0 };
+double sqrtCellAreaOut = 0;
+double getSqrtCellArea(
+    double aspectWidth, double aspectHeight, double margin, int count
+) {
+    SqrtCellAreaIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.width = aspectWidth;
+    in.height = aspectHeight;
+    in.margin = margin;
+    in.count = count;
+    if (!memcmp(&in, &sqrtCellAreaIn, sizeof(in))) { return sqrtCellAreaOut; }
+    ZeroMemory(&sqrtCellAreaIn, sizeof(in));
+    sqrtCellAreaIn = in;
+    double temp = margin * (aspectWidth - aspectHeight);
+    sqrtCellAreaOut = (
+        margin * (aspectWidth + aspectHeight) + sqrt(
+            temp * temp + count * aspectWidth * aspectHeight
+        )
+    ) / (count - 4 * margin * margin);
+    return sqrtCellAreaOut;
 }
 
 Point getBubblePositionPt(
     Model *model, double width, double height, int count, int index
 ) {
+    double sqrtAspect = getSqrtAspect(model->aspect);
+    double sqrtCellArea = getSqrtCellArea(
+        width / sqrtAspect, height * sqrtAspect, model->gridMargin, count
+    );
+    Point marginSize = {
+        .x = model->gridMargin * sqrtCellArea * sqrtAspect,
+        .y = model->gridMargin * sqrtCellArea / sqrtAspect,
+    };
+    width += 2 * marginSize.x;
+    height += 2 * marginSize.y;
     // get the shape of all screen parallelograms (cells) without worrying
     // about scale yet. shape1 and shape2 represent the edges that
     // approximately correspond to the x and y axes respectively.
@@ -1323,15 +1372,15 @@ Point getBubblePositionPt(
     // positive y direction is downward.
     Point edge1, edge2;
     getCellEdges(
-        model->angle1, model->angle2, model->aspect, width * height / count,
-        &edge1, &edge2
+        model->angle1, model->angle2, model->aspect,
+        sqrtCellArea * sqrtCellArea, &edge1, &edge2
     );
     Point *bubbles = getBubbles(
         edge1, edge2, model->offsetPt, width, height, count, model->dialog
     );
     Point result = add(
         matrixDot(edge1, edge2, bubbles[index]),
-        model->offsetPt
+        add(model->offsetPt, scale(marginSize, -1))
     );
     return result;
 }
@@ -2255,8 +2304,9 @@ int CALLBACK WinMain(
         .deltaPx = 12,
         .smallDeltaPx = 1,
         .bubbleCount = 1200,
-        .gridMargin = 1,
-        .aspect = 4 / 3,
+        .minCellArea = 30 * 30,
+        .gridMargin = 0.5,
+        .aspect = 4 / 3.0,
         .angle1 = 15 * PI / 180,
         .angle2 = 75 * PI / 180,
         .fontHeightPt = 0,
