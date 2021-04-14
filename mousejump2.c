@@ -1475,6 +1475,9 @@ typedef struct {
     int widthPx;
     int heightPx;
     LabelRange labelRange;
+    BOOL dragging;
+    HWND dragSource;
+    POINT dragStart;
 } Graphics;
 
 Graphics getGraphics(HWND window) {
@@ -1500,6 +1503,12 @@ Graphics getGraphics(HWND window) {
     graphics.widthPx = widthPx;
     graphics.heightPx = heightPx;
     graphics.labelRange = getLabelRange(model->text, labels);
+    graphics.dragging = model->dragging;
+    if (model->dragging) {
+        graphics.dragStart = model->dragStart;
+        graphics.dragSource = model->dragSource;
+    }
+
     return graphics;
 }
 
@@ -1510,6 +1519,9 @@ Graphics lastGraphics = {
     .widthPx = 0,
     .heightPx = 0,
     .labelRange = { 0, 0, 0 },
+    .dragging = FALSE,
+    .dragSource = NULL,
+    .dragStart = { 0, 0 },
 };
 POINT lastCursorPos = { .x = MINLONG, .y = MINLONG };
 POINT naturalCursorPos = { .x = 0, .y = 0 };
@@ -1526,53 +1538,6 @@ void redraw(HWND window) {
     double heightPt = intPxToPt(graphics.heightPx, graphics.dpi);
     int bubbleCount = getBubbleCount(model, widthPt, heightPt);
     StringArray labels = getSortedLabels(bubbleCount);
-    if (graphics.labelRange.matchLength > 0) {
-        POINT goalCursorPos;
-        ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
-        Point goalCursorPosPt = getBubblePositionPt(
-            model,
-            widthPt,
-            heightPt,
-            labels.count,
-            graphics.labelRange.start
-        );
-        goalCursorPos.x = ptToIntPx(goalCursorPosPt.x, graphics.dpi);
-        goalCursorPos.y = ptToIntPx(goalCursorPosPt.y, graphics.dpi);
-        ClientToScreen(model->window, &goalCursorPos);
-
-        POINT actualCursorPos;
-        ZeroMemory(&actualCursorPos, sizeof(actualCursorPos));
-        GetCursorPos(&actualCursorPos);
-        if (lastGraphics.labelRange.matchLength <= 0
-                || memcmp(&actualCursorPos, &lastCursorPos, sizeof(POINT))
-        ) {
-            naturalCursorPos = actualCursorPos;
-        }
-
-        SetCursorPos(goalCursorPos.x, goalCursorPos.y);
-        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-        lastCursorPos = goalCursorPos;
-    } else if (lastGraphics.labelRange.matchLength > 0) {
-        SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
-        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-        lastCursorPos = naturalCursorPos;
-    } else if (
-        memcmp(&graphics.offsetPt, &lastGraphics.offsetPt, sizeof(Point))
-    ) {
-        Point delta = add(
-            graphics.offsetPt, scale(lastGraphics.offsetPt, -1)
-        );
-        POINT cursorPos;
-        GetCursorPos(&cursorPos);
-        cursorPos.x += ptToIntPx(delta.x, graphics.dpi);
-        cursorPos.y += ptToIntPx(delta.y, graphics.dpi);
-        SetCursorPos(cursorPos.x, cursorPos.y);
-        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-        lastCursorPos = cursorPos;
-    }
-
-    ZeroMemory(&lastGraphics, sizeof(graphics));
-    lastGraphics = graphics;
     HDC device = GetDC(window);
     HDC memory = CreateCompatibleDC(device);
     HBRUSH keyBrush = getBrush(model->colorKey, KEY_BRUSH_SLOT);
@@ -1713,10 +1678,79 @@ void redraw(HWND window) {
         }
     }
 
-    POINT dragStart = model->dragStart;
+    if (graphics.labelRange.matchLength > 0) {
+        POINT goalCursorPos;
+        ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
+        Point goalCursorPosPt = getBubblePositionPt(
+            model,
+            widthPt,
+            heightPt,
+            labels.count,
+            graphics.labelRange.start
+        );
+        goalCursorPos.x = ptToIntPx(goalCursorPosPt.x, graphics.dpi);
+        goalCursorPos.y = ptToIntPx(goalCursorPosPt.y, graphics.dpi);
+        ClientToScreen(model->window, &goalCursorPos);
+
+        POINT actualCursorPos;
+        ZeroMemory(&actualCursorPos, sizeof(actualCursorPos));
+        GetCursorPos(&actualCursorPos);
+        if (lastGraphics.labelRange.matchLength <= 0
+                || memcmp(&actualCursorPos, &lastCursorPos, sizeof(POINT))
+        ) {
+            naturalCursorPos = actualCursorPos;
+        }
+
+        SetCursorPos(goalCursorPos.x, goalCursorPos.y);
+        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+        GetCursorPos(&lastCursorPos);
+    } else if (lastGraphics.dragging && !graphics.dragging) {
+        POINT dragStart = model->dragStart;
+        if (model->dragSource) {
+            ClientToScreen(model->dragSource, &dragStart);
+        }
+
+        SetCursorPos(dragStart.x, dragStart.y);
+    } else if (lastGraphics.labelRange.matchLength > 0) {
+        SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
+        if (graphics.dragging) {
+            ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+            GetCursorPos(&lastCursorPos);
+        }
+    } else if (
+        memcmp(&graphics.offsetPt, &lastGraphics.offsetPt, sizeof(Point))
+    ) {
+        GetCursorPos(&lastCursorPos);
+        lastCursorPos.x += ptToIntPx(graphics.offsetPt.x, graphics.dpi)
+            - ptToIntPx(lastGraphics.offsetPt.x, graphics.dpi);
+        lastCursorPos.y += ptToIntPx(graphics.offsetPt.y, graphics.dpi)
+            - ptToIntPx(lastGraphics.offsetPt.y, graphics.dpi);
+        SetCursorPos(lastCursorPos.x, lastCursorPos.y);
+        if (graphics.dragging) {
+            ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+            GetCursorPos(&lastCursorPos);
+        }
+    } else if (
+        graphics.dragging != lastGraphics.dragging
+            || graphics.dragSource != lastGraphics.dragSource
+            || memcmp(
+                &graphics.dragStart, &lastGraphics.dragStart, sizeof(POINT)
+            )
+    ) {
+        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+        GetCursorPos(&lastCursorPos);
+    }
+
+    ZeroMemory(&lastGraphics, sizeof(graphics));
+    lastGraphics = graphics;
+
+    POINT dragStart = graphics.dragStart;
     int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
-    if (model->dragging) {
-        ClientToScreen(model->dragSource, &dragStart);
+    if (graphics.dragging) {
+        if (graphics.dragSource) {
+            ClientToScreen(graphics.dragSource, &dragStart);
+        }
+
         ScreenToClient(window, &dragStart);
         SelectObject(
             memory,
@@ -1796,7 +1830,7 @@ void redraw(HWND window) {
         FillRect(memory, &earRect, keyBrush);
     }
 
-    if (model->dragging) {
+    if (graphics.dragging) {
         SelectObject(
             memory,
             getPen(
@@ -2301,7 +2335,8 @@ LRESULT CALLBACK DlgProc(
                     ScreenToClient(model->dragSource, &model->dragStart);
                 }
 
-                SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
+                SetDlgItemText(dialog, IDC_TEXTBOX, L",");
+                SendMessage(GetDlgItem(dialog, IDC_TEXTBOX), EM_SETSEL, 1, 1);
             } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
                 model->showCaption = !model->showCaption;
@@ -2339,7 +2374,20 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
-                redraw(getModel(dialog)->window);
+                Model *model = getModel(dialog);
+                BOOL newDragging = model->text[0] == L',';
+                if (newDragging && !model->dragging) {
+                    GetCursorPos(&model->dragStart);
+                    skipHitTest = TRUE;
+                    model->dragSource = WindowFromPoint(model->dragStart);
+                    skipHitTest = FALSE;
+                    if (model->dragSource) {
+                        ScreenToClient(model->dragSource, &model->dragStart);
+                    }
+                }
+
+                model->dragging = newDragging;
+                redraw(model->window);
                 return TRUE;
             }
         }
