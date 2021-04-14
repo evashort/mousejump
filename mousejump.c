@@ -1692,8 +1692,17 @@ void redraw(HWND window) {
                 sizeof(POINT)
             )
     );
+    BOOL naturalChanged = FALSE;
     if (newDrag) {
         naturalCursorPos = dragStart;
+    } else if (graphics.dragging != lastGraphics.dragging) {
+        dragStart = lastGraphics.dragStart;
+        if (lastGraphics.dragSource) {
+            ClientToScreen(lastGraphics.dragSource, &dragStart);
+        }
+
+        naturalCursorPos = dragStart;
+        naturalChanged = TRUE;
     }
 
     if (graphics.labelRange.matchLength > 0) {
@@ -1722,7 +1731,7 @@ void redraw(HWND window) {
         SetCursorPos(goalCursorPos.x, goalCursorPos.y);
         ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
         GetCursorPos(&lastCursorPos);
-    } else if (lastGraphics.labelRange.matchLength > 0) {
+    } else if (lastGraphics.labelRange.matchLength > 0 || naturalChanged) {
         SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
         if (graphics.dragging) {
             ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
