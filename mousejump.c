@@ -1678,6 +1678,24 @@ void redraw(HWND window) {
         }
     }
 
+    POINT dragStart = graphics.dragStart;
+    if (graphics.dragging && graphics.dragSource) {
+        ClientToScreen(graphics.dragSource, &dragStart);
+    }
+
+    BOOL newDrag = graphics.dragging && (
+        !lastGraphics.dragging
+            || graphics.dragSource != lastGraphics.dragSource
+            || memcmp(
+                &graphics.dragStart,
+                &lastGraphics.dragStart,
+                sizeof(POINT)
+            )
+    );
+    if (newDrag) {
+        naturalCursorPos = dragStart;
+    }
+
     if (graphics.labelRange.matchLength > 0) {
         POINT goalCursorPos;
         ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
@@ -1704,13 +1722,6 @@ void redraw(HWND window) {
         SetCursorPos(goalCursorPos.x, goalCursorPos.y);
         ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
         GetCursorPos(&lastCursorPos);
-    } else if (lastGraphics.dragging && !graphics.dragging) {
-        POINT dragStart = model->dragStart;
-        if (model->dragSource) {
-            ClientToScreen(model->dragSource, &dragStart);
-        }
-
-        SetCursorPos(dragStart.x, dragStart.y);
     } else if (lastGraphics.labelRange.matchLength > 0) {
         SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
         if (graphics.dragging) {
@@ -1730,13 +1741,7 @@ void redraw(HWND window) {
             ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
             GetCursorPos(&lastCursorPos);
         }
-    } else if (
-        graphics.dragging != lastGraphics.dragging
-            || graphics.dragSource != lastGraphics.dragSource
-            || memcmp(
-                &graphics.dragStart, &lastGraphics.dragStart, sizeof(POINT)
-            )
-    ) {
+    } else if (newDrag) {
         ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
         GetCursorPos(&lastCursorPos);
     }
@@ -1744,13 +1749,8 @@ void redraw(HWND window) {
     ZeroMemory(&lastGraphics, sizeof(graphics));
     lastGraphics = graphics;
 
-    POINT dragStart = graphics.dragStart;
     int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
     if (graphics.dragging) {
-        if (graphics.dragSource) {
-            ClientToScreen(graphics.dragSource, &dragStart);
-        }
-
         ScreenToClient(window, &dragStart);
         SelectObject(
             memory,
