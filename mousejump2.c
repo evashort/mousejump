@@ -276,7 +276,6 @@ typedef struct {
     int start;
     int stop;
     int matchLength;
-    int count;
 } LabelRange;
 LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
     int start = 0;
@@ -297,7 +296,11 @@ LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
         }
     }
 
-    LabelRange result = { start, stop, matchLength, labels.count };
+    LabelRange result;
+    ZeroMemory(&result, sizeof(result));
+    result.start = start;
+    result.stop = stop;
+    result.matchLength = matchLength;
     return result;
 }
 
@@ -1472,7 +1475,6 @@ typedef struct {
     int widthPx;
     int heightPx;
     LabelRange labelRange;
-    POINT cursorPos;
 } Graphics;
 
 Graphics getGraphics(HWND window) {
@@ -1487,19 +1489,9 @@ Graphics getGraphics(HWND window) {
     StringArray labels = getSortedLabels(
         getBubbleCount(model, widthPt, heightPt)
     );
-    LabelRange labelRange = getLabelRange(model->text, labels);
-    Point cursorPosPt = getBubblePositionPt(
-        model,
-        widthPt,
-        heightPt,
-        labels.count,
-        labelRange.start
-    );
-    POINT cursorPos = {
-        .x = ptToIntPx(cursorPosPt.x, dpi),
-        .y = ptToIntPx(cursorPosPt.y, dpi),
-    };
-    ClientToScreen(model->window, &cursorPos);
+    LabelRange labelRange;
+    ZeroMemory(&labelRange, sizeof(labelRange));
+    labelRange = getLabelRange(model->text, labels);
     Graphics graphics;
     ZeroMemory(&graphics, sizeof(graphics));
     graphics.offsetPt = model->offsetPt;
@@ -1508,7 +1500,6 @@ Graphics getGraphics(HWND window) {
     graphics.widthPx = widthPx;
     graphics.heightPx = heightPx;
     graphics.labelRange = getLabelRange(model->text, labels);
-    graphics.cursorPos = cursorPos;
     return graphics;
 }
 
@@ -1518,9 +1509,9 @@ Graphics lastGraphics = {
     .systemFontChanges = 0,
     .widthPx = 0,
     .heightPx = 0,
-    .labelRange = { 0, 0, 0, 0 },
-    .cursorPos = { 0, 0 },
+    .labelRange = { 0, 0, 0 },
 };
+POINT lastCursorPos = { .x = MINLONG, .y = MINLONG };
 POINT naturalCursorPos = { .x = 0, .y = 0 };
 void redraw(HWND window) {
     Graphics graphics;
@@ -1535,25 +1526,49 @@ void redraw(HWND window) {
     double heightPt = intPxToPt(graphics.heightPx, graphics.dpi);
     int bubbleCount = getBubbleCount(model, widthPt, heightPt);
     StringArray labels = getSortedLabels(bubbleCount);
-    if (
-        memcmp(
-            &graphics.labelRange, &lastGraphics.labelRange, sizeof(LabelRange)
-        ) || memcmp(
-            &graphics.cursorPos, &lastGraphics.cursorPos, sizeof(POINT)
-        )
-    ) {
-        POINT cursorPos;
-        ZeroMemory(&cursorPos, sizeof(cursorPos));
-        GetCursorPos(&cursorPos);
-        BOOL isNatural = lastGraphics.labelRange.matchLength <= 0 || memcmp(
-            &cursorPos, &lastGraphics.cursorPos, sizeof(cursorPos)
+    if (graphics.labelRange.matchLength > 0) {
+        POINT goalCursorPos;
+        ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
+        Point goalCursorPosPt = getBubblePositionPt(
+            model,
+            widthPt,
+            heightPt,
+            labels.count,
+            graphics.labelRange.start
         );
-        if (graphics.labelRange.matchLength > 0) {
-            if (isNatural) { naturalCursorPos = cursorPos; }
-            SetCursorPos(graphics.cursorPos.x, graphics.cursorPos.y);
-        } else if (!isNatural) {
-            SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
+        goalCursorPos.x = ptToIntPx(goalCursorPosPt.x, graphics.dpi);
+        goalCursorPos.y = ptToIntPx(goalCursorPosPt.y, graphics.dpi);
+        ClientToScreen(model->window, &goalCursorPos);
+
+        POINT actualCursorPos;
+        ZeroMemory(&actualCursorPos, sizeof(actualCursorPos));
+        GetCursorPos(&actualCursorPos);
+        if (lastGraphics.labelRange.matchLength <= 0
+                || memcmp(&actualCursorPos, &lastCursorPos, sizeof(POINT))
+        ) {
+            naturalCursorPos = actualCursorPos;
         }
+
+        SetCursorPos(goalCursorPos.x, goalCursorPos.y);
+        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+        lastCursorPos = goalCursorPos;
+    } else if (lastGraphics.labelRange.matchLength > 0) {
+        SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
+        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+        lastCursorPos = naturalCursorPos;
+    } else if (
+        memcmp(&graphics.offsetPt, &lastGraphics.offsetPt, sizeof(Point))
+    ) {
+        Point delta = add(
+            graphics.offsetPt, scale(lastGraphics.offsetPt, -1)
+        );
+        POINT cursorPos;
+        GetCursorPos(&cursorPos);
+        cursorPos.x += ptToIntPx(delta.x, graphics.dpi);
+        cursorPos.y += ptToIntPx(delta.y, graphics.dpi);
+        SetCursorPos(cursorPos.x, cursorPos.y);
+        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
+        lastCursorPos = cursorPos;
     }
 
     ZeroMemory(&lastGraphics, sizeof(graphics));
@@ -1700,7 +1715,7 @@ void redraw(HWND window) {
 
     POINT dragStart = model->dragStart;
     int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
-    if (model->dragging && graphics.labelRange.matchLength > 0) {
+    if (model->dragging) {
         ClientToScreen(model->dragSource, &dragStart);
         ScreenToClient(window, &dragStart);
         SelectObject(
@@ -1714,7 +1729,7 @@ void redraw(HWND window) {
             )
         );
         MoveToEx(memory, dragStart.x, dragStart.y, NULL);
-        LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
+        LineTo(memory, lastCursorPos.x, lastCursorPos.y);
         SelectObject(
             memory,
             getPen(
@@ -1726,7 +1741,7 @@ void redraw(HWND window) {
             )
         );
         MoveToEx(memory, dragStart.x, dragStart.y, NULL);
-        LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
+        LineTo(memory, lastCursorPos.x, lastCursorPos.y);
     }
 
     DeleteDC(selectionMemory);
@@ -1781,7 +1796,7 @@ void redraw(HWND window) {
         FillRect(memory, &earRect, keyBrush);
     }
 
-    if (model->dragging && graphics.labelRange.matchLength > 0) {
+    if (model->dragging) {
         SelectObject(
             memory,
             getPen(
@@ -1793,7 +1808,7 @@ void redraw(HWND window) {
             )
         );
         MoveToEx(memory, dragStart.x, dragStart.y, NULL);
-        LineTo(memory, graphics.cursorPos.x, graphics.cursorPos.y);
+        LineTo(memory, lastCursorPos.x, lastCursorPos.y);
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
