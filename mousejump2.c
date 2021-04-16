@@ -2346,6 +2346,52 @@ LRESULT CALLBACK DlgProc(
 
                 SetDlgItemText(dialog, IDC_TEXTBOX, L",");
                 SendMessage(GetDlgItem(dialog, IDC_TEXTBOX), EM_SETSEL, 1, 1);
+                return TRUE;
+            } else if (LOWORD(wParam) == IDM_BRING_TO_FRONT) {
+                static LPCWSTR taskBarClassName = L"MSTaskListWClass";
+                POINT cursorPos;
+                GetCursorPos(&cursorPos);
+                skipHitTest = TRUE;
+                HWND target = WindowFromPoint(cursorPos);
+                skipHitTest = FALSE;
+                if (target) {
+                    WCHAR className[18] = L"";
+                    if (IsWindowUnicode(target)) {
+                        GetClassName(target, className, 18);
+                    }
+
+                    if (!wcsncmp(className, taskBarClassName, 18)) {
+                        ScreenToClient(target, &cursorPos);
+                        LPARAM lParam = MAKELPARAM(cursorPos.x, cursorPos.y);
+                        SetForegroundWindow(target);
+                        SendMessage(target, WM_LBUTTONDOWN, 0, lParam);
+                        SendMessage(target, WM_LBUTTONUP, 0, lParam);
+                        SetForegroundWindow(dialog);
+                    } else {
+                        HWND topLevel = GetAncestor(target, GA_ROOT);
+                        HWND insertAfter = GetWindow(
+                            GetWindowOwner(dialog),
+                            GW_HWNDNEXT
+                        );
+                        if (insertAfter) {
+                            SetWindowPos(
+                                topLevel, insertAfter, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                            );
+                        }
+                    }
+                }
+
+                if (getModel(dialog)->text[0] == L',') {
+                    SetDlgItemText(dialog, IDC_TEXTBOX, L",");
+                    SendMessage(
+                        GetDlgItem(dialog, IDC_TEXTBOX), EM_SETSEL, 1, 1
+                    );
+                } else {
+                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                }
+
+                return TRUE;
             } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
                 model->showCaption = !model->showCaption;
