@@ -1190,7 +1190,7 @@ Point *getBubbles(
     }
 
     int removedCount = 0;
-    for (int i = 0; i < oldCount; i++) {
+    for (int i = 0; i < min(oldCount, count); i++) {
         if (!spineContains(spine, bubbles[i])) {
             Point screen = add(
                 matrixDot(edge1, edge2, bubbles[i]), negativeOffset
@@ -1254,9 +1254,16 @@ Point *getBubbles(
 
     qsort(added, addedCount, sizeof(ScoredPoint), compareScoredPoints);
 
+    for (int i = count; i < oldCount; i++) {
+        if (spineContains(spine, bubbles[i])) {
+            added[addedCount].point = bubbles[i];
+            addedCount++;
+        }
+    }
+
     // if the number of labels has increased, shuffle the new ones
     for (int i = removedCount; i < addedCount; i++) {
-        removed[i].index = i;
+        removed[i].index = oldCount + i - removedCount;
     }
 
     for (int i = removedCount; i < addedCount - 1; i++) {
