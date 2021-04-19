@@ -1311,6 +1311,7 @@ void destroyCache() {
 typedef struct {
     HWND window;
     HWND dialog;
+    HMONITOR monitor;
     COLORREF colorKey;
     Point offsetPt;
     double deltaPx;
@@ -1472,21 +1473,43 @@ typedef struct {
     Point offsetPt;
     UINT dpi;
     int systemFontChanges;
+    int leftPx;
+    int topPx;
     int widthPx;
     int heightPx;
+    int topCrop;
+    int bottomCrop;
     LabelRange labelRange;
     BOOL dragging;
     HWND dragSource;
     POINT dragStart;
 } Graphics;
 
-Graphics getGraphics(HWND window) {
-    Model *model = getModel(window);
-    RECT frame;
-    GetWindowRect(window, &frame);
-    int widthPx = frame.right - frame.left;
-    int heightPx = frame.bottom - frame.top;
-    UINT dpi = GetDpiForWindow(window);
+Graphics getGraphics(Model *model) {
+    MONITORINFO monitorInfo;
+    ZeroMemory(&monitorInfo, sizeof(monitorInfo));
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (!GetMonitorInfo(model->monitor, &monitorInfo)) {
+        POINT origin = { 0, 0 };
+        model->monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+        GetMonitorInfo(model->monitor, &monitorInfo);
+    }
+
+    int topCrop = 1;
+    int bottomCrop = 0;
+    if (
+        monitorInfo.rcWork.top - monitorInfo.rcMonitor.top
+            > monitorInfo.rcMonitor.bottom - monitorInfo.rcWork.bottom
+    ) {
+        // taskbar is on top
+        topCrop = 0;
+        bottomCrop = 1;
+    }
+
+    int widthPx = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
+    int heightPx = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+    UINT dpi;
+    GetDpiForMonitor(model->monitor, MDT_EFFECTIVE_DPI, &dpi, &dpi);
     double widthPt = intPxToPt(widthPx, dpi);
     double heightPt = intPxToPt(heightPx, dpi);
     StringArray labels = getSortedLabels(
@@ -1500,8 +1523,12 @@ Graphics getGraphics(HWND window) {
     graphics.offsetPt = model->offsetPt;
     graphics.dpi = dpi;
     graphics.systemFontChanges = model->systemFontChanges;
+    graphics.leftPx = monitorInfo.rcMonitor.left;
+    graphics.topPx = monitorInfo.rcMonitor.top;
     graphics.widthPx = widthPx;
     graphics.heightPx = heightPx;
+    graphics.topCrop = topCrop;
+    graphics.bottomCrop = bottomCrop;
     graphics.labelRange = getLabelRange(model->text, labels);
     graphics.dragging = model->dragging;
     if (model->dragging) {
@@ -1516,8 +1543,8 @@ Graphics lastGraphics = {
     .offsetPt = { 0, 0 },
     .dpi = 0,
     .systemFontChanges = 0,
-    .widthPx = 0,
-    .heightPx = 0,
+    .leftPx = 0, .topPx = 0, .widthPx = 0, .heightPx = 0,
+    .topCrop = 0, .bottomCrop = 0,
     .labelRange = { 0, 0, 0 },
     .dragging = FALSE,
     .dragSource = NULL,
@@ -1526,14 +1553,14 @@ Graphics lastGraphics = {
 POINT lastCursorPos = { .x = MINLONG, .y = MINLONG };
 POINT naturalCursorPos = { .x = 0, .y = 0 };
 void redraw(HWND window) {
+    Model *model = getModel(window);
     Graphics graphics;
     ZeroMemory(&graphics, sizeof(graphics));
-    graphics = getGraphics(window);
+    graphics = getGraphics(model);
     if (!memcmp(&graphics, &lastGraphics, sizeof(graphics))) {
         return;
     }
 
-    Model *model = getModel(window);
     double widthPt = intPxToPt(graphics.widthPx, graphics.dpi);
     double heightPt = intPxToPt(graphics.heightPx, graphics.dpi);
     int bubbleCount = getBubbleCount(model, widthPt, heightPt);
@@ -1715,9 +1742,10 @@ void redraw(HWND window) {
             labels.count,
             graphics.labelRange.start
         );
-        goalCursorPos.x = ptToIntPx(goalCursorPosPt.x, graphics.dpi);
-        goalCursorPos.y = ptToIntPx(goalCursorPosPt.y, graphics.dpi);
-        ClientToScreen(model->window, &goalCursorPos);
+        goalCursorPos.x
+            = ptToIntPx(goalCursorPosPt.x, graphics.dpi) + graphics.leftPx;
+        goalCursorPos.y
+            = ptToIntPx(goalCursorPosPt.y, graphics.dpi) + graphics.topPx;
 
         POINT actualCursorPos;
         ZeroMemory(&actualCursorPos, sizeof(actualCursorPos));
@@ -1760,7 +1788,6 @@ void redraw(HWND window) {
 
     int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
     if (graphics.dragging) {
-        ScreenToClient(window, &dragStart);
         SelectObject(
             memory,
             getPen(
@@ -1771,8 +1798,17 @@ void redraw(HWND window) {
                 DRAG_PEN_SLOT
             )
         );
-        MoveToEx(memory, dragStart.x, dragStart.y, NULL);
-        LineTo(memory, lastCursorPos.x, lastCursorPos.y);
+        MoveToEx(
+            memory,
+            dragStart.x - graphics.leftPx,
+            dragStart.y - graphics.topPx,
+            NULL
+        );
+        LineTo(
+            memory,
+            lastCursorPos.x - graphics.leftPx,
+            lastCursorPos.y - graphics.topPx
+        );
         SelectObject(
             memory,
             getPen(
@@ -1783,23 +1819,38 @@ void redraw(HWND window) {
                 ALT_DRAG_PEN_SLOT
             )
         );
-        MoveToEx(memory, dragStart.x, dragStart.y, NULL);
-        LineTo(memory, lastCursorPos.x, lastCursorPos.y);
+        MoveToEx(
+            memory,
+            dragStart.x - graphics.leftPx,
+            dragStart.y - graphics.topPx,
+            NULL
+        );
+        LineTo(
+            memory,
+            lastCursorPos.x - graphics.leftPx,
+            lastCursorPos.y - graphics.topPx
+        );
     }
 
     DeleteDC(selectionMemory);
     DeleteDC(labelMemory);
     DeleteDC(earMemory);
     ReleaseDC(window, device);
-    POINT origin = {0, 0};
-    SIZE frameSize = { graphics.widthPx, graphics.heightPx };
+    POINT screenPosition = {
+        graphics.leftPx, graphics.topPx + graphics.topCrop
+    };
+    SIZE screenSize = {
+        graphics.widthPx,
+        graphics.heightPx - graphics.bottomCrop - graphics.topCrop
+    };
+    POINT memoryPosition = { 0, graphics.topCrop };
     UpdateLayeredWindow(
         window,
         device,
-        NULL,
-        &frameSize,
+        &screenPosition,
+        &screenSize,
         memory,
-        &origin,
+        &memoryPosition,
         model->colorKey,
         NULL,
         ULW_COLORKEY
@@ -1850,8 +1901,17 @@ void redraw(HWND window) {
                 ERASE_DRAG_PEN_SLOT
             )
         );
-        MoveToEx(memory, dragStart.x, dragStart.y, NULL);
-        LineTo(memory, lastCursorPos.x, lastCursorPos.y);
+        MoveToEx(
+            memory,
+            dragStart.x - graphics.leftPx,
+            dragStart.y - graphics.topPx,
+            NULL
+        );
+        LineTo(
+            memory,
+            lastCursorPos.x - graphics.leftPx,
+            lastCursorPos.y - graphics.topPx
+        );
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
@@ -2348,19 +2408,18 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(GetDlgItem(dialog, IDC_TEXTBOX), EM_SETSEL, 1, 1);
                 return TRUE;
             } else if (LOWORD(wParam) == IDM_BRING_TO_FRONT) {
-                static LPCWSTR taskBarClassName = L"MSTaskListWClass";
                 POINT cursorPos;
                 GetCursorPos(&cursorPos);
                 skipHitTest = TRUE;
                 HWND target = WindowFromPoint(cursorPos);
                 skipHitTest = FALSE;
                 if (target) {
-                    WCHAR className[18] = L"";
+                    WCHAR className[17] = L"";
                     if (IsWindowUnicode(target)) {
-                        GetClassName(target, className, 18);
+                        GetClassName(target, className, 17);
                     }
 
-                    if (!wcsncmp(className, taskBarClassName, 18)) {
+                    if (!wcsncmp(className, L"MSTaskListWClass", 17)) {
                         ScreenToClient(target, &cursorPos);
                         LPARAM lParam = MAKELPARAM(cursorPos.x, cursorPos.y);
                         SetForegroundWindow(target);
@@ -2512,6 +2571,9 @@ int CALLBACK WinMain(
     srand(478956);
 
     Model model = {
+        .monitor = MonitorFromWindow(
+            GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY
+        ),
         .colorKey = RGB(255, 0, 255),
         .offsetPt = { 0, 0 },
         .deltaPx = 12,
@@ -2572,10 +2634,10 @@ int CALLBACK WinMain(
     } while (oldWindow);
 
     model.window = CreateWindowEx(
-        WS_EX_LAYERED,
+        WS_EX_LAYERED | WS_EX_TOPMOST,
         windowClass.lpszClassName,
         L"MouseJump",
-        WS_POPUP | WS_VISIBLE | WS_MAXIMIZE,
+        WS_POPUP | WS_VISIBLE | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         NULL, // parent
         NULL, // menu
