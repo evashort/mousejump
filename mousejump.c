@@ -2189,6 +2189,37 @@ LRESULT CALLBACK DlgProc(
         }
 
         return 0;
+    } else if (message == WM_ACTIVATE) {
+        // make MouseJump topmost only when the dialog is active
+        if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
+            SetWindowPos(
+                GetWindowOwner(dialog), HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+            );
+            return 0;
+        } else if (LOWORD(wParam) == WA_INACTIVE) {
+            HWND window = GetWindowOwner(dialog);
+            SetWindowPos(
+                window, HWND_NOTOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+            );
+            HWND newlyActive = GetForegroundWindow();
+            if (
+                newlyActive && !(
+                    GetWindowLong(newlyActive, GWL_EXSTYLE) & WS_EX_TOPMOST
+                )
+            ) {
+                HWND insertAfter = GetWindow(newlyActive, GW_HWNDNEXT);
+                if (insertAfter) {
+                    SetWindowPos(
+                        window, insertAfter, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                    );
+                }
+            }
+
+            return 0;
+        }
     } else if (message == WM_DPICHANGED) {
         SendMessage(
             dialog,
@@ -2515,7 +2546,7 @@ LRESULT CALLBACK DlgProc(
     } else if (message == WM_CLOSE) {
         PostQuitMessage(0);
         return TRUE;
-    } else if (message == WM_ACTIVATE || message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == 70 || message == WM_SYSKEYDOWN || message == 71 || message == 28 || message == 134 || message == 799 || message == 1024 || message == 307 || message == 309 || message == 32 || message == 131 || message == 133 || message == 20 || message == 310 || message == 15) {
+    } else if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == 70 || message == WM_SYSKEYDOWN || message == 71 || message == 28 || message == 134 || message == 799 || message == 1024 || message == 307 || message == 309 || message == 32 || message == 131 || message == 133 || message == 20 || message == 310 || message == 15) {
 
     } else {
         return FALSE;
@@ -2641,7 +2672,7 @@ int CALLBACK WinMain(
     } while (oldWindow);
 
     model.window = CreateWindowEx(
-        WS_EX_LAYERED | WS_EX_TOPMOST,
+        WS_EX_LAYERED,
         windowClass.lpszClassName,
         L"MouseJump",
         WS_POPUP | WS_VISIBLE | WS_MINIMIZEBOX,
