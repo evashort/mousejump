@@ -2075,6 +2075,7 @@ const int PRESSED = 0x8000;
 const UINT WM_APP_FITTOTEXT = WM_APP + 0;
 const int ENABLE_DROPDOWN_TIMER = 1;
 const int ACTIVATE_WINDOW_TIMER = 2;
+const int TASKBAR_CLICKED_TIMER = 3;
 LRESULT CALLBACK DlgProc(
     HWND dialog,
     UINT message,
@@ -2301,6 +2302,22 @@ LRESULT CALLBACK DlgProc(
             KillTimer(dialog, wParam);
             SetForegroundWindow(dialog);
             return TRUE;
+        } else if (wParam == TASKBAR_CLICKED_TIMER) {
+            HWND active = GetForegroundWindow();
+            WCHAR className[14] = L"";
+            if (IsWindowUnicode(active)) {
+                GetClassName(active, className, 14);
+            }
+
+            if (
+                wcsncmp(className, L"Shell_TrayWnd", 14)
+                    && IsWindowVisible(active)
+            ) {
+                KillTimer(dialog, wParam);
+                SetForegroundWindow(dialog);
+            }
+
+            return TRUE;
         }
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
@@ -2458,12 +2475,19 @@ LRESULT CALLBACK DlgProc(
                     }
 
                     if (!wcsncmp(className, L"MSTaskListWClass", 17)) {
-                        ScreenToClient(target, &cursorPos);
-                        LPARAM lParam = MAKELPARAM(cursorPos.x, cursorPos.y);
                         SetForegroundWindow(target);
-                        SendMessage(target, WM_LBUTTONDOWN, 0, lParam);
-                        SendMessage(target, WM_LBUTTONUP, 0, lParam);
-                        SetForegroundWindow(dialog);
+                        INPUT click[2] = {
+                            {
+                                .type = INPUT_MOUSE,
+                                .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
+                            },
+                            {
+                                .type = INPUT_MOUSE,
+                                .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
+                            },
+                        };
+                        SendInput(2, click, sizeof(INPUT));
+                        SetTimer(dialog, TASKBAR_CLICKED_TIMER, 50, NULL);
                     } else {
                         HWND topLevel = GetAncestor(target, GA_ROOT);
                         HWND insertAfter = GetWindow(
