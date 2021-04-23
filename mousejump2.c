@@ -2453,7 +2453,9 @@ LRESULT CALLBACK DlgProc(
                 model->dragging = TRUE;
                 GetCursorPos(&model->dragStart);
                 skipHitTest = TRUE;
-                model->dragSource = WindowFromPoint(model->dragStart);
+                model->dragSource = GetAncestor(
+                    WindowFromPoint(model->dragStart), GA_ROOT
+                );
                 skipHitTest = FALSE;
                 if (model->dragSource) {
                     ScreenToClient(model->dragSource, &model->dragStart);
@@ -2555,7 +2557,9 @@ LRESULT CALLBACK DlgProc(
                 if (newDragging && !model->dragging) {
                     GetCursorPos(&model->dragStart);
                     skipHitTest = TRUE;
-                    model->dragSource = WindowFromPoint(model->dragStart);
+                    model->dragSource = GetAncestor(
+                        WindowFromPoint(model->dragStart), GA_ROOT
+                    );
                     skipHitTest = FALSE;
                     if (model->dragSource) {
                         ScreenToClient(model->dragSource, &model->dragStart);
