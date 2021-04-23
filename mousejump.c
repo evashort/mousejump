@@ -2418,35 +2418,69 @@ LRESULT CALLBACK DlgProc(
                 skipHitTest = TRUE;
                 HWND target = WindowFromPoint(cursor);
                 skipHitTest = FALSE;
-                if (target) { SetForegroundWindow(target); }
+                Model *model = getModel(dialog);
+                if (model->dragging) {
+                    SetForegroundWindow(model->dragSource);
+                    POINT dragStart = model->dragStart;
+                    ClientToScreen(model->dragSource, &dragStart);
+                    SetCursorPos(dragStart.x, dragStart.y);
+                    INPUT mouseDown = {
+                        .type = INPUT_MOUSE,
+                        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
+                    };
+                    SendInput(1, &mouseDown, sizeof(INPUT));
+                    Point vector = {
+                        cursor.x - dragStart.x,
+                        cursor.y - dragStart.y,
+                    };
+                    if (vector.x == 0 && vector.y == 0) { vector.x = 1; }
+                    vector = scale(vector, 8 / sqrt(dot(vector, vector)));
+                    SetCursorPos(
+                        dragStart.x + (int)round(vector.x),
+                        dragStart.y + (int)round(vector.y)
+                    );
+                    //SetForegroundWindow(target);
+                    Sleep(100);
+                    SetCursorPos(cursor.x, cursor.y);
+                    Sleep(100);
+                    INPUT mouseUp = {
+                        .type = INPUT_MOUSE,
+                        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
+                    };
+                    SendInput(1, &mouseUp, sizeof(INPUT));
+                    SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
+                } else {
+                    if (target) { SetForegroundWindow(target); }
 
-                INPUT click[2] = {
-                    {
-                        .type = INPUT_MOUSE,
-                        .mi = {
-                            .dx = 0,
-                            .dy = 0,
-                            .mouseData = 0,
-                            .dwFlags = MOUSEEVENTF_LEFTDOWN,
-                            .time = 0,
-                            .dwExtraInfo = 0,
+                    INPUT click[2] = {
+                        {
+                            .type = INPUT_MOUSE,
+                            .mi = {
+                                .dx = 0,
+                                .dy = 0,
+                                .mouseData = 0,
+                                .dwFlags = MOUSEEVENTF_LEFTDOWN,
+                                .time = 0,
+                                .dwExtraInfo = 0,
+                            },
                         },
-                    },
-                    {
-                        .type = INPUT_MOUSE,
-                        .mi = {
-                            .dx = 0,
-                            .dy = 0,
-                            .mouseData = 0,
-                            .dwFlags = MOUSEEVENTF_LEFTUP,
-                            .time = 0,
-                            .dwExtraInfo = 0,
+                        {
+                            .type = INPUT_MOUSE,
+                            .mi = {
+                                .dx = 0,
+                                .dy = 0,
+                                .mouseData = 0,
+                                .dwFlags = MOUSEEVENTF_LEFTUP,
+                                .time = 0,
+                                .dwExtraInfo = 0,
+                            },
                         },
-                    },
-                };
-                SendInput(2, click, sizeof(INPUT));
-                SetDlgItemText(dialog, IDC_TEXTBOX, L"");
-                SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
+                    };
+                    SendInput(2, click, sizeof(INPUT));
+                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                    SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
+                }
+
                 return TRUE;
             } else if (LOWORD(wParam) == IDM_START_DRAGGING) {
                 Model *model = getModel(dialog);
