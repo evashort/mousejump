@@ -1941,8 +1941,10 @@ LRESULT CALLBACK WndProc(
             Model *model = getModel(window);
             // The main window initially receives WM_ACTIVATE before its user
             // data is populated
-            if (model) { SetActiveWindow(model->dialog); }
+            if (model && IsWindowVisible(model->dialog)) {
+                SetActiveWindow(model->dialog);
             return 0;
+        }
         }
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
