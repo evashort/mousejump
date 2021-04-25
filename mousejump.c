@@ -1352,9 +1352,8 @@ typedef struct {
     SIZE minTextBoxSize;
     BOOL inMenuLoop;
     LPWSTR text;
-    BOOL dragging;
-    HWND dragSource;
-    POINT dragStart;
+    int dragCount;
+    POINT drag[3];
 } Model;
 
 int getBubbleCount(Model *model, double width, double height) {
@@ -1487,9 +1486,8 @@ typedef struct {
     int topCrop;
     int bottomCrop;
     LabelRange labelRange;
-    BOOL dragging;
-    HWND dragSource;
-    POINT dragStart;
+    int dragCount;
+    POINT drag[3];
 } Graphics;
 
 Graphics getGraphics(Model *model) {
@@ -1537,10 +1535,10 @@ Graphics getGraphics(Model *model) {
     graphics.topCrop = topCrop;
     graphics.bottomCrop = bottomCrop;
     graphics.labelRange = getLabelRange(model->text, labels);
-    graphics.dragging = model->dragging;
-    if (model->dragging) {
-        graphics.dragStart = model->dragStart;
-        graphics.dragSource = model->dragSource;
+    graphics.dragCount = model->dragCount;
+    for (int i = 0; i < model->dragCount; i++) {
+        graphics.drag[i].x = model->drag[i].x;
+        graphics.drag[i].y = model->drag[i].y;
     }
 
     return graphics;
@@ -1553,9 +1551,8 @@ Graphics lastGraphics = {
     .leftPx = 0, .topPx = 0, .widthPx = 0, .heightPx = 0,
     .topCrop = 0, .bottomCrop = 0,
     .labelRange = { 0, 0, 0 },
-    .dragging = FALSE,
-    .dragSource = NULL,
-    .dragStart = { 0, 0 },
+    .dragCount = 0,
+    .drag = { { 0, 0 }, { 0, 0 }, { 0, 0 } },
 };
 POINT lastCursorPos = { .x = MINLONG, .y = MINLONG };
 POINT naturalCursorPos = { .x = 0, .y = 0 };
@@ -1712,33 +1709,6 @@ void redraw(HWND window) {
         }
     }
 
-    POINT dragStart = graphics.dragStart;
-    if (graphics.dragging && graphics.dragSource) {
-        ClientToScreen(graphics.dragSource, &dragStart);
-    }
-
-    BOOL newDrag = graphics.dragging && (
-        !lastGraphics.dragging
-            || graphics.dragSource != lastGraphics.dragSource
-            || memcmp(
-                &graphics.dragStart,
-                &lastGraphics.dragStart,
-                sizeof(POINT)
-            )
-    );
-    BOOL naturalChanged = FALSE;
-    if (newDrag) {
-        naturalCursorPos = dragStart;
-    } else if (graphics.dragging != lastGraphics.dragging) {
-        dragStart = lastGraphics.dragStart;
-        if (lastGraphics.dragSource) {
-            ClientToScreen(lastGraphics.dragSource, &dragStart);
-        }
-
-        naturalCursorPos = dragStart;
-        naturalChanged = TRUE;
-    }
-
     if (graphics.labelRange.matchLength > 0) {
         POINT goalCursorPos;
         ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
@@ -1766,26 +1736,39 @@ void redraw(HWND window) {
         SetCursorPos(goalCursorPos.x, goalCursorPos.y);
         ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
         GetCursorPos(&lastCursorPos);
-    } else if (lastGraphics.labelRange.matchLength > 0 || naturalChanged) {
-        SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
-        if (graphics.dragging) {
+    } else if (
+        lastGraphics.labelRange.matchLength > 0
+            || graphics.dragCount < lastGraphics.dragCount
+    ) {
+        if (graphics.dragCount > 0) {
+            lastCursorPos = graphics.drag[graphics.dragCount - 1];
+            SetCursorPos(lastCursorPos.x, lastCursorPos.y);
             ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
             GetCursorPos(&lastCursorPos);
+            graphics.drag[graphics.dragCount - 1] = lastCursorPos;
+            model->drag[graphics.dragCount - 1] = lastCursorPos;
+        } else {
+            if (lastGraphics.dragCount > 0) {
+                naturalCursorPos = lastGraphics.drag[graphics.dragCount];
+            }
+
+            SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
         }
     } else if (
         memcmp(&graphics.offsetPt, &lastGraphics.offsetPt, sizeof(Point))
     ) {
-        GetCursorPos(&lastCursorPos);
-        lastCursorPos.x += ptToIntPx(graphics.offsetPt.x, graphics.dpi)
+        POINT cursorPos;
+        GetCursorPos(&cursorPos);
+        cursorPos.x += ptToIntPx(graphics.offsetPt.x, graphics.dpi)
             - ptToIntPx(lastGraphics.offsetPt.x, graphics.dpi);
-        lastCursorPos.y += ptToIntPx(graphics.offsetPt.y, graphics.dpi)
+        cursorPos.y += ptToIntPx(graphics.offsetPt.y, graphics.dpi)
             - ptToIntPx(lastGraphics.offsetPt.y, graphics.dpi);
-        SetCursorPos(lastCursorPos.x, lastCursorPos.y);
-        if (graphics.dragging) {
+        SetCursorPos(cursorPos.x, cursorPos.y);
+        if (graphics.dragCount > 0 && graphics.dragCount < 3) {
             ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
             GetCursorPos(&lastCursorPos);
         }
-    } else if (newDrag) {
+    } else if (graphics.dragCount > lastGraphics.dragCount) {
         ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
         GetCursorPos(&lastCursorPos);
     }
@@ -1794,49 +1777,47 @@ void redraw(HWND window) {
     lastGraphics = graphics;
 
     int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
-    if (graphics.dragging) {
-        SelectObject(
-            memory,
+    if (graphics.dragCount > 0) {
+        HPEN pens[2] = {
             getPen(
                 model->labelBackground,
                 borderPx,
                 DASH_PEN_STYLE,
                 dashPx,
                 DRAG_PEN_SLOT
-            )
-        );
-        MoveToEx(
-            memory,
-            dragStart.x - graphics.leftPx,
-            dragStart.y - graphics.topPx,
-            NULL
-        );
-        LineTo(
-            memory,
-            lastCursorPos.x - graphics.leftPx,
-            lastCursorPos.y - graphics.topPx
-        );
-        SelectObject(
-            memory,
+            ),
             getPen(
                 model->borderColor,
                 borderPx,
                 ALT_DASH_PEN_STYLE,
                 dashPx,
                 ALT_DRAG_PEN_SLOT
-            )
-        );
-        MoveToEx(
-            memory,
-            dragStart.x - graphics.leftPx,
-            dragStart.y - graphics.topPx,
-            NULL
-        );
-        LineTo(
-            memory,
-            lastCursorPos.x - graphics.leftPx,
-            lastCursorPos.y - graphics.topPx
-        );
+            ),
+        };
+        for (int i = 0; i < 2; i++) {
+            SelectObject(memory, pens[i]);
+            MoveToEx(
+                memory,
+                graphics.drag[0].x - graphics.leftPx,
+                graphics.drag[0].y - graphics.topPx,
+                NULL
+            );
+            for (int j = 1; j < graphics.dragCount; j++) {
+                LineTo(
+                    memory,
+                    graphics.drag[j].x - graphics.leftPx,
+                    graphics.drag[j].y - graphics.topPx
+                );
+            }
+
+            if (graphics.dragCount < 3) {
+                LineTo(
+                    memory,
+                    lastCursorPos.x - graphics.leftPx,
+                    lastCursorPos.y - graphics.topPx
+                );
+            }
+        }
     }
 
     DeleteDC(selectionMemory);
@@ -1897,7 +1878,7 @@ void redraw(HWND window) {
         FillRect(memory, &earRect, keyBrush);
     }
 
-    if (graphics.dragging) {
+    if (graphics.dragCount > 0) {
         SelectObject(
             memory,
             getPen(
@@ -1910,15 +1891,25 @@ void redraw(HWND window) {
         );
         MoveToEx(
             memory,
-            dragStart.x - graphics.leftPx,
-            dragStart.y - graphics.topPx,
+            graphics.drag[0].x - graphics.leftPx,
+            graphics.drag[0].y - graphics.topPx,
             NULL
         );
-        LineTo(
-            memory,
-            lastCursorPos.x - graphics.leftPx,
-            lastCursorPos.y - graphics.topPx
-        );
+        for (int j = 1; j < graphics.dragCount; j++) {
+            LineTo(
+                memory,
+                graphics.drag[j].x - graphics.leftPx,
+                graphics.drag[j].y - graphics.topPx
+            );
+        }
+
+        if (graphics.dragCount < 3) {
+            LineTo(
+                memory,
+                lastCursorPos.x - graphics.leftPx,
+                lastCursorPos.y - graphics.topPx
+            );
+        }
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
@@ -2076,8 +2067,7 @@ void applyMinDialogSize(HWND dialog) {
 const int PRESSED = 0x8000;
 const UINT WM_APP_FITTOTEXT = WM_APP + 0;
 const int ENABLE_DROPDOWN_TIMER = 1;
-const int ACTIVATE_WINDOW_TIMER = 2;
-const int TASKBAR_CLICKED_TIMER = 3;
+const int RESTORE_WINDOW_TIMER = 2;
 LRESULT CALLBACK DlgProc(
     HWND dialog,
     UINT message,
@@ -2300,25 +2290,12 @@ LRESULT CALLBACK DlgProc(
             SetMenu(dialog, NULL);
             applyMinDialogSize(dialog);
             return TRUE;
-        } else if (wParam == ACTIVATE_WINDOW_TIMER) {
+        } else if (wParam == RESTORE_WINDOW_TIMER) {
             KillTimer(dialog, wParam);
-            SetForegroundWindow(dialog);
-            return TRUE;
-        } else if (wParam == TASKBAR_CLICKED_TIMER) {
-            HWND active = GetForegroundWindow();
-            WCHAR className[14] = L"";
-            if (IsWindowUnicode(active)) {
-                GetClassName(active, className, 14);
-            }
-
-            if (
-                wcsncmp(className, L"Shell_TrayWnd", 14)
-                    && IsWindowVisible(active)
-            ) {
-                KillTimer(dialog, wParam);
-                SetForegroundWindow(dialog);
-            }
-
+            Model *model = getModel(dialog);
+            ShowWindow(model->window, SW_SHOWNORMAL);
+            SendMessage(dialog, WM_COMMAND, IDM_PREVIOUS_DRAG, 0);
+            SetDlgItemText(dialog, IDC_TEXTBOX, L"");
             return TRUE;
         }
     } else if (message == WM_NCHITTEST && skipHitTest) {
@@ -2417,14 +2394,11 @@ LRESULT CALLBACK DlgProc(
             } else if (LOWORD(wParam) == IDM_CLICK) {
                 POINT cursor;
                 GetCursorPos(&cursor);
-                skipHitTest = TRUE;
-                HWND target = WindowFromPoint(cursor);
-                skipHitTest = FALSE;
                 Model *model = getModel(dialog);
-                if (model->dragging) {
-                    SetForegroundWindow(model->dragSource);
-                    POINT dragStart = model->dragStart;
-                    ClientToScreen(model->dragSource, &dragStart);
+                ShowWindow(model->window, SW_MINIMIZE);
+                if (model->dragCount > 0) {
+                    model->dragCount = 0;
+                    POINT dragStart = model->drag[0];
                     SetCursorPos(dragStart.x, dragStart.y);
                     INPUT mouseDown = {
                         .type = INPUT_MOUSE,
@@ -2441,7 +2415,6 @@ LRESULT CALLBACK DlgProc(
                         dragStart.x + (int)round(vector.x),
                         dragStart.y + (int)round(vector.y)
                     );
-                    //SetForegroundWindow(target);
                     Sleep(100);
                     SetCursorPos(cursor.x, cursor.y);
                     Sleep(100);
@@ -2450,104 +2423,62 @@ LRESULT CALLBACK DlgProc(
                         .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
                     };
                     SendInput(1, &mouseUp, sizeof(INPUT));
-                    SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
                 } else {
-                    if (target) { SetForegroundWindow(target); }
-
                     INPUT click[2] = {
                         {
                             .type = INPUT_MOUSE,
-                            .mi = {
-                                .dx = 0,
-                                .dy = 0,
-                                .mouseData = 0,
-                                .dwFlags = MOUSEEVENTF_LEFTDOWN,
-                                .time = 0,
-                                .dwExtraInfo = 0,
-                            },
+                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
                         },
                         {
                             .type = INPUT_MOUSE,
-                            .mi = {
-                                .dx = 0,
-                                .dy = 0,
-                                .mouseData = 0,
-                                .dwFlags = MOUSEEVENTF_LEFTUP,
-                                .time = 0,
-                                .dwExtraInfo = 0,
-                            },
+                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
                         },
                     };
                     SendInput(2, click, sizeof(INPUT));
-                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
-                    SetTimer(dialog, ACTIVATE_WINDOW_TIMER, 100, NULL);
                 }
 
+                SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
                 return TRUE;
             } else if (LOWORD(wParam) == IDM_START_DRAGGING) {
                 Model *model = getModel(dialog);
-                model->dragging = TRUE;
-                GetCursorPos(&model->dragStart);
-                skipHitTest = TRUE;
-                model->dragSource = GetAncestor(
-                    WindowFromPoint(model->dragStart), GA_ROOT
-                );
-                skipHitTest = FALSE;
-                if (model->dragSource) {
-                    ScreenToClient(model->dragSource, &model->dragStart);
+                BOOL erase = FALSE;
+                if (model->dragCount > 0) {
+                    POINT start = model->drag[model->dragCount - 1];
+                    POINT end;
+                    GetCursorPos(&end);
+                    erase = start.x == end.x && start.y == end.y;
                 }
 
-                SetDlgItemText(dialog, IDC_TEXTBOX, L",");
-                SendMessage(GetDlgItem(dialog, IDC_TEXTBOX), EM_SETSEL, 1, 1);
-                return TRUE;
-            } else if (LOWORD(wParam) == IDM_BRING_TO_FRONT) {
-                POINT cursorPos;
-                GetCursorPos(&cursorPos);
-                skipHitTest = TRUE;
-                HWND target = WindowFromPoint(cursorPos);
-                skipHitTest = FALSE;
-                if (target) {
-                    WCHAR className[17] = L"";
-                    if (IsWindowUnicode(target)) {
-                        GetClassName(target, className, 17);
-                    }
-
-                    if (!wcsncmp(className, L"MSTaskListWClass", 17)) {
-                        SetForegroundWindow(target);
-                        INPUT click[2] = {
-                            {
-                                .type = INPUT_MOUSE,
-                                .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
-                            },
-                            {
-                                .type = INPUT_MOUSE,
-                                .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
-                            },
-                        };
-                        SendInput(2, click, sizeof(INPUT));
-                        SetTimer(dialog, TASKBAR_CLICKED_TIMER, 50, NULL);
-                    } else {
-                        HWND topLevel = GetAncestor(target, GA_ROOT);
-                        HWND insertAfter = GetWindow(
-                            GetWindowOwner(dialog),
-                            GW_HWNDNEXT
-                        );
-                        if (insertAfter) {
-                            SetWindowPos(
-                                topLevel, insertAfter, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
-                            );
-                        }
-                    }
-                }
-
-                if (getModel(dialog)->text[0] == L',') {
-                    SetDlgItemText(dialog, IDC_TEXTBOX, L",");
-                    SendMessage(
-                        GetDlgItem(dialog, IDC_TEXTBOX), EM_SETSEL, 1, 1
-                    );
-                } else {
+                if (erase) {
+                    model->dragCount--;
                     SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                } else if (model->dragCount < 3) {
+                    GetCursorPos(&model->drag[model->dragCount]);
+                    model->dragCount++;
+                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                } else {
+                    ShowWindow(model->window, SW_MINIMIZE);
+                    INPUT click[2] = {
+                        {
+                            .type = INPUT_MOUSE,
+                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
+                        },
+                        {
+                            .type = INPUT_MOUSE,
+                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
+                        },
+                    };
+                    SendInput(2, click, sizeof(INPUT));
+                    SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
+                }
+
+                return TRUE;
+            } else if (LOWORD(wParam) == IDM_PREVIOUS_DRAG) {
+                Model *model = getModel(dialog);
+                if (model->dragCount >= 3) {
+                    POINT cursorPos = model->drag[model->dragCount - 1];
+                    SetCursorPos(cursorPos.x, cursorPos.y);
+                    GetCursorPos(&model->drag[model->dragCount - 1]);
                 }
 
                 return TRUE;
@@ -2588,22 +2519,7 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
-                Model *model = getModel(dialog);
-                BOOL newDragging = model->text[0] == L',';
-                if (newDragging && !model->dragging) {
-                    GetCursorPos(&model->dragStart);
-                    skipHitTest = TRUE;
-                    model->dragSource = GetAncestor(
-                        WindowFromPoint(model->dragStart), GA_ROOT
-                    );
-                    skipHitTest = FALSE;
-                    if (model->dragSource) {
-                        ScreenToClient(model->dragSource, &model->dragStart);
-                    }
-                }
-
-                model->dragging = newDragging;
-                redraw(model->window);
+                redraw(GetWindowOwner(dialog));
                 return TRUE;
             }
         }
@@ -2634,6 +2550,11 @@ int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
     if (message->message == WM_KEYDOWN) {
         if (message->wParam == VK_SPACE && !getModifiers()) {
             if (GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX)) {
+                return 0;
+            }
+        } else if (message->wParam == VK_BACK && !getModifiers()) {
+            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+            if (GetFocus() != textBox || GetWindowTextLength(textBox) > 0) {
                 return 0;
             }
         } else if (
@@ -2709,7 +2630,7 @@ int CALLBACK WinMain(
         .minTextBoxSize = { 0, 0 },
         .inMenuLoop = FALSE,
         .text = L"",
-        .dragging = FALSE,
+        .dragCount = 0,
     };
 
     WNDCLASS windowClass = {
