@@ -1454,6 +1454,7 @@ typedef struct {
     RECT paddingPx;
     double borderPx, earHeightPx, earElevationPx, dashPx;
     POINT mirrorStart;
+    POINT matchPoint;
     int dragCount;
     POINT drag[3];
 } Graphics;
@@ -1547,6 +1548,7 @@ Graphics *getGraphics(Model *model) {
         - ptToIntPx(model->mirrorWidthPt, dpi);
     graphicsOut.mirrorStart.y = heightPx
         - ptToIntPx(model->mirrorHeightPt, dpi);
+    graphicsOut.matchPoint = model->matchPoint;
     graphicsOut.dragCount = model->dragCount;
     for (int i = 0; i < model->dragCount; i++) {
         graphicsOut.drag[i] = model->drag[i];
@@ -1596,10 +1598,15 @@ Graphics lastGraphics = {
     .paddingPx = { 0, 0, 0, 0 },
     .borderPx = 0, .earHeightPx = 0, .earElevationPx = 0, .dashPx = 0,
     .mirrorStart = { 0, 0 },
+    .matchPoint = { 0, 0 },
     .dragCount = 0,
     .drag = { { 0, 0 }, { 0, 0 }, { 0, 0 } },
 };
 void redraw(Graphics *graphics) {
+    if (graphics->dragCount <= 0 || graphics->dragCount > 3) {
+        ZeroMemory(&graphics->matchPoint, sizeof(POINT));
+    }
+
     if (!memcmp(graphics, &lastGraphics, sizeof(Graphics))) {
         return;
     }
@@ -1771,13 +1778,13 @@ void redraw(Graphics *graphics) {
                 );
             }
 
-            // if (graphics->dragCount < 3) {
-            //     LineTo(
-            //         memory,
-            //         lastCursorPos.x - graphics->leftPx,
-            //         lastCursorPos.y - graphics->topPx
-            //     );
-            // }
+            if (graphics->dragCount < 3) {
+                LineTo(
+                    memory,
+                    graphics->matchPoint.x - graphics->leftPx,
+                    graphics->matchPoint.y - graphics->topPx
+                );
+            }
         }
     }
 
@@ -1857,13 +1864,13 @@ void redraw(Graphics *graphics) {
             );
         }
 
-        // if (graphics->dragCount < 3) {
-        //     LineTo(
-        //         memory,
-        //         lastCursorPos.x - graphics->leftPx,
-        //         lastCursorPos.y - graphics->topPx
-        //     );
-        // }
+        if (graphics->dragCount < 3) {
+            LineTo(
+                memory,
+                graphics->matchPoint.x - graphics->leftPx,
+                graphics->matchPoint.y - graphics->topPx
+            );
+        }
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
@@ -2030,14 +2037,16 @@ void applyMinDialogSize(HWND dialog) {
 }
 
 void setMatchPoint(Model *model, POINT matchPoint) {
-    POINT cursorPos;
-    GetCursorPos(&cursorPos);
-    if (
-        !model->hasMatch
-            || cursorPos.x != model->matchPoint.x
-            || cursorPos.y != model->matchPoint.y
-    ) {
-        model->naturalPoint = cursorPos;
+    if (model->dragCount <= 0) {
+        POINT cursorPos;
+        GetCursorPos(&cursorPos);
+        if (
+            !model->hasMatch
+                || cursorPos.x != model->matchPoint.x
+                || cursorPos.y != model->matchPoint.y
+        ) {
+            model->naturalPoint = cursorPos;
+        }
     }
 
     model->hasMatch = TRUE;
@@ -2046,8 +2055,12 @@ void setMatchPoint(Model *model, POINT matchPoint) {
 }
 
 void unsetMatchPoint(Model *model) {
-    if (model->hasMatch) {
-        model->hasMatch = FALSE;
+    if (model->dragCount > 0) {
+        POINT dragStop = model->drag[model->dragCount - 1];
+        SetCursorPos(dragStop.x, dragStop.y);
+        GetCursorPos(&model->matchPoint);
+        model->drag[model->dragCount - 1] = model->matchPoint;
+    } else if (model->hasMatch) {
         POINT cursorPos;
         GetCursorPos(&cursorPos);
         if (
@@ -2059,6 +2072,8 @@ void unsetMatchPoint(Model *model) {
             );
         }
     }
+
+    model->hasMatch = FALSE;
 }
 
 const int PRESSED = 0x8000;
@@ -2291,7 +2306,11 @@ LRESULT CALLBACK DlgProc(
             KillTimer(dialog, wParam);
             Model *model = getModel(dialog);
             ShowWindow(model->window, SW_SHOWNORMAL);
-            SendMessage(dialog, WM_COMMAND, IDM_PREVIOUS_DRAG, 0);
+            if (!model->text[0]) {
+                unsetMatchPoint(model);
+                redraw(getGraphics(model));
+            }
+
             SetDlgItemText(dialog, IDC_TEXTBOX, L"");
             return TRUE;
         }
@@ -2381,7 +2400,7 @@ LRESULT CALLBACK DlgProc(
                     cursorPos.y += graphics->topPx;
                     setMatchPoint(model, cursorPos);
                 } else {
-                    unsetMatchPoint(model);
+                    if (model->hasMatch) { unsetMatchPoint(model); }
                     POINT cursorPos;
                     GetCursorPos(&cursorPos);
                     cursorPos.x += ptToIntPx(model->offsetPt.x, graphics->dpi)
@@ -2390,8 +2409,12 @@ LRESULT CALLBACK DlgProc(
                         - ptToIntPx(graphics->offsetPt.y, graphics->dpi);
                     graphics->offsetPt = model->offsetPt;
                     SetCursorPos(cursorPos.x, cursorPos.y);
+                    if (model->dragCount > 0 && model->dragCount < 3) {
+                        GetCursorPos(&model->matchPoint);
+                    }
                 }
 
+                graphics->matchPoint = model->matchPoint;
                 redraw(graphics);
                 return TRUE;
             } else if (command == IDM_CLICK) {
@@ -2452,14 +2475,18 @@ LRESULT CALLBACK DlgProc(
                     erase = start.x == end.x && start.y == end.y;
                 }
 
+                BOOL click = FALSE;
                 if (erase) {
                     model->dragCount--;
-                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
                 } else if (model->dragCount < 3) {
                     GetCursorPos(&model->drag[model->dragCount]);
                     model->dragCount++;
-                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                    click = model->dragCount == 2;
                 } else {
+                    click = TRUE;
+                }
+
+                if (click) {
                     ShowWindow(model->window, SW_MINIMIZE);
                     INPUT click[2] = {
                         {
@@ -2473,17 +2500,18 @@ LRESULT CALLBACK DlgProc(
                     };
                     SendInput(2, click, sizeof(INPUT));
                     SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
+                } if (model->text[0]) {
+                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+                } else {
+                    unsetMatchPoint(model);
+                    redraw(getGraphics(model));
                 }
 
                 return TRUE;
             } else if (command == IDM_PREVIOUS_DRAG) {
                 Model *model = getModel(dialog);
-                if (model->dragCount >= 3) {
-                    POINT cursorPos = model->drag[model->dragCount - 1];
-                    SetCursorPos(cursorPos.x, cursorPos.y);
-                    GetCursorPos(&model->drag[model->dragCount - 1]);
-                }
-
+                unsetMatchPoint(model);
+                redraw(getGraphics(model));
                 return TRUE;
             } else if (command == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
@@ -2535,6 +2563,7 @@ LRESULT CALLBACK DlgProc(
                     unsetMatchPoint(model);
                 }
 
+                graphics->matchPoint = model->matchPoint;
                 redraw(graphics);
                 return TRUE;
             }
