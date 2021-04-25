@@ -1318,13 +1318,6 @@ int ptToThinPx(double pt, UINT dpi) {
     return max(1, (int)(pt * (double)dpi / 72));
 }
 
-void clampToRect(RECT rect, POINT *point) {
-    if (point->x < rect.left) { point->x = rect.left; }
-    if (point->y < rect.top) { point->y = rect.top; }
-    if (point->x >= rect.right) { point->x = rect.right - 1; }
-    if (point->y >= rect.bottom) { point->y = rect.bottom - 1; }
-}
-
 COLORREF getTextColor(COLORREF background) {
     // https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color/3943023
     if (
@@ -1407,6 +1400,9 @@ typedef struct {
     SIZE minTextBoxSize;
     BOOL inMenuLoop;
     LPWSTR text;
+    POINT naturalPoint;
+    POINT matchPoint;
+    BOOL hasMatch;
     int dragCount;
     POINT drag[3];
 } Model;
@@ -1457,7 +1453,7 @@ typedef struct {
     COLORREF colorKey, labelBackground, selectionBackground, borderColor;
     RECT paddingPx;
     double borderPx, earHeightPx, earElevationPx, dashPx;
-    double mirrorWidthPt, mirrorHeightPt;
+    POINT mirrorStart;
     int dragCount;
     POINT drag[3];
 } Graphics;
@@ -1547,14 +1543,40 @@ Graphics *getGraphics(Model *model) {
     graphicsOut.earHeightPx = ptToIntPx(model->earHeightPt, dpi);
     graphicsOut.earElevationPx = ptToIntPx(model->earElevationPt, dpi);
     graphicsOut.dashPx = ptToIntPx(model->dashPt, dpi);
-    graphicsOut.mirrorWidthPt = model->mirrorWidthPt;
-    graphicsOut.mirrorHeightPt = model->mirrorHeightPt;
+    graphicsOut.mirrorStart.x = widthPx
+        - ptToIntPx(model->mirrorWidthPt, dpi);
+    graphicsOut.mirrorStart.y = heightPx
+        - ptToIntPx(model->mirrorHeightPt, dpi);
     graphicsOut.dragCount = model->dragCount;
     for (int i = 0; i < model->dragCount; i++) {
         graphicsOut.drag[i] = model->drag[i];
     }
 
     return &graphicsOut;
+}
+
+POINT getBubblePositionPx(Graphics *graphics, int index) {
+    Point positionPt = getBubblePositionPt(
+        graphics->marginSize,
+        graphics->edge1, graphics->edge2,
+        graphics->offsetPt,
+        graphics->dialog,
+        intPxToPt(graphics->widthPx, graphics->dpi),
+        intPxToPt(graphics->heightPx, graphics->dpi),
+        getSortedLabels(graphics->bubbleCount).count,
+        index
+    );
+    POINT positionPx = {
+        .x = min(
+            graphics->widthPx - 1,
+            max(0, ptToIntPx(positionPt.x, graphics->dpi))
+        ),
+        .y = min(
+            graphics->heightPx - 1,
+            max(0, ptToIntPx(positionPt.y, graphics->dpi))
+        ),
+    };
+    return positionPx;
 }
 
 Graphics lastGraphics = {
@@ -1573,16 +1595,17 @@ Graphics lastGraphics = {
     .labelBackground = 0, .selectionBackground = 0, .borderColor = 0,
     .paddingPx = { 0, 0, 0, 0 },
     .borderPx = 0, .earHeightPx = 0, .earElevationPx = 0, .dashPx = 0,
-    .mirrorWidthPt = 0, .mirrorHeightPt = 0,
+    .mirrorStart = { 0, 0 },
     .dragCount = 0,
     .drag = { { 0, 0 }, { 0, 0 }, { 0, 0 } },
 };
-POINT lastCursorPos = { .x = MINLONG, .y = MINLONG };
-POINT naturalCursorPos = { .x = 0, .y = 0 };
 void redraw(Graphics *graphics) {
     if (!memcmp(graphics, &lastGraphics, sizeof(Graphics))) {
         return;
     }
+
+    ZeroMemory(&lastGraphics, sizeof(graphics));
+    lastGraphics = *graphics;
 
     double widthPt = intPxToPt(graphics->widthPx, graphics->dpi);
     double heightPt = intPxToPt(graphics->heightPx, graphics->dpi);
@@ -1650,18 +1673,9 @@ void redraw(Graphics *graphics) {
     for (
         int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
     ) {
-        Point positionPt = getBubblePositionPt(
-            graphics->marginSize, graphics->edge1, graphics->edge2,
-            graphics->offsetPt, graphics->dialog, widthPt, heightPt,
-            labels.count, i
-        );
-        BOOL xFlip = widthPt - positionPt.x <= graphics->mirrorWidthPt;
-        BOOL yFlip = heightPt - positionPt.y <= graphics->mirrorHeightPt;
-        POINT positionPx = {
-            .x = ptToIntPx(positionPt.x, graphics->dpi),
-            .y = ptToIntPx(positionPt.y, graphics->dpi),
-        };
-        clampToRect(client, &positionPx);
+        POINT positionPx = getBubblePositionPx(graphics, i);
+        BOOL xFlip = positionPx.x >= graphics->mirrorStart.x;
+        BOOL yFlip = positionPx.y >= graphics->mirrorStart.y;
         BitBlt(
             memory,
             positionPx.x + xFlip * (1 - earSize.cx),
@@ -1724,71 +1738,6 @@ void redraw(Graphics *graphics) {
         }
     }
 
-    if (graphics->labelRange.matchLength > 0) {
-        POINT goalCursorPos;
-        ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
-        Point goalCursorPosPt = getBubblePositionPt(
-            graphics->marginSize, graphics->edge1, graphics->edge2,
-            graphics->offsetPt, graphics->dialog, widthPt, heightPt,
-            labels.count, graphics->labelRange.start
-        );
-        goalCursorPos.x
-            = ptToIntPx(goalCursorPosPt.x, graphics->dpi) + graphics->leftPx;
-        goalCursorPos.y
-            = ptToIntPx(goalCursorPosPt.y, graphics->dpi) + graphics->topPx;
-
-        POINT actualCursorPos;
-        ZeroMemory(&actualCursorPos, sizeof(actualCursorPos));
-        GetCursorPos(&actualCursorPos);
-        if (lastGraphics.labelRange.matchLength <= 0
-                || memcmp(&actualCursorPos, &lastCursorPos, sizeof(POINT))
-        ) {
-            naturalCursorPos = actualCursorPos;
-        }
-
-        SetCursorPos(goalCursorPos.x, goalCursorPos.y);
-        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-        GetCursorPos(&lastCursorPos);
-    } else if (
-        lastGraphics.labelRange.matchLength > 0
-            || graphics->dragCount < lastGraphics.dragCount
-    ) {
-        if (graphics->dragCount > 0) {
-            lastCursorPos = graphics->drag[graphics->dragCount - 1];
-            SetCursorPos(lastCursorPos.x, lastCursorPos.y);
-            ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-            GetCursorPos(&lastCursorPos);
-            graphics->drag[graphics->dragCount - 1] = lastCursorPos;
-            ((Model*)GetWindowLongPtr(graphics->window, GWLP_USERDATA))->drag[graphics->dragCount - 1] = lastCursorPos;
-        } else {
-            if (lastGraphics.dragCount > 0) {
-                naturalCursorPos = lastGraphics.drag[graphics->dragCount];
-            }
-
-            SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
-        }
-    } else if (
-        memcmp(&graphics->offsetPt, &lastGraphics.offsetPt, sizeof(Point))
-    ) {
-        POINT cursorPos;
-        GetCursorPos(&cursorPos);
-        cursorPos.x += ptToIntPx(graphics->offsetPt.x, graphics->dpi)
-            - ptToIntPx(lastGraphics.offsetPt.x, graphics->dpi);
-        cursorPos.y += ptToIntPx(graphics->offsetPt.y, graphics->dpi)
-            - ptToIntPx(lastGraphics.offsetPt.y, graphics->dpi);
-        SetCursorPos(cursorPos.x, cursorPos.y);
-        if (graphics->dragCount > 0 && graphics->dragCount < 3) {
-            ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-            GetCursorPos(&lastCursorPos);
-        }
-    } else if (graphics->dragCount > lastGraphics.dragCount) {
-        ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
-        GetCursorPos(&lastCursorPos);
-    }
-
-    ZeroMemory(&lastGraphics, sizeof(graphics));
-    lastGraphics = *graphics;
-
     if (graphics->dragCount > 0) {
         HPEN pens[2] = {
             getPen(
@@ -1822,13 +1771,13 @@ void redraw(Graphics *graphics) {
                 );
             }
 
-            if (graphics->dragCount < 3) {
-                LineTo(
-                    memory,
-                    lastCursorPos.x - graphics->leftPx,
-                    lastCursorPos.y - graphics->topPx
-                );
-            }
+            // if (graphics->dragCount < 3) {
+            //     LineTo(
+            //         memory,
+            //         lastCursorPos.x - graphics->leftPx,
+            //         lastCursorPos.y - graphics->topPx
+            //     );
+            // }
         }
     }
 
@@ -1858,18 +1807,9 @@ void redraw(Graphics *graphics) {
     for (
         int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
     ) {
-        Point positionPt = getBubblePositionPt(
-            graphics->marginSize, graphics->edge1, graphics->edge2,
-            graphics->offsetPt, graphics->dialog, widthPt, heightPt,
-            labels.count, i
-        );
-        BOOL xFlip = widthPt - positionPt.x <= graphics->mirrorWidthPt;
-        BOOL yFlip = heightPt - positionPt.y <= graphics->mirrorHeightPt;
-        POINT positionPx = {
-            .x = ptToIntPx(positionPt.x, graphics->dpi),
-            .y = ptToIntPx(positionPt.y, graphics->dpi),
-        };
-        clampToRect(client, &positionPx);
+        POINT positionPx = getBubblePositionPx(graphics, i);
+        BOOL xFlip = positionPx.x >= graphics->mirrorStart.x;
+        BOOL yFlip = positionPx.y >= graphics->mirrorStart.y;
         RECT dstRect = labelRects[i];
         OffsetRect(
             &dstRect,
@@ -1917,13 +1857,13 @@ void redraw(Graphics *graphics) {
             );
         }
 
-        if (graphics->dragCount < 3) {
-            LineTo(
-                memory,
-                lastCursorPos.x - graphics->leftPx,
-                lastCursorPos.y - graphics->topPx
-            );
-        }
+        // if (graphics->dragCount < 3) {
+        //     LineTo(
+        //         memory,
+        //         lastCursorPos.x - graphics->leftPx,
+        //         lastCursorPos.y - graphics->topPx
+        //     );
+        // }
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
@@ -2087,6 +2027,38 @@ void applyMinDialogSize(HWND dialog) {
         newFrame.right, newFrame.bottom,
         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
     );
+}
+
+void setMatchPoint(Model *model, POINT matchPoint) {
+    POINT cursorPos;
+    GetCursorPos(&cursorPos);
+    if (
+        !model->hasMatch
+            || cursorPos.x != model->matchPoint.x
+            || cursorPos.y != model->matchPoint.y
+    ) {
+        model->naturalPoint = cursorPos;
+    }
+
+    model->hasMatch = TRUE;
+    model->matchPoint = matchPoint;
+    SetCursorPos(matchPoint.x, matchPoint.y);
+}
+
+void unsetMatchPoint(Model *model) {
+    if (model->hasMatch) {
+        model->hasMatch = FALSE;
+        POINT cursorPos;
+        GetCursorPos(&cursorPos);
+        if (
+            cursorPos.x == model->matchPoint.x
+                && cursorPos.y == model->matchPoint.y
+        ) {
+            SetCursorPos(
+                model->naturalPoint.x, model->naturalPoint.y
+            );
+        }
+    }
 }
 
 const int PRESSED = 0x8000;
@@ -2386,19 +2358,41 @@ LRESULT CALLBACK DlgProc(
                         || (GetKeyState(keys.up) & PRESSED)
                 );
                 Model *model = getModel(dialog);
-                UINT dpi = GetDpiForWindow(model->window);
+                Graphics *graphics = getGraphics(model);
+                Point deltaPt;
                 if (slow) {
-                    model->offsetPt.x
-                        += xDirection * pxToPt(model->smallDeltaPx, dpi);
-                    model->offsetPt.y
-                        += yDirection * pxToPt(model->smallDeltaPx, dpi);
+                    model->offsetPt.x += xDirection
+                        * pxToPt(model->smallDeltaPx, graphics->dpi);
+                    model->offsetPt.y += yDirection
+                        * pxToPt(model->smallDeltaPx, graphics->dpi);
                 } else {
-                    model->offsetPt.x
-                        += xDirection * pxToPt(model->deltaPx, dpi);
-                    model->offsetPt.y
-                        += yDirection * pxToPt(model->deltaPx, dpi);
+                    model->offsetPt.x += xDirection
+                        * pxToPt(model->deltaPx, graphics->dpi);
+                    model->offsetPt.y += yDirection
+                        * pxToPt(model->deltaPx, graphics->dpi);
                 }
-                redraw(getGraphics(model));
+
+                if (graphics->labelRange.matchLength > 0) {
+                    graphics->offsetPt = model->offsetPt;
+                    POINT cursorPos = getBubblePositionPx(
+                        graphics, graphics->labelRange.start
+                    );
+                    cursorPos.x += graphics->leftPx;
+                    cursorPos.y += graphics->topPx;
+                    setMatchPoint(model, cursorPos);
+                } else {
+                    unsetMatchPoint(model);
+                    POINT cursorPos;
+                    GetCursorPos(&cursorPos);
+                    cursorPos.x += ptToIntPx(model->offsetPt.x, graphics->dpi)
+                        - ptToIntPx(graphics->offsetPt.x, graphics->dpi);
+                    cursorPos.y += ptToIntPx(model->offsetPt.y, graphics->dpi)
+                        - ptToIntPx(graphics->offsetPt.y, graphics->dpi);
+                    graphics->offsetPt = model->offsetPt;
+                    SetCursorPos(cursorPos.x, cursorPos.y);
+                }
+
+                redraw(graphics);
                 return TRUE;
             } else if (command == IDM_CLICK) {
                 POINT cursor;
@@ -2528,7 +2522,20 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
-                redraw(getGraphics(getModel(dialog)));
+                Model *model = getModel(dialog);
+                Graphics *graphics = getGraphics(model);
+                if (graphics->labelRange.matchLength > 0) {
+                    POINT cursorPos = getBubblePositionPx(
+                        graphics, graphics->labelRange.start
+                    );
+                    cursorPos.x += graphics->leftPx;
+                    cursorPos.y += graphics->topPx;
+                    setMatchPoint(model, cursorPos);
+                } else {
+                    unsetMatchPoint(model);
+                }
+
+                redraw(graphics);
                 return TRUE;
             }
         }
@@ -2639,6 +2646,7 @@ int CALLBACK WinMain(
         .minTextBoxSize = { 0, 0 },
         .inMenuLoop = FALSE,
         .text = L"",
+        .hasMatch = FALSE,
         .dragCount = 0,
     };
 
