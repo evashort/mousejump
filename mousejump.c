@@ -694,7 +694,7 @@ AccelArray getAccelerators() {
 }
 
 typedef struct { int left; int up; int right; int down; } ArrowKeyMap;
-ArrowKeyMap getArrowKeyMap(int left, int up, int right, int down) {
+ArrowKeyMap getArrowKeyMapHelp(int left, int up, int right, int down) {
     ArrowKeyMap keys = { 0, 0, 0, 0 };
     AccelArray accelerators = getAccelerators();
     for (int i = 0; i < accelerators.count; i++) {
@@ -708,20 +708,14 @@ ArrowKeyMap getArrowKeyMap(int left, int up, int right, int down) {
     return keys;
 }
 
-ArrowKeyMap normalArrowKeyMapOut = { 0, 0, 0, 0 };
-ArrowKeyMap getNormalArrowKeyMap() {
-    if (normalArrowKeyMapOut.left) { return normalArrowKeyMapOut; }
-    return normalArrowKeyMapOut = getArrowKeyMap(
-        IDM_LEFT, IDM_UP, IDM_RIGHT, IDM_DOWN
-    );
-}
-
-ArrowKeyMap slowArrowKeyMapOut = { 0, 0, 0, 0 };
-ArrowKeyMap getSlowArrowKeyMap() {
-    if (slowArrowKeyMapOut.left) { return slowArrowKeyMapOut; }
-    return slowArrowKeyMapOut = getArrowKeyMap(
+ArrowKeyMap arrowKeyMapOut[2] = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
+ArrowKeyMap getArrowKeyMap(BOOL slow) {
+    if (arrowKeyMapOut[slow].left) { return arrowKeyMapOut[slow]; }
+    return arrowKeyMapOut[slow] = slow ? getArrowKeyMapHelp(
         IDM_SLIGHTLY_LEFT, IDM_SLIGHTLY_UP,
         IDM_SLIGHTLY_RIGHT, IDM_SLIGHTLY_DOWN
+    ) : getArrowKeyMapHelp(
+        IDM_LEFT, IDM_UP, IDM_RIGHT, IDM_DOWN
     );
 }
 
@@ -1925,9 +1919,7 @@ LRESULT CALLBACK WndProc(
     WPARAM wParam,
     LPARAM lParam
 ) {
-    if (message == WM_PAINT) {
-        redraw(window);
-    } else if (message == WM_ACTIVATE) {
+    if (message == WM_ACTIVATE) {
         if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
             Model *model = getModel(window);
             // The main window initially receives WM_ACTIVATE before its user
@@ -2302,18 +2294,19 @@ LRESULT CALLBACK DlgProc(
         return HTTRANSPARENT;
     } else if (message == WM_COMMAND) {
         if (HIWORD(wParam) == 0 || HIWORD(wParam) == 1) {
-            if (LOWORD(wParam) == 2) {
+            WORD command = LOWORD(wParam);
+            if (command == 2) {
                 PostQuitMessage(0);
                 return TRUE;
-            } else if (LOWORD(wParam) == IDM_EXIT) {
+            } else if (command == IDM_EXIT) {
                 PostQuitMessage(0);
                 return TRUE;
-            } else if (LOWORD(wParam) == IDM_SELECT_ALL) {
+            } else if (command == IDM_SELECT_ALL) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                 SendMessage(textBox, EM_SETSEL, 0, -1);
                 SetFocus(textBox);
                 return TRUE;
-            } else if (LOWORD(wParam) == IDC_DROPDOWN) {
+            } else if (command == IDC_DROPDOWN) {
                 // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
                 HWND button = GetDlgItem(dialog, IDC_DROPDOWN);
                 Button_SetCheck(button, BST_CHECKED);
@@ -2334,64 +2327,47 @@ LRESULT CALLBACK DlgProc(
 
                 return TRUE;
             } else if (
-                LOWORD(wParam) == IDM_LEFT
-                    || LOWORD(wParam) == IDM_UP
-                    || LOWORD(wParam) == IDM_RIGHT
-                    || LOWORD(wParam) == IDM_DOWN
+                command >= IDM_LEFT && command <= IDM_DOWN || (
+                    command >= IDM_SLIGHTLY_LEFT
+                        && command <= IDM_SLIGHTLY_DOWN
+                )
             ) {
-                ArrowKeyMap keys = getNormalArrowKeyMap();
+                BOOL slow = !(command >= IDM_LEFT && command <= IDM_DOWN);
+                if (slow) {
+                    command += IDM_LEFT; command -= IDM_SLIGHTLY_LEFT;
+                }
+
+                ArrowKeyMap keys = getArrowKeyMap(slow);
                 int xDirection = (
-                    LOWORD(wParam) == IDM_RIGHT
+                    command == IDM_RIGHT
                         || (GetKeyState(keys.right) & PRESSED)
                 ) - (
-                    LOWORD(wParam) == IDM_LEFT
+                    command == IDM_LEFT
                         || (GetKeyState(keys.left) & PRESSED)
                 );
                 int yDirection = (
-                    LOWORD(wParam) == IDM_DOWN
+                    command == IDM_DOWN
                         || (GetKeyState(keys.down) & PRESSED)
                 ) - (
-                    LOWORD(wParam) == IDM_UP
+                    command == IDM_UP
                         || (GetKeyState(keys.up) & PRESSED)
                 );
                 Model *model = getModel(dialog);
                 UINT dpi = GetDpiForWindow(model->window);
-                model->offsetPt.x += xDirection * pxToPt(model->deltaPx, dpi);
-                model->offsetPt.y += yDirection * pxToPt(model->deltaPx, dpi);
-                RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
+                if (slow) {
+                    model->offsetPt.x
+                        += xDirection * pxToPt(model->smallDeltaPx, dpi);
+                    model->offsetPt.y
+                        += yDirection * pxToPt(model->smallDeltaPx, dpi);
+                } else {
+                    model->offsetPt.x
+                        += xDirection * pxToPt(model->deltaPx, dpi);
+                    model->offsetPt.y
+                        += yDirection * pxToPt(model->deltaPx, dpi);
+                }
+                redraw(model->window);
                 return TRUE;
-            } else if (
-                LOWORD(wParam) == IDM_SLIGHTLY_LEFT
-                    || LOWORD(wParam) == IDM_SLIGHTLY_UP
-                    || LOWORD(wParam) == IDM_SLIGHTLY_RIGHT
-                    || LOWORD(wParam) == IDM_SLIGHTLY_DOWN
-            ) {
-                ArrowKeyMap keys = getSlowArrowKeyMap();
-                int xDirection = (
-                    LOWORD(wParam) == IDM_SLIGHTLY_RIGHT
-                        || (GetKeyState(keys.right) & PRESSED)
-                ) - (
-                    LOWORD(wParam) == IDM_SLIGHTLY_LEFT
-                        || (GetKeyState(keys.left) & PRESSED)
-                );
-                int yDirection = (
-                    LOWORD(wParam) == IDM_SLIGHTLY_DOWN
-                        || (GetKeyState(keys.down) & PRESSED)
-                ) - (
-                    LOWORD(wParam) == IDM_SLIGHTLY_UP
-                        || (GetKeyState(keys.up) & PRESSED)
-                );
-                Model *model = getModel(dialog);
-                UINT dpi = GetDpiForWindow(model->window);
-                model->offsetPt.x += xDirection * pxToPt(
-                    model->smallDeltaPx, dpi
-                );
-                model->offsetPt.y += yDirection * pxToPt(
-                    model->smallDeltaPx, dpi
-                );
-                RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
-                return TRUE;
-            } else if (LOWORD(wParam) == IDM_CLICK) {
+            } else if (command == IDM_CLICK) {
                 POINT cursor;
                 GetCursorPos(&cursor);
                 Model *model = getModel(dialog);
@@ -2439,7 +2415,7 @@ LRESULT CALLBACK DlgProc(
 
                 SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
                 return TRUE;
-            } else if (LOWORD(wParam) == IDM_START_DRAGGING) {
+            } else if (command == IDM_START_DRAGGING) {
                 Model *model = getModel(dialog);
                 BOOL erase = FALSE;
                 if (model->dragCount > 0) {
@@ -2473,7 +2449,7 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 return TRUE;
-            } else if (LOWORD(wParam) == IDM_PREVIOUS_DRAG) {
+            } else if (command == IDM_PREVIOUS_DRAG) {
                 Model *model = getModel(dialog);
                 if (model->dragCount >= 3) {
                     POINT cursorPos = model->drag[model->dragCount - 1];
@@ -2482,7 +2458,7 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 return TRUE;
-            } else if (LOWORD(wParam) == IDM_HIDE_INTERFACE) {
+            } else if (command == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
                 model->showCaption = !model->showCaption;
                 DWORD selectionStart, selectionStop;
