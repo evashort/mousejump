@@ -781,7 +781,7 @@ LPWSTR getTextBoxText(HWND textBox) {
 
 #pragma endregion
 
-#pragma region bubbles
+#pragma region getBubblePositionPt
 
 typedef struct { double x, y; } Point;
 Point makePoint(double x, double y) { Point point = { x, y }; return point; }
@@ -1275,6 +1275,67 @@ Point *getBubbles(
 }
 
 #pragma endregion
+Point getBubblePositionPt(
+    Point marginSize, Point edge1, Point edge2, Point offsetPt, HWND dialog,
+    double width, double height, int count, int index
+) {
+    width += 2 * marginSize.x;
+    height += 2 * marginSize.y;
+    Point *bubbles = getBubbles(
+        edge1, edge2, offsetPt, width, height, count, dialog
+    );
+    Point result = add(
+        matrixDot(edge1, edge2, bubbles[index]),
+        add(offsetPt, scale(marginSize, -1))
+    );
+    return result;
+}
+
+int getBubbleCount(
+    int maxCount, double minCellArea, double gridMargin, double aspect,
+    double width, double height
+) {
+    return min(
+        maxCount,
+        width * height / minCellArea + 2 * gridMargin * (
+            2 * gridMargin + (width + height * aspect) / sqrt(
+                aspect * minCellArea
+            )
+        )
+    );
+}
+
+double pxToPt(double px, UINT dpi) { return px * 72 / (double)dpi; }
+double intPxToPt(int px, UINT dpi) {
+    return (double)px * 72 / (double)dpi;
+}
+
+double ptToPx(double pt, UINT dpi) { return pt * (double)dpi / 72; }
+int ptToIntPx(double pt, UINT dpi) {
+    return (int)round(pt * (double)dpi / 72);
+}
+int ptToThinPx(double pt, UINT dpi) {
+    return max(1, (int)(pt * (double)dpi / 72));
+}
+
+void clampToRect(RECT rect, POINT *point) {
+    if (point->x < rect.left) { point->x = rect.left; }
+    if (point->y < rect.top) { point->y = rect.top; }
+    if (point->x >= rect.right) { point->x = rect.right - 1; }
+    if (point->y >= rect.bottom) { point->y = rect.bottom - 1; }
+}
+
+COLORREF getTextColor(COLORREF background) {
+    // https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color/3943023
+    if (
+        0.299 * GetRValue(background) + 0.587 * GetGValue(background)
+            + 0.114 * GetBValue(background) > 149
+    ) {
+        return RGB(0, 0, 0);
+    } else {
+        return RGB(255, 255, 255);
+    }
+}
 
 void destroyCache() {
     for (int i = 0; i < BRUSH_SLOT_COUNT; i++) {
@@ -1350,17 +1411,6 @@ typedef struct {
     POINT drag[3];
 } Model;
 
-int getBubbleCount(Model *model, double width, double height) {
-    return min(
-        model->bubbleCount,
-        width * height / model->minCellArea + 2 * model->gridMargin * (
-            2 * model->gridMargin + (width + height * model->aspect) / sqrt(
-                model->aspect * model->minCellArea
-            )
-        )
-    );
-}
-
 double sqrtAspectIn = 0;
 double sqrtAspectOut = 0;
 double getSqrtAspect(double aspect) {
@@ -1392,99 +1442,27 @@ double getSqrtCellArea(
     return sqrtCellAreaOut;
 }
 
-Point getBubblePositionPt(
-    Model *model, double width, double height, int count, int index
-) {
-    double sqrtAspect = getSqrtAspect(model->aspect);
-    double sqrtCellArea = getSqrtCellArea(
-        width / sqrtAspect, height * sqrtAspect, model->gridMargin, count
-    );
-    Point marginSize = {
-        .x = model->gridMargin * sqrtCellArea * sqrtAspect,
-        .y = model->gridMargin * sqrtCellArea / sqrtAspect,
-    };
-    width += 2 * marginSize.x;
-    height += 2 * marginSize.y;
-    // get the shape of all screen parallelograms (cells) without worrying
-    // about scale yet. shape1 and shape2 represent the edges that
-    // approximately correspond to the x and y axes respectively.
-    // in the windows API in general and in this function specifically, the
-    // positive y direction is downward.
-    Point edge1, edge2;
-    getCellEdges(
-        model->angle1, model->angle2, model->aspect,
-        sqrtCellArea * sqrtCellArea, &edge1, &edge2
-    );
-    Point *bubbles = getBubbles(
-        edge1, edge2, model->offsetPt, width, height, count, model->dialog
-    );
-    Point result = add(
-        matrixDot(edge1, edge2, bubbles[index]),
-        add(model->offsetPt, scale(marginSize, -1))
-    );
-    return result;
-}
-
-double pxToPt(double px, UINT dpi) { return px * 72 / (double)dpi; }
-double intPxToPt(int px, UINT dpi) {
-    return (double)px * 72 / (double)dpi;
-}
-
-double ptToPx(double pt, UINT dpi) { return pt * (double)dpi / 72; }
-int ptToIntPx(double pt, UINT dpi) {
-    return (int)round(pt * (double)dpi / 72);
-}
-int ptToThinPx(double pt, UINT dpi) {
-    return max(1, (int)(pt * (double)dpi / 72));
-}
-
-void clampToRect(RECT rect, POINT *point) {
-    if (point->x < rect.left) { point->x = rect.left; }
-    if (point->y < rect.top) { point->y = rect.top; }
-    if (point->x >= rect.right) { point->x = rect.right - 1; }
-    if (point->y >= rect.bottom) { point->y = rect.bottom - 1; }
-}
-
-COLORREF getTextColor(COLORREF background) {
-    // https://stackoverflow.com/questions/3942878/how-to-decide-font-color-in-white-or-black-depending-on-background-color/3943023
-    if (
-        0.299 * GetRValue(background) + 0.587 * GetGValue(background)
-            + 0.114 * GetBValue(background) > 149
-    ) {
-        return RGB(0, 0, 0);
-    } else {
-        return RGB(255, 255, 255);
-    }
-}
-
-Model *getModel(HWND window) {
-    Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
-    if (model) { return model; }
-    HWND owner = GetWindowOwner(window);
-    if (owner) {
-        model = (Model*)GetWindowLongPtr(owner, GWLP_USERDATA);
-        SetWindowLongPtr(window, GWLP_USERDATA, (LONG)model);
-    }
-
-    return model;
-}
-
 typedef struct {
+    HWND window, dialog;
     Point offsetPt;
     UINT dpi;
+    double fontHeightPt;
+    WCHAR fontFamily[LF_FACESIZE];
     int systemFontChanges;
-    int leftPx;
-    int topPx;
-    int widthPx;
-    int heightPx;
-    int topCrop;
-    int bottomCrop;
+    int leftPx, topPx, widthPx, heightPx;
+    int topCrop, bottomCrop;
+    int bubbleCount;
     LabelRange labelRange;
+    Point marginSize, edge1, edge2;
+    COLORREF colorKey, labelBackground, selectionBackground, borderColor;
+    RECT paddingPx;
+    double borderPx, earHeightPx, earElevationPx, dashPx;
+    double mirrorWidthPt, mirrorHeightPt;
     int dragCount;
     POINT drag[3];
 } Graphics;
-
-Graphics getGraphics(Model *model) {
+Graphics graphicsOut;
+Graphics *getGraphics(Model *model) {
     MONITORINFO monitorInfo;
     ZeroMemory(&monitorInfo, sizeof(monitorInfo));
     monitorInfo.cbSize = sizeof(monitorInfo);
@@ -1511,118 +1489,156 @@ Graphics getGraphics(Model *model) {
     GetDpiForMonitor(model->monitor, MDT_EFFECTIVE_DPI, &dpi, &dpi);
     double widthPt = intPxToPt(widthPx, dpi);
     double heightPt = intPxToPt(heightPx, dpi);
-    StringArray labels = getSortedLabels(
-        getBubbleCount(model, widthPt, heightPt)
+    int bubbleCount = getBubbleCount(
+        model->bubbleCount, model->minCellArea, model->gridMargin,
+        model->aspect, widthPt, heightPt
     );
+    StringArray labels = getSortedLabels(bubbleCount);
     LabelRange labelRange;
     ZeroMemory(&labelRange, sizeof(labelRange));
     labelRange = getLabelRange(model->text, labels);
-    Graphics graphics;
-    ZeroMemory(&graphics, sizeof(graphics));
-    graphics.offsetPt = model->offsetPt;
-    graphics.dpi = dpi;
-    graphics.systemFontChanges = model->systemFontChanges;
-    graphics.leftPx = monitorInfo.rcMonitor.left;
-    graphics.topPx = monitorInfo.rcMonitor.top;
-    graphics.widthPx = widthPx;
-    graphics.heightPx = heightPx;
-    graphics.topCrop = topCrop;
-    graphics.bottomCrop = bottomCrop;
-    graphics.labelRange = getLabelRange(model->text, labels);
-    graphics.dragCount = model->dragCount;
+    double sqrtAspect = getSqrtAspect(model->aspect);
+    double sqrtCellArea = getSqrtCellArea(
+        widthPt / sqrtAspect, heightPt * sqrtAspect, model->gridMargin,
+        labels.count
+    );
+    Point marginSize = {
+        .x = model->gridMargin * sqrtCellArea * sqrtAspect,
+        .y = model->gridMargin * sqrtCellArea / sqrtAspect,
+    };
+    // get the shape of all screen parallelograms (cells) without worrying
+    // about scale yet. shape1 and shape2 represent the edges that
+    // approximately correspond to the x and y axes respectively.
+    // in the windows API in general and in this function specifically, the
+    // positive y direction is downward.
+    Point edge1, edge2;
+    getCellEdges(
+        model->angle1, model->angle2, model->aspect,
+        sqrtCellArea * sqrtCellArea, &edge1, &edge2
+    );
+    ZeroMemory(&graphicsOut, sizeof(graphicsOut));
+    graphicsOut.window = model->window;
+    graphicsOut.dialog = model->dialog;
+    graphicsOut.offsetPt = model->offsetPt;
+    graphicsOut.dpi = dpi;
+    graphicsOut.fontHeightPt = model->fontHeightPt;
+    wcsncpy(graphicsOut.fontFamily, model->fontFamily, LF_FACESIZE);
+    graphicsOut.systemFontChanges = model->systemFontChanges;
+    graphicsOut.leftPx = monitorInfo.rcMonitor.left;
+    graphicsOut.topPx = monitorInfo.rcMonitor.top;
+    graphicsOut.widthPx = widthPx;
+    graphicsOut.heightPx = heightPx;
+    graphicsOut.topCrop = topCrop;
+    graphicsOut.bottomCrop = bottomCrop;
+    graphicsOut.bubbleCount = bubbleCount;
+    graphicsOut.labelRange = getLabelRange(model->text, labels);
+    graphicsOut.marginSize = marginSize;
+    graphicsOut.edge1 = edge1;
+    graphicsOut.edge2 = edge2;
+    graphicsOut.colorKey = model->colorKey;
+    graphicsOut.labelBackground = model->labelBackground;
+    graphicsOut.selectionBackground = model->selectionBackground;
+    graphicsOut.borderColor = model->borderColor;
+    graphicsOut.paddingPx.left = ptToThinPx(model->paddingLeftPt, dpi),
+    graphicsOut.paddingPx.top = ptToThinPx(model->paddingTopPt, dpi),
+    graphicsOut.paddingPx.right = ptToThinPx(model->paddingRightPt, dpi),
+    graphicsOut.paddingPx.bottom = ptToThinPx(model->paddingBottomPt, dpi),
+    graphicsOut.borderPx = ptToThinPx(model->borderPt, dpi);
+    graphicsOut.earHeightPx = ptToIntPx(model->earHeightPt, dpi);
+    graphicsOut.earElevationPx = ptToIntPx(model->earElevationPt, dpi);
+    graphicsOut.dashPx = ptToIntPx(model->dashPt, dpi);
+    graphicsOut.mirrorWidthPt = model->mirrorWidthPt;
+    graphicsOut.mirrorHeightPt = model->mirrorHeightPt;
+    graphicsOut.dragCount = model->dragCount;
     for (int i = 0; i < model->dragCount; i++) {
-        graphics.drag[i].x = model->drag[i].x;
-        graphics.drag[i].y = model->drag[i].y;
+        graphicsOut.drag[i] = model->drag[i];
     }
 
-    return graphics;
+    return &graphicsOut;
 }
 
 Graphics lastGraphics = {
+    .window = NULL, .dialog = NULL,
     .offsetPt = { 0, 0 },
     .dpi = 0,
+    .fontHeightPt = 0,
+    .fontFamily = L"",
     .systemFontChanges = 0,
     .leftPx = 0, .topPx = 0, .widthPx = 0, .heightPx = 0,
     .topCrop = 0, .bottomCrop = 0,
+    .bubbleCount = 0,
     .labelRange = { 0, 0, 0 },
+    .marginSize = { 0, 0 }, .edge1 = { 0, 0 }, .edge2 = { 0, 0 },
+    .colorKey = 0,
+    .labelBackground = 0, .selectionBackground = 0, .borderColor = 0,
+    .paddingPx = { 0, 0, 0, 0 },
+    .borderPx = 0, .earHeightPx = 0, .earElevationPx = 0, .dashPx = 0,
+    .mirrorWidthPt = 0, .mirrorHeightPt = 0,
     .dragCount = 0,
     .drag = { { 0, 0 }, { 0, 0 }, { 0, 0 } },
 };
 POINT lastCursorPos = { .x = MINLONG, .y = MINLONG };
 POINT naturalCursorPos = { .x = 0, .y = 0 };
-void redraw(HWND window) {
-    Model *model = getModel(window);
-    Graphics graphics;
-    ZeroMemory(&graphics, sizeof(graphics));
-    graphics = getGraphics(model);
-    if (!memcmp(&graphics, &lastGraphics, sizeof(graphics))) {
+void redraw(Graphics *graphics) {
+    if (!memcmp(graphics, &lastGraphics, sizeof(Graphics))) {
         return;
     }
 
-    double widthPt = intPxToPt(graphics.widthPx, graphics.dpi);
-    double heightPt = intPxToPt(graphics.heightPx, graphics.dpi);
-    int bubbleCount = getBubbleCount(model, widthPt, heightPt);
-    StringArray labels = getSortedLabels(bubbleCount);
-    HDC device = GetDC(window);
+    double widthPt = intPxToPt(graphics->widthPx, graphics->dpi);
+    double heightPt = intPxToPt(graphics->heightPx, graphics->dpi);
+    StringArray labels = getSortedLabels(graphics->bubbleCount);
+    HDC device = GetDC(graphics->window);
     HDC memory = CreateCompatibleDC(device);
-    HBRUSH keyBrush = getBrush(model->colorKey, KEY_BRUSH_SLOT);
+    HBRUSH keyBrush = getBrush(graphics->colorKey, KEY_BRUSH_SLOT);
     selectKeyBitmap(
-        device, memory, graphics.widthPx, graphics.heightPx, model->colorKey
+        device, memory, graphics->widthPx, graphics->heightPx, graphics->colorKey
     );
     HDC labelMemory = CreateCompatibleDC(device);
     SelectObject(
         labelMemory,
         getLabelFont(
-            graphics.dpi,
-            model->fontHeightPt,
-            model->fontFamily,
-            model->systemFontChanges
+            graphics->dpi,
+            graphics->fontHeightPt,
+            graphics->fontFamily,
+            graphics->systemFontChanges
         )
     );
-    SetBkColor(labelMemory, model->labelBackground);
-    SetTextColor(labelMemory, getTextColor(model->labelBackground));
-    RECT paddingPx = {
-        ptToThinPx(model->paddingLeftPt, graphics.dpi),
-        ptToThinPx(model->paddingTopPt, graphics.dpi),
-        ptToThinPx(model->paddingRightPt, graphics.dpi),
-        ptToThinPx(model->paddingBottomPt, graphics.dpi),
-    };
+    SetBkColor(labelMemory, graphics->labelBackground);
+    SetTextColor(labelMemory, getTextColor(graphics->labelBackground));
     RECT *labelRects = selectLabelBitmap(
-        device, labelMemory, bubbleCount, paddingPx
+        device, labelMemory, graphics->bubbleCount, graphics->paddingPx
     );
     HDC selectionMemory = CreateCompatibleDC(device);
     SelectObject(
         selectionMemory,
         getLabelFont(
-            graphics.dpi,
-            model->fontHeightPt,
-            model->fontFamily,
-            model->systemFontChanges
+            graphics->dpi,
+            graphics->fontHeightPt,
+            graphics->fontFamily,
+            graphics->systemFontChanges
         )
     );
-    SetBkColor(selectionMemory, model->selectionBackground);
-    SetTextColor(selectionMemory, getTextColor(model->selectionBackground));
+    SetBkColor(selectionMemory, graphics->selectionBackground);
+    SetTextColor(selectionMemory, getTextColor(graphics->selectionBackground));
     RECT *selectionRects = selectSelectionBitmap(
-        device, selectionMemory, bubbleCount
+        device, selectionMemory, graphics->bubbleCount
     );
     HDC earMemory = CreateCompatibleDC(device);
-    int borderPx = ptToThinPx(model->borderPt, graphics.dpi);
-    int earElevationPx = ptToIntPx(model->earElevationPt, graphics.dpi);
     SIZE earSize = selectEarBitmap(
         device,
         earMemory,
-        borderPx,
-        earElevationPx,
-        ptToIntPx(model->earHeightPt, graphics.dpi),
-        model->colorKey,
-        model->borderColor,
-        model->labelBackground
+        graphics->borderPx,
+        graphics->earElevationPx,
+        graphics->earHeightPx,
+        graphics->colorKey,
+        graphics->borderColor,
+        graphics->labelBackground
     );
     // RECT labelBitmapRect = {
-    //     ptToIntPx(model->offsetPt.x, graphics.dpi) + 100,
-    //     ptToIntPx(model->offsetPt.y, graphics.dpi) + 400,
-    //     ptToIntPx(model->offsetPt.x, graphics.dpi) + 100 + 600,
-    //     ptToIntPx(model->offsetPt.y, graphics.dpi) + 400 + 400,
+    //     ptToIntPx(graphics->offsetPt.x, graphics->dpi) + 100,
+    //     ptToIntPx(graphics->offsetPt.y, graphics->dpi) + 400,
+    //     ptToIntPx(graphics->offsetPt.x, graphics->dpi) + 100 + 600,
+    //     ptToIntPx(graphics->offsetPt.y, graphics->dpi) + 400 + 400,
     // };
     // BitBlt(
     //     memory, labelBitmapRect.left, labelBitmapRect.top,
@@ -1630,18 +1646,20 @@ void redraw(HWND window) {
     //     labelBitmapRect.bottom - labelBitmapRect.top,
     //     labelMemory, 0, 0, SRCCOPY
     // );
-    RECT client = { 0, 0, graphics.widthPx, graphics.heightPx };
+    RECT client = { 0, 0, graphics->widthPx, graphics->heightPx };
     for (
-        int i = graphics.labelRange.start; i < graphics.labelRange.stop; i++
+        int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
     ) {
         Point positionPt = getBubblePositionPt(
-            model, widthPt, heightPt, labels.count, i
+            graphics->marginSize, graphics->edge1, graphics->edge2,
+            graphics->offsetPt, graphics->dialog, widthPt, heightPt,
+            labels.count, i
         );
-        BOOL xFlip = widthPt - positionPt.x <= model->mirrorWidthPt;
-        BOOL yFlip = heightPt - positionPt.y <= model->mirrorHeightPt;
+        BOOL xFlip = widthPt - positionPt.x <= graphics->mirrorWidthPt;
+        BOOL yFlip = heightPt - positionPt.y <= graphics->mirrorHeightPt;
         POINT positionPx = {
-            .x = ptToIntPx(positionPt.x, graphics.dpi),
-            .y = ptToIntPx(positionPt.y, graphics.dpi),
+            .x = ptToIntPx(positionPt.x, graphics->dpi),
+            .y = ptToIntPx(positionPt.y, graphics->dpi),
         };
         clampToRect(client, &positionPx);
         BitBlt(
@@ -1657,11 +1675,12 @@ void redraw(HWND window) {
         );
         BitBlt(
             memory,
-            positionPx.x + borderPx + xFlip * (
-                1 - 2 * borderPx + labelRects[i].left - labelRects[i].right
+            positionPx.x + graphics->borderPx + xFlip * (
+                1 - 2 * graphics->borderPx
+                    + labelRects[i].left - labelRects[i].right
             ),
-            positionPx.y + earElevationPx + yFlip * (
-                1 - 2 * earElevationPx
+            positionPx.y + graphics->earElevationPx + yFlip * (
+                1 - 2 * graphics->earElevationPx
                     + labelRects[i].top - labelRects[i].bottom
             ),
             labelRects[i].right - labelRects[i].left,
@@ -1671,25 +1690,27 @@ void redraw(HWND window) {
             labelRects[i].top,
             SRCCOPY
         );
-        if (graphics.labelRange.matchLength) {
+        if (graphics->labelRange.matchLength) {
             RECT textRect = { 0, 0, 0, 0 };
             DrawText(
                 labelMemory,
                 labels.value[i],
-                graphics.labelRange.matchLength,
+                graphics->labelRange.matchLength,
                 &textRect,
                 DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
             );
             BitBlt(
                 memory,
-                positionPx.x + borderPx + paddingPx.left + xFlip * (
-                    1 - 2 * borderPx
-                        + labelRects[i].left - labelRects[i].right
-                ),
-                positionPx.y + earElevationPx + paddingPx.top + yFlip * (
-                    1 - 2 * earElevationPx
-                        + labelRects[i].top - labelRects[i].bottom
-                ),
+                positionPx.x + graphics->borderPx
+                    + graphics->paddingPx.left + xFlip * (
+                        1 - 2 * graphics->borderPx
+                            + labelRects[i].left - labelRects[i].right
+                    ),
+                positionPx.y + graphics->earElevationPx
+                    + graphics->paddingPx.top + yFlip * (
+                        1 - 2 * graphics->earElevationPx
+                            + labelRects[i].top - labelRects[i].bottom
+                    ),
                 min(
                     selectionRects[i].right - selectionRects[i].left,
                     textRect.right
@@ -1703,20 +1724,18 @@ void redraw(HWND window) {
         }
     }
 
-    if (graphics.labelRange.matchLength > 0) {
+    if (graphics->labelRange.matchLength > 0) {
         POINT goalCursorPos;
         ZeroMemory(&goalCursorPos, sizeof(goalCursorPos));
         Point goalCursorPosPt = getBubblePositionPt(
-            model,
-            widthPt,
-            heightPt,
-            labels.count,
-            graphics.labelRange.start
+            graphics->marginSize, graphics->edge1, graphics->edge2,
+            graphics->offsetPt, graphics->dialog, widthPt, heightPt,
+            labels.count, graphics->labelRange.start
         );
         goalCursorPos.x
-            = ptToIntPx(goalCursorPosPt.x, graphics.dpi) + graphics.leftPx;
+            = ptToIntPx(goalCursorPosPt.x, graphics->dpi) + graphics->leftPx;
         goalCursorPos.y
-            = ptToIntPx(goalCursorPosPt.y, graphics.dpi) + graphics.topPx;
+            = ptToIntPx(goalCursorPosPt.y, graphics->dpi) + graphics->topPx;
 
         POINT actualCursorPos;
         ZeroMemory(&actualCursorPos, sizeof(actualCursorPos));
@@ -1732,59 +1751,58 @@ void redraw(HWND window) {
         GetCursorPos(&lastCursorPos);
     } else if (
         lastGraphics.labelRange.matchLength > 0
-            || graphics.dragCount < lastGraphics.dragCount
+            || graphics->dragCount < lastGraphics.dragCount
     ) {
-        if (graphics.dragCount > 0) {
-            lastCursorPos = graphics.drag[graphics.dragCount - 1];
+        if (graphics->dragCount > 0) {
+            lastCursorPos = graphics->drag[graphics->dragCount - 1];
             SetCursorPos(lastCursorPos.x, lastCursorPos.y);
             ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
             GetCursorPos(&lastCursorPos);
-            graphics.drag[graphics.dragCount - 1] = lastCursorPos;
-            model->drag[graphics.dragCount - 1] = lastCursorPos;
+            graphics->drag[graphics->dragCount - 1] = lastCursorPos;
+            ((Model*)GetWindowLongPtr(graphics->window, GWLP_USERDATA))->drag[graphics->dragCount - 1] = lastCursorPos;
         } else {
             if (lastGraphics.dragCount > 0) {
-                naturalCursorPos = lastGraphics.drag[graphics.dragCount];
+                naturalCursorPos = lastGraphics.drag[graphics->dragCount];
             }
 
             SetCursorPos(naturalCursorPos.x, naturalCursorPos.y);
         }
     } else if (
-        memcmp(&graphics.offsetPt, &lastGraphics.offsetPt, sizeof(Point))
+        memcmp(&graphics->offsetPt, &lastGraphics.offsetPt, sizeof(Point))
     ) {
         POINT cursorPos;
         GetCursorPos(&cursorPos);
-        cursorPos.x += ptToIntPx(graphics.offsetPt.x, graphics.dpi)
-            - ptToIntPx(lastGraphics.offsetPt.x, graphics.dpi);
-        cursorPos.y += ptToIntPx(graphics.offsetPt.y, graphics.dpi)
-            - ptToIntPx(lastGraphics.offsetPt.y, graphics.dpi);
+        cursorPos.x += ptToIntPx(graphics->offsetPt.x, graphics->dpi)
+            - ptToIntPx(lastGraphics.offsetPt.x, graphics->dpi);
+        cursorPos.y += ptToIntPx(graphics->offsetPt.y, graphics->dpi)
+            - ptToIntPx(lastGraphics.offsetPt.y, graphics->dpi);
         SetCursorPos(cursorPos.x, cursorPos.y);
-        if (graphics.dragCount > 0 && graphics.dragCount < 3) {
+        if (graphics->dragCount > 0 && graphics->dragCount < 3) {
             ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
             GetCursorPos(&lastCursorPos);
         }
-    } else if (graphics.dragCount > lastGraphics.dragCount) {
+    } else if (graphics->dragCount > lastGraphics.dragCount) {
         ZeroMemory(&lastCursorPos, sizeof(lastCursorPos));
         GetCursorPos(&lastCursorPos);
     }
 
     ZeroMemory(&lastGraphics, sizeof(graphics));
-    lastGraphics = graphics;
+    lastGraphics = *graphics;
 
-    int dashPx = ptToIntPx(model->dashPt, graphics.dpi);
-    if (graphics.dragCount > 0) {
+    if (graphics->dragCount > 0) {
         HPEN pens[2] = {
             getPen(
-                model->labelBackground,
-                borderPx,
+                graphics->labelBackground,
+                graphics->borderPx,
                 DASH_PEN_STYLE,
-                dashPx,
+                graphics->dashPx,
                 DRAG_PEN_SLOT
             ),
             getPen(
-                model->borderColor,
-                borderPx,
+                graphics->borderColor,
+                graphics->borderPx,
                 ALT_DASH_PEN_STYLE,
-                dashPx,
+                graphics->dashPx,
                 ALT_DRAG_PEN_SLOT
             ),
         };
@@ -1792,23 +1810,23 @@ void redraw(HWND window) {
             SelectObject(memory, pens[i]);
             MoveToEx(
                 memory,
-                graphics.drag[0].x - graphics.leftPx,
-                graphics.drag[0].y - graphics.topPx,
+                graphics->drag[0].x - graphics->leftPx,
+                graphics->drag[0].y - graphics->topPx,
                 NULL
             );
-            for (int j = 1; j < graphics.dragCount; j++) {
+            for (int j = 1; j < graphics->dragCount; j++) {
                 LineTo(
                     memory,
-                    graphics.drag[j].x - graphics.leftPx,
-                    graphics.drag[j].y - graphics.topPx
+                    graphics->drag[j].x - graphics->leftPx,
+                    graphics->drag[j].y - graphics->topPx
                 );
             }
 
-            if (graphics.dragCount < 3) {
+            if (graphics->dragCount < 3) {
                 LineTo(
                     memory,
-                    lastCursorPos.x - graphics.leftPx,
-                    lastCursorPos.y - graphics.topPx
+                    lastCursorPos.x - graphics->leftPx,
+                    lastCursorPos.y - graphics->topPx
                 );
             }
         }
@@ -1817,49 +1835,51 @@ void redraw(HWND window) {
     DeleteDC(selectionMemory);
     DeleteDC(labelMemory);
     DeleteDC(earMemory);
-    ReleaseDC(window, device);
+    ReleaseDC(graphics->window, device);
     POINT screenPosition = {
-        graphics.leftPx, graphics.topPx + graphics.topCrop
+        graphics->leftPx, graphics->topPx + graphics->topCrop
     };
     SIZE screenSize = {
-        graphics.widthPx,
-        graphics.heightPx - graphics.bottomCrop - graphics.topCrop
+        graphics->widthPx,
+        graphics->heightPx - graphics->bottomCrop - graphics->topCrop
     };
-    POINT memoryPosition = { 0, graphics.topCrop };
+    POINT memoryPosition = { 0, graphics->topCrop };
     UpdateLayeredWindow(
-        window,
+        graphics->window,
         device,
         &screenPosition,
         &screenSize,
         memory,
         &memoryPosition,
-        model->colorKey,
+        graphics->colorKey,
         NULL,
         ULW_COLORKEY
     );
     for (
-        int i = graphics.labelRange.start; i < graphics.labelRange.stop; i++
+        int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
     ) {
         Point positionPt = getBubblePositionPt(
-            model, widthPt, heightPt, labels.count, i
+            graphics->marginSize, graphics->edge1, graphics->edge2,
+            graphics->offsetPt, graphics->dialog, widthPt, heightPt,
+            labels.count, i
         );
-        BOOL xFlip = widthPt - positionPt.x <= model->mirrorWidthPt;
-        BOOL yFlip = heightPt - positionPt.y <= model->mirrorHeightPt;
+        BOOL xFlip = widthPt - positionPt.x <= graphics->mirrorWidthPt;
+        BOOL yFlip = heightPt - positionPt.y <= graphics->mirrorHeightPt;
         POINT positionPx = {
-            .x = ptToIntPx(positionPt.x, graphics.dpi),
-            .y = ptToIntPx(positionPt.y, graphics.dpi),
+            .x = ptToIntPx(positionPt.x, graphics->dpi),
+            .y = ptToIntPx(positionPt.y, graphics->dpi),
         };
         clampToRect(client, &positionPx);
         RECT dstRect = labelRects[i];
         OffsetRect(
             &dstRect,
             positionPx.x + (
-                xFlip ? 1 - borderPx - dstRect.right
-                    : borderPx - dstRect.left
+                xFlip ? 1 - graphics->borderPx - dstRect.right
+                    : graphics->borderPx - dstRect.left
             ),
             positionPx.y + (
-                yFlip ? 1 - earElevationPx - dstRect.bottom
-                    : earElevationPx - dstRect.top
+                yFlip ? 1 - graphics->earElevationPx - dstRect.bottom
+                    : graphics->earElevationPx - dstRect.top
             )
         );
         FillRect(memory, &dstRect, keyBrush);
@@ -1872,36 +1892,36 @@ void redraw(HWND window) {
         FillRect(memory, &earRect, keyBrush);
     }
 
-    if (graphics.dragCount > 0) {
+    if (graphics->dragCount > 0) {
         SelectObject(
             memory,
             getPen(
-                model->colorKey,
-                borderPx,
+                graphics->colorKey,
+                graphics->borderPx,
                 BOTH_DASH_PEN_STYLE,
-                dashPx,
+                graphics->dashPx,
                 ERASE_DRAG_PEN_SLOT
             )
         );
         MoveToEx(
             memory,
-            graphics.drag[0].x - graphics.leftPx,
-            graphics.drag[0].y - graphics.topPx,
+            graphics->drag[0].x - graphics->leftPx,
+            graphics->drag[0].y - graphics->topPx,
             NULL
         );
-        for (int j = 1; j < graphics.dragCount; j++) {
+        for (int j = 1; j < graphics->dragCount; j++) {
             LineTo(
                 memory,
-                graphics.drag[j].x - graphics.leftPx,
-                graphics.drag[j].y - graphics.topPx
+                graphics->drag[j].x - graphics->leftPx,
+                graphics->drag[j].y - graphics->topPx
             );
         }
 
-        if (graphics.dragCount < 3) {
+        if (graphics->dragCount < 3) {
             LineTo(
                 memory,
-                lastCursorPos.x - graphics.leftPx,
-                lastCursorPos.y - graphics.topPx
+                lastCursorPos.x - graphics->leftPx,
+                lastCursorPos.y - graphics->topPx
             );
         }
     }
@@ -1909,6 +1929,18 @@ void redraw(HWND window) {
     // FillRect(memory, &labelBitmapRect, keyBrush);
 
     DeleteDC(memory);
+}
+
+Model *getModel(HWND window) {
+    Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
+    if (model) { return model; }
+    HWND owner = GetWindowOwner(window);
+    if (owner) {
+        model = (Model*)GetWindowLongPtr(owner, GWLP_USERDATA);
+        SetWindowLongPtr(window, GWLP_USERDATA, (LONG)model);
+    }
+
+    return model;
 }
 
 BOOL skipHitTest = FALSE;
@@ -1943,12 +1975,13 @@ LRESULT CALLBACK WndProc(
             bounds->bottom - bounds->top,
             SWP_NOZORDER | SWP_NOACTIVATE
         );
-        redraw(window);
+        redraw(getGraphics(getModel(window)));
         return 0;
     } else if (message == WM_SETTINGCHANGE) {
         if (wParam == SPI_SETNONCLIENTMETRICS) {
-            getModel(window)->systemFontChanges++;
-            redraw(window);
+            Model *model = getModel(window);
+            model->systemFontChanges++;
+            redraw(getGraphics(model));
             return 0;
         }
     } else if (message == WM_DESTROY) {
@@ -2365,7 +2398,7 @@ LRESULT CALLBACK DlgProc(
                     model->offsetPt.y
                         += yDirection * pxToPt(model->deltaPx, dpi);
                 }
-                redraw(model->window);
+                redraw(getGraphics(model));
                 return TRUE;
             } else if (command == IDM_CLICK) {
                 POINT cursor;
@@ -2495,7 +2528,7 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
-                redraw(GetWindowOwner(dialog));
+                redraw(getGraphics(getModel(dialog)));
                 return TRUE;
             }
         }
@@ -2645,7 +2678,7 @@ int CALLBACK WinMain(
     );
     SetWindowLongPtr(model.window, GWLP_USERDATA, (LONG)&model);
     model.dialog = CreateDialog(hInstance, L"TOOL", model.window, DlgProc);
-    redraw(model.window);
+    redraw(getGraphics(&model));
 
     MSG message;
     while (GetMessage(&message, NULL, 0, 0)) {
