@@ -2618,6 +2618,7 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
                 Model *model = getModel(dialog);
+                TextPath path = getTextPath(model->text);
                 Graphics *graphics = getGraphics(model);
                 if (graphics->labelRange.matchLength > 0) {
                     POINT cursorPos = getBubblePositionPx(
@@ -2641,6 +2642,20 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 redraw(graphics);
+                if (path.removePath) {
+                    HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+                    DWORD start, stop;
+                    SendMessage(
+                        textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop
+                    );
+                    int delta = wcslen(path.suffix) - wcslen(model->text);
+                    SetWindowText(textBox, path.suffix);
+                    SendMessage(
+                        textBox, EM_SETSEL,
+                        max(0, start + delta), max(0, stop + delta)
+                    );
+                }
+
                 return TRUE;
             }
         }
