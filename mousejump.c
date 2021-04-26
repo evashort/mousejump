@@ -2529,6 +2529,12 @@ LRESULT CALLBACK DlgProc(
                     };
                     SendInput(2, click, sizeof(INPUT));
                     SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
+                } else if (erase && model->dragCount > 0) {
+                    SetDlgItemText(dialog, IDC_TEXTBOX, L"-");
+                    SendMessage(
+                        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
+                        1, 1
+                    );
                 } else {
                     SetDlgItemText(dialog, IDC_TEXTBOX, L"");
                 }
