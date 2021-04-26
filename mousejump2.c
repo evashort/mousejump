@@ -278,6 +278,19 @@ typedef struct {
     int matchLength;
 } LabelRange;
 LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
+    LPWSTR node = L","; int nodeLength = wcslen(node);
+    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
+    if (!wcsncmp(text, node, nodeLength)) {
+        text += nodeLength;
+        while (TRUE) {
+            if (!wcsncmp(text, node, nodeLength)) { text += nodeLength; }
+            else if (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
+            else { break; }
+        }
+    } else {
+        while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
+    }
+
     int start = 0;
     int stop = labels.count;
     int textLength = wcslen(text);
@@ -2027,6 +2040,49 @@ void applyMinDialogSize(HWND dialog) {
     );
 }
 
+typedef struct {
+    int nodeCount;
+    LPWSTR suffix;
+    BOOL removePath;
+} TextPath;
+TextPath getTextPath(LPWSTR text) {
+    LPWSTR node = L","; int nodeLength = wcslen(node);
+    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
+    TextPath path = { .nodeCount = 0, .suffix = text };
+    while (!wcsncmp(text, node, nodeLength)) {
+        path.nodeCount++;
+        text += nodeLength;
+        while (!wcsncmp(text, node, nodeLength)) { text += nodeLength; }
+        path.suffix = text;
+        while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
+    }
+
+    path.removePath = path.nodeCount > 0 && text[0] != L'\0';
+    return path;
+}
+
+LPWSTR setNaturalEdge(LPWSTR text, BOOL naturalEdge) {
+    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
+    text = getTextPath(text).suffix;
+    if (!naturalEdge) {
+        while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
+    } else if (wcsncmp(text, edge, edgeLength)) {
+        int length = wcslen(text);
+        int capacity = edgeLength + length + 1;
+        LPWSTR newText = getText(capacity, TEMP_TEXT_SLOT);
+        wcsncpy_s(newText, capacity, edge, edgeLength + 1);
+        wcsncpy_s(newText + edgeLength, length + 1, text, length + 1);
+        text = newText;
+    }
+
+    return text;
+}
+
+LPWSTR removeNodes(LPWSTR text) {
+    LPWSTR node = L","; int nodeLength = wcslen(node);
+    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
+}
+
 void setMatchPoint(Model *model, POINT matchPoint) {
     POINT cursorPos;
     GetCursorPos(&cursorPos);
@@ -2044,7 +2100,10 @@ void setMatchPoint(Model *model, POINT matchPoint) {
 }
 
 void unsetMatchPoint(Model *model) {
-    if (model->dragCount > 0 && wcsncmp(model->text, L"-", 1)) {
+    if (
+        model->dragCount > 0
+            && wcsncmp(getTextPath(model->text).suffix, L"-", 1)
+    ) {
         POINT dragEnd = model->drag[model->dragCount - 1];
         SetCursorPos(dragEnd.x, dragEnd.y);
         GetCursorPos(&model->naturalPoint);
@@ -2397,51 +2456,19 @@ LRESULT CALLBACK DlgProc(
                     if (model->dragCount > 0) {
                         GetCursorPos(&model->naturalPoint);
                         POINT dragEnd = model->drag[model->dragCount - 1];
-                        LPWSTR prefix = L"-";
-                        int length = wcslen(model->text);
-                        int prefixLength = wcslen(prefix);
-                        int capacity = 0;
-                        LPWSTR newText = NULL;
-                        if (
-                            model->naturalPoint.x == dragEnd.x
-                                && model->naturalPoint.y == dragEnd.y
-                        ) {
-                            int offset = 0;
-                            while (
-                                !wcsncmp(
-                                    model->text + offset, prefix, prefixLength
-                                )
-                            ) { offset += prefixLength; }
-                            if (offset > 0) {
-                                capacity = length + 1 - offset;
-                                newText = getText(capacity, TEMP_TEXT_SLOT);
-                                wcsncpy_s(
-                                    newText, capacity,
-                                    model->text + offset, capacity
-                                );
-                            }
-                        } else if (
-                            wcsncmp(model->text, prefix, prefixLength)
-                        ) {
-                            capacity = prefixLength + length + 1;
-                            newText = getText(capacity, TEMP_TEXT_SLOT);
-                            wcsncpy_s(
-                                newText, capacity, prefix, prefixLength + 1
-                            );
-                            wcsncpy_s(
-                                newText + prefixLength, length + 1,
-                                model->text, length + 1
-                            );
-                        }
-
-                        if (newText) {
+                        LPWSTR newText = setNaturalEdge(
+                            model->text,
+                            model->naturalPoint.x != dragEnd.x
+                                || model->naturalPoint.y != dragEnd.y
+                        );
+                        if (newText != model->text) {
                             HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                             DWORD start, stop;
                             SendMessage(
                                 textBox, EM_GETSEL,
                                 (WPARAM)&start, (LPARAM)&stop
                             );
-                            int delta = capacity - length - 1;
+                            int delta = wcslen(newText) - wcslen(model->text);
                             SetWindowText(textBox, newText);
                             SendMessage(
                                 textBox, EM_SETSEL,
