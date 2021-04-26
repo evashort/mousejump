@@ -2664,6 +2664,9 @@ LRESULT CALLBACK DlgProc(
                                 || !wcsncmp(path.suffix, L"-", 1)
                         ) {
                             model->naturalPoint = model->drag[path.nodeCount];
+                            SetCursorPos(
+                                model->naturalPoint.x, model->naturalPoint.y
+                            );
                         } else {
                             model->naturalPoint
                                 = model->drag[path.nodeCount - 1];
