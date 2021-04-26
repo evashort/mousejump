@@ -762,46 +762,28 @@ int nextPowerOf2(int n, int start) {
     return result;
 }
 
-struct { LPWSTR text; int capacity; } textBoxTextOut = { .text = NULL };
-LPWSTR reserveTextBoxText(LPWSTR text, int capacity) {
-    int oldCapacity = textBoxTextOut.text ? textBoxTextOut.capacity : 0;
-    capacity = nextPowerOf2(capacity, 64);
-    if (capacity > oldCapacity) {
-        BOOL copy = text != textBoxTextOut.text;
-        textBoxTextOut.text = (LPWSTR)realloc(
-            textBoxTextOut.text, capacity * sizeof(WCHAR)
+const int MODEL_TEXT_SLOT = 0;
+const int TEMP_TEXT_SLOT = 1;
+#define TEXT_SLOT_COUNT 2
+int textsIn[TEXT_SLOT_COUNT] = { 0, 0 };
+LPWSTR textsOut[TEXT_SLOT_COUNT] = { NULL, NULL };
+LPWSTR getText(int capacity, int slot) {
+    if (textsIn[slot] < capacity) {
+        textsIn[slot] = nextPowerOf2(capacity, 64);
+        textsOut[slot] = realloc(
+            textsOut[slot], textsIn[slot] * sizeof(WCHAR)
         );
-        textBoxTextOut.capacity = capacity;
-        if (copy) { wcscpy_s(textBoxTextOut.text, capacity, text); }
-        return textBoxTextOut.text;
     }
 
-    return text;
+    return textsOut[slot];
 }
+
 
 LPWSTR getTextBoxText(HWND textBox) {
     int capacity = GetWindowTextLength(textBox) + 1;
-    LPWSTR text = reserveTextBoxText(textBoxTextOut.text, capacity);
+    LPWSTR text = getText(capacity, MODEL_TEXT_SLOT);
     GetWindowText(textBox, text, capacity);
     return text;
-}
-
-LPWSTR togglePrefix(LPWSTR *text, LPCWSTR prefix, BOOL enabled) {
-    int prefixLength = wcslen(prefix);
-    LPWSTR newText = *text;
-    if (!enabled) {
-        while (!wcsncmp(newText, prefix, prefixLength)) {
-            newText += prefixLength;
-        }
-    } else if (wcsncmp(*text, prefix, prefixLength)) {
-        int oldCapacity = wcslen(*text) + 1;
-        newText = reserveTextBoxText(*text, prefixLength + oldCapacity);
-        *text = newText + prefixLength;
-        wmemmove_s(*text, oldCapacity, newText, oldCapacity);
-        wcsncpy(newText, prefix, prefixLength);
-    }
-
-    return newText;
 }
 
 #pragma endregion
@@ -1379,7 +1361,7 @@ void destroyCache() {
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
     DeleteObject(dropdownBitmapOut);
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
-    free(textBoxTextOut.text);
+    for (int i = 0; i < TEXT_SLOT_COUNT; i++) { free(textsOut[i]); }
     free(edgeCellsOut.edgeCells);
     free(spineOut.oldSpine.ribStarts);
     free(spineOut.newSpine.ribStarts);
@@ -2415,20 +2397,51 @@ LRESULT CALLBACK DlgProc(
                     if (model->dragCount > 0) {
                         GetCursorPos(&model->naturalPoint);
                         POINT dragEnd = model->drag[model->dragCount - 1];
-                        LPWSTR newText = togglePrefix(
-                            &model->text,
-                            L"-",
-                            model->naturalPoint.x != dragEnd.x
-                                || model->naturalPoint.y != dragEnd.y
-                        );
-                        if (newText != model->text) {
+                        LPWSTR prefix = L"-";
+                        int length = wcslen(model->text);
+                        int prefixLength = wcslen(prefix);
+                        int capacity = 0;
+                        LPWSTR newText = NULL;
+                        if (
+                            model->naturalPoint.x == dragEnd.x
+                                && model->naturalPoint.y == dragEnd.y
+                        ) {
+                            int offset = 0;
+                            while (
+                                !wcsncmp(
+                                    model->text + offset, prefix, prefixLength
+                                )
+                            ) { offset += prefixLength; }
+                            if (offset > 0) {
+                                capacity = length + 1 - offset;
+                                newText = getText(capacity, TEMP_TEXT_SLOT);
+                                wcsncpy_s(
+                                    newText, capacity,
+                                    model->text + offset, capacity
+                                );
+                            }
+                        } else if (
+                            wcsncmp(model->text, prefix, prefixLength)
+                        ) {
+                            capacity = prefixLength + length + 1;
+                            newText = getText(capacity, TEMP_TEXT_SLOT);
+                            wcsncpy_s(
+                                newText, capacity, prefix, prefixLength + 1
+                            );
+                            wcsncpy_s(
+                                newText + prefixLength, length + 1,
+                                model->text, length + 1
+                            );
+                        }
+
+                        if (newText) {
                             HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                             DWORD start, stop;
                             SendMessage(
                                 textBox, EM_GETSEL,
                                 (WPARAM)&start, (LPARAM)&stop
                             );
-                            int delta = wcslen(newText) - wcslen(model->text);
+                            int delta = capacity - length - 1;
                             SetWindowText(textBox, newText);
                             SendMessage(
                                 textBox, EM_SETSEL,
