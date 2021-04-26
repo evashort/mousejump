@@ -1425,6 +1425,7 @@ typedef struct {
     BOOL hasMatch;
     int dragCount;
     POINT drag[3];
+    BOOL showingPath;
 } Model;
 
 double sqrtAspectIn = 0;
@@ -2043,7 +2044,7 @@ void applyMinDialogSize(HWND dialog) {
 typedef struct {
     int nodeCount;
     LPWSTR suffix;
-    BOOL removePath;
+    BOOL hidePath;
 } TextPath;
 TextPath getTextPath(LPWSTR text) {
     LPWSTR node = L","; int nodeLength = wcslen(node);
@@ -2057,8 +2058,29 @@ TextPath getTextPath(LPWSTR text) {
         while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
     }
 
-    path.removePath = path.nodeCount > 0 && text[0] != L'\0';
+    path.hidePath = path.nodeCount > 0 && text[0] != L'\0';
     return path;
+}
+
+LPWSTR textFromPath(int nodeCount, LPWSTR suffix) {
+    if (nodeCount <= 0) { return suffix; }
+    LPWSTR node = L","; int nodeLength = wcslen(node);
+    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
+    int suffixLength = wcslen(suffix);
+    int capacity = (nodeLength + edgeLength) * nodeCount - edgeLength
+        + suffixLength + 1;
+    LPWSTR text = getText(capacity, TEMP_TEXT_SLOT);
+    wcsncpy_s(text, capacity, node, nodeLength + 1);
+    for (int i = 0; i < nodeCount - 1; i++) {
+        int offset = nodeLength + i * (nodeLength + edgeLength);
+        wcsncpy_s(text + offset, capacity - offset, edge, edgeLength + 1);
+        offset += edgeLength;
+        wcsncpy_s(text + offset, capacity - offset, node, nodeLength + 1);
+    }
+
+    int offset = (nodeLength + edgeLength) * nodeCount - edgeLength;
+    wcsncpy_s(text + offset, capacity - offset, suffix, suffixLength + 1);
+    return text;
 }
 
 LPWSTR setNaturalEdge(LPWSTR text, BOOL naturalEdge) {
@@ -2076,11 +2098,6 @@ LPWSTR setNaturalEdge(LPWSTR text, BOOL naturalEdge) {
     }
 
     return text;
-}
-
-LPWSTR removeNodes(LPWSTR text) {
-    LPWSTR node = L","; int nodeLength = wcslen(node);
-    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
 }
 
 void setMatchPoint(Model *model, POINT matchPoint) {
@@ -2352,7 +2369,10 @@ LRESULT CALLBACK DlgProc(
             KillTimer(dialog, wParam);
             Model *model = getModel(dialog);
             ShowWindow(model->window, SW_SHOWNORMAL);
-            SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+            if (!model->showingPath) {
+                SetDlgItemText(dialog, IDC_TEXTBOX, L"");
+            }
+
             return TRUE;
         }
     } else if (message == WM_NCHITTEST && skipHitTest) {
@@ -2462,6 +2482,7 @@ LRESULT CALLBACK DlgProc(
                                 || model->naturalPoint.y != dragEnd.y
                         );
                         if (newText != model->text) {
+                            model->showingPath = FALSE;
                             HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                             DWORD start, stop;
                             SendMessage(
@@ -2543,16 +2564,30 @@ LRESULT CALLBACK DlgProc(
                     erase = start.x == end.x && start.y == end.y;
                 }
 
+                LPWSTR newText = NULL;
                 BOOL click = FALSE;
                 if (erase) {
-                    model->dragCount--;
+                    if (model->dragCount <= 1) {
+                        newText = L"";
+                    } else {
+                        newText = textFromPath(model->dragCount - 1, L"-");
+                    }
                 } else if (model->dragCount < 3) {
-                    GetCursorPos(&model->naturalPoint);
-                    model->drag[model->dragCount] = model->naturalPoint;
-                    model->dragCount++;
-                    click = model->dragCount == 2;
+                    newText = textFromPath(model->dragCount + 1, L"");
+                    click = model->dragCount == 1;
                 } else {
+                    newText = textFromPath(model->dragCount, L"");
                     click = TRUE;
+                }
+
+                if (newText) {
+                    int length = wcslen(newText);
+                    model->showingPath = TRUE;
+                    SetDlgItemText(dialog, IDC_TEXTBOX, newText);
+                    SendMessage(
+                        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
+                        length, length
+                    );
                 }
 
                 if (click) {
@@ -2569,14 +2604,6 @@ LRESULT CALLBACK DlgProc(
                     };
                     SendInput(2, click, sizeof(INPUT));
                     SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
-                } else if (erase && model->dragCount > 0) {
-                    SetDlgItemText(dialog, IDC_TEXTBOX, L"-");
-                    SendMessage(
-                        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
-                        1, 1
-                    );
-                } else {
-                    SetDlgItemText(dialog, IDC_TEXTBOX, L"");
                 }
 
                 return TRUE;
@@ -2619,6 +2646,31 @@ LRESULT CALLBACK DlgProc(
             } else if (HIWORD(wParam) == EN_CHANGE) {
                 Model *model = getModel(dialog);
                 TextPath path = getTextPath(model->text);
+                model->showingPath = model->showingPath || path.nodeCount > 0;
+                if (model->showingPath) {
+                    if (path.nodeCount > model->dragCount) {
+                        POINT start = model->drag[model->dragCount - 1];
+                        POINT end;
+                        GetCursorPos(&end);
+                        if (start.x != end.x || start.y != end.y) {
+                            model->naturalPoint = end;
+                            model->drag[model->dragCount] = end;
+                            model->dragCount++;
+                        }
+                    } else if (path.nodeCount < model->dragCount) {
+                        model->dragCount = path.nodeCount;
+                        if (
+                            path.nodeCount <= 0
+                                || !wcsncmp(path.suffix, L"-", 1)
+                        ) {
+                            model->naturalPoint = model->drag[path.nodeCount];
+                        } else {
+                            model->naturalPoint
+                                = model->drag[path.nodeCount - 1];
+                        }
+                    }
+                }
+
                 Graphics *graphics = getGraphics(model);
                 if (graphics->labelRange.matchLength > 0) {
                     POINT cursorPos = getBubblePositionPx(
@@ -2642,14 +2694,22 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 redraw(graphics);
-                if (path.removePath) {
+                LPWSTR newText = NULL;
+                if (path.hidePath) {
+                    model->showingPath = FALSE;
+                    newText = path.suffix;
+                } else if (path.nodeCount > model->dragCount) {
+                    newText = textFromPath(model->dragCount, path.suffix);
+                }
+
+                if (newText) {
                     HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                     DWORD start, stop;
                     SendMessage(
                         textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop
                     );
-                    int delta = wcslen(path.suffix) - wcslen(model->text);
-                    SetWindowText(textBox, path.suffix);
+                    int delta = wcslen(newText) - wcslen(model->text);
+                    SetWindowText(textBox, newText);
                     SendMessage(
                         textBox, EM_SETSEL,
                         max(0, start + delta), max(0, stop + delta)
@@ -2768,6 +2828,7 @@ int CALLBACK WinMain(
         .text = L"",
         .hasMatch = FALSE,
         .dragCount = 0,
+        .showingPath = FALSE,
     };
 
     WNDCLASS windowClass = {
