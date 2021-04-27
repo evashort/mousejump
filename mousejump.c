@@ -2739,11 +2739,6 @@ int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
             if (GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX)) {
                 return 0;
             }
-        } else if (message->wParam == VK_BACK && !getModifiers()) {
-            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-            if (GetFocus() != textBox || GetWindowTextLength(textBox) > 0) {
-                return 0;
-            }
         } else if (
             message->wParam == VK_LEFT || message->wParam == VK_RIGHT
         ) {
