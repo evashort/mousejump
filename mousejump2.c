@@ -1753,38 +1753,33 @@ void redraw(Graphics *graphics) {
         }
     }
 
+    POINT dragPoints[7];
     if (graphics->dragCount > 0) {
+        dragPoints[0] = graphics->drag[0];
+        for (int i = 0; i < graphics->dragCount - 1; i++) {
+            dragPoints[3 * i + 1] = graphics->drag[i];
+            dragPoints[3 * i + 2] = graphics->drag[i + 1];
+            dragPoints[3 * i + 3] = graphics->drag[i + 1];
+        }
+
+        for (int i = 0; i < 3 * graphics->dragCount - 2; i++) {
+            dragPoints[i].x -= graphics->leftPx;
+            dragPoints[i].y -= graphics->topPx;
+        }
+
         HPEN pens[2] = {
             getPen(
-                graphics->labelBackground,
-                graphics->borderPx,
-                DASH_PEN_STYLE,
-                graphics->dashPx,
-                DRAG_PEN_SLOT
+                graphics->labelBackground, graphics->borderPx,
+                DASH_PEN_STYLE, graphics->dashPx, DRAG_PEN_SLOT
             ),
             getPen(
-                graphics->borderColor,
-                graphics->borderPx,
-                ALT_DASH_PEN_STYLE,
-                graphics->dashPx,
-                ALT_DRAG_PEN_SLOT
+                graphics->borderColor, graphics->borderPx,
+                ALT_DASH_PEN_STYLE, graphics->dashPx, ALT_DRAG_PEN_SLOT
             ),
         };
         for (int i = 0; i < 2; i++) {
             SelectObject(memory, pens[i]);
-            MoveToEx(
-                memory,
-                graphics->drag[0].x - graphics->leftPx,
-                graphics->drag[0].y - graphics->topPx,
-                NULL
-            );
-            for (int j = 1; j < graphics->dragCount; j++) {
-                LineTo(
-                    memory,
-                    graphics->drag[j].x - graphics->leftPx,
-                    graphics->drag[j].y - graphics->topPx
-                );
-            }
+            PolyBezier(memory, dragPoints, 3 * graphics->dragCount - 2);
         }
     }
 
@@ -1843,26 +1838,11 @@ void redraw(Graphics *graphics) {
         SelectObject(
             memory,
             getPen(
-                graphics->colorKey,
-                graphics->borderPx,
-                BOTH_DASH_PEN_STYLE,
-                graphics->dashPx,
-                ERASE_DRAG_PEN_SLOT
+                graphics->colorKey, graphics->borderPx,
+                BOTH_DASH_PEN_STYLE, graphics->dashPx, ERASE_DRAG_PEN_SLOT
             )
         );
-        MoveToEx(
-            memory,
-            graphics->drag[0].x - graphics->leftPx,
-            graphics->drag[0].y - graphics->topPx,
-            NULL
-        );
-        for (int j = 1; j < graphics->dragCount; j++) {
-            LineTo(
-                memory,
-                graphics->drag[j].x - graphics->leftPx,
-                graphics->drag[j].y - graphics->topPx
-            );
-        }
+        PolyBezier(memory, dragPoints, 3 * graphics->dragCount - 2);
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
