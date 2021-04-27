@@ -1478,7 +1478,8 @@ typedef struct {
     int dragCount;
     POINT drag[3];
 } Graphics;
-Graphics graphicsOut;
+Graphics graphicsOut[2] = { { .window = NULL }, { .window = NULL } };
+int graphicsOutIndex = 1;
 Graphics *getGraphics(Model *model) {
     MONITORINFO monitorInfo;
     ZeroMemory(&monitorInfo, sizeof(monitorInfo));
@@ -1533,54 +1534,55 @@ Graphics *getGraphics(Model *model) {
         model->angle1, model->angle2, model->aspect,
         sqrtCellArea * sqrtCellArea, &edge1, &edge2
     );
-    ZeroMemory(&graphicsOut, sizeof(graphicsOut));
-    graphicsOut.window = model->window;
-    graphicsOut.dialog = model->dialog;
-    graphicsOut.offsetPt = model->offsetPt;
-    graphicsOut.dpi = dpi;
-    graphicsOut.fontHeightPt = model->fontHeightPt;
-    wcsncpy(graphicsOut.fontFamily, model->fontFamily, LF_FACESIZE);
-    graphicsOut.systemFontChanges = model->systemFontChanges;
-    graphicsOut.leftPx = monitorInfo.rcMonitor.left;
-    graphicsOut.topPx = monitorInfo.rcMonitor.top;
-    graphicsOut.widthPx = widthPx;
-    graphicsOut.heightPx = heightPx;
-    graphicsOut.topCrop = topCrop;
-    graphicsOut.bottomCrop = bottomCrop;
-    graphicsOut.bubbleCount = bubbleCount;
-    graphicsOut.labelRange = getLabelRange(model->text, labels);
-    graphicsOut.marginSize = marginSize;
-    graphicsOut.edge1 = edge1;
-    graphicsOut.edge2 = edge2;
-    graphicsOut.colorKey = model->colorKey;
-    graphicsOut.labelBackground = model->labelBackground;
-    graphicsOut.selectionBackground = model->selectionBackground;
-    graphicsOut.borderColor = model->borderColor;
-    graphicsOut.paddingPx.left = ptToThinPx(model->paddingLeftPt, dpi),
-    graphicsOut.paddingPx.top = ptToThinPx(model->paddingTopPt, dpi),
-    graphicsOut.paddingPx.right = ptToThinPx(model->paddingRightPt, dpi),
-    graphicsOut.paddingPx.bottom = ptToThinPx(model->paddingBottomPt, dpi),
-    graphicsOut.borderPx = ptToThinPx(model->borderPt, dpi);
-    graphicsOut.earHeightPx = ptToIntPx(model->earHeightPt, dpi);
-    graphicsOut.earElevationPx = ptToIntPx(model->earElevationPt, dpi);
-    graphicsOut.dashPx = ptToIntPx(model->dashPt, dpi);
-    graphicsOut.mirrorStart.x = widthPx
+    Graphics *graphics = &graphicsOut[graphicsOutIndex];
+    ZeroMemory(graphics, sizeof(Graphics));
+    graphics->window = model->window;
+    graphics->dialog = model->dialog;
+    graphics->offsetPt = model->offsetPt;
+    graphics->dpi = dpi;
+    graphics->fontHeightPt = model->fontHeightPt;
+    wcsncpy(graphics->fontFamily, model->fontFamily, LF_FACESIZE);
+    graphics->systemFontChanges = model->systemFontChanges;
+    graphics->leftPx = monitorInfo.rcMonitor.left;
+    graphics->topPx = monitorInfo.rcMonitor.top;
+    graphics->widthPx = widthPx;
+    graphics->heightPx = heightPx;
+    graphics->topCrop = topCrop;
+    graphics->bottomCrop = bottomCrop;
+    graphics->bubbleCount = bubbleCount;
+    graphics->labelRange = getLabelRange(model->text, labels);
+    graphics->marginSize = marginSize;
+    graphics->edge1 = edge1;
+    graphics->edge2 = edge2;
+    graphics->colorKey = model->colorKey;
+    graphics->labelBackground = model->labelBackground;
+    graphics->selectionBackground = model->selectionBackground;
+    graphics->borderColor = model->borderColor;
+    graphics->paddingPx.left = ptToThinPx(model->paddingLeftPt, dpi),
+    graphics->paddingPx.top = ptToThinPx(model->paddingTopPt, dpi),
+    graphics->paddingPx.right = ptToThinPx(model->paddingRightPt, dpi),
+    graphics->paddingPx.bottom = ptToThinPx(model->paddingBottomPt, dpi),
+    graphics->borderPx = ptToThinPx(model->borderPt, dpi);
+    graphics->earHeightPx = ptToIntPx(model->earHeightPt, dpi);
+    graphics->earElevationPx = ptToIntPx(model->earElevationPt, dpi);
+    graphics->dashPx = ptToIntPx(model->dashPt, dpi);
+    graphics->mirrorStart.x = widthPx
         - ptToIntPx(model->mirrorWidthPt, dpi);
-    graphicsOut.mirrorStart.y = heightPx
+    graphics->mirrorStart.y = heightPx
         - ptToIntPx(model->mirrorHeightPt, dpi);
     if (model->dragCount > 0) {
-        graphicsOut.dragCount = min(model->dragCount + 1, 3);
+        graphics->dragCount = min(model->dragCount + 1, 3);
         for (int i = 0; i < model->dragCount; i++) {
-            graphicsOut.drag[i] = model->drag[i];
+            graphics->drag[i] = model->drag[i];
         }
 
-        if (graphicsOut.dragCount > model->dragCount) {
-            graphicsOut.drag[model->dragCount] = model->hasMatch
+        if (graphics->dragCount > model->dragCount) {
+            graphics->drag[model->dragCount] = model->hasMatch
                 ? model->matchPoint : model->naturalPoint;
         }
     }
 
-    return &graphicsOut;
+    return graphics;
 }
 
 POINT getBubblePositionPx(Graphics *graphics, int index) {
@@ -1607,33 +1609,15 @@ POINT getBubblePositionPx(Graphics *graphics, int index) {
     return positionPx;
 }
 
-Graphics lastGraphics = {
-    .window = NULL, .dialog = NULL,
-    .offsetPt = { 0, 0 },
-    .dpi = 0,
-    .fontHeightPt = 0,
-    .fontFamily = L"",
-    .systemFontChanges = 0,
-    .leftPx = 0, .topPx = 0, .widthPx = 0, .heightPx = 0,
-    .topCrop = 0, .bottomCrop = 0,
-    .bubbleCount = 0,
-    .labelRange = { 0, 0, 0 },
-    .marginSize = { 0, 0 }, .edge1 = { 0, 0 }, .edge2 = { 0, 0 },
-    .colorKey = 0,
-    .labelBackground = 0, .selectionBackground = 0, .borderColor = 0,
-    .paddingPx = { 0, 0, 0, 0 },
-    .borderPx = 0, .earHeightPx = 0, .earElevationPx = 0, .dashPx = 0,
-    .mirrorStart = { 0, 0 },
-    .dragCount = 0,
-    .drag = { { 0, 0 }, { 0, 0 }, { 0, 0 } },
-};
+Graphics *lastGraphics = &graphicsOut[0];
 void redraw(Graphics *graphics) {
-    if (!memcmp(graphics, &lastGraphics, sizeof(Graphics))) {
+    if (!memcmp(graphics, lastGraphics, sizeof(Graphics))) {
         return;
     }
 
-    ZeroMemory(&lastGraphics, sizeof(graphics));
-    lastGraphics = *graphics;
+    lastGraphics = graphics;
+    graphicsOutIndex++;
+    graphicsOutIndex %= 2;
 
     double widthPt = intPxToPt(graphics->widthPx, graphics->dpi);
     double heightPt = intPxToPt(graphics->heightPx, graphics->dpi);
@@ -1642,7 +1626,8 @@ void redraw(Graphics *graphics) {
     HDC memory = CreateCompatibleDC(device);
     HBRUSH keyBrush = getBrush(graphics->colorKey, KEY_BRUSH_SLOT);
     selectKeyBitmap(
-        device, memory, graphics->widthPx, graphics->heightPx, graphics->colorKey
+        device, memory,
+        graphics->widthPx, graphics->heightPx, graphics->colorKey
     );
     HDC labelMemory = CreateCompatibleDC(device);
     SelectObject(
@@ -1670,7 +1655,9 @@ void redraw(Graphics *graphics) {
         )
     );
     SetBkColor(selectionMemory, graphics->selectionBackground);
-    SetTextColor(selectionMemory, getTextColor(graphics->selectionBackground));
+    SetTextColor(
+        selectionMemory, getTextColor(graphics->selectionBackground)
+    );
     RECT *selectionRects = selectSelectionBitmap(
         device, selectionMemory, graphics->bubbleCount
     );
@@ -2452,6 +2439,7 @@ LRESULT CALLBACK DlgProc(
                         * pxToPt(model->deltaPx, graphics->dpi);
                 }
 
+                LPWSTR newText = model->text;
                 if (graphics->labelRange.matchLength > 0) {
                     graphics->offsetPt = model->offsetPt;
                     POINT cursorPos = getBubblePositionPx(
@@ -2476,35 +2464,35 @@ LRESULT CALLBACK DlgProc(
                     if (model->dragCount > 0) {
                         GetCursorPos(&model->naturalPoint);
                         POINT dragEnd = model->drag[model->dragCount - 1];
-                        LPWSTR newText = setNaturalEdge(
+                        newText = setNaturalEdge(
                             model->text,
                             model->naturalPoint.x != dragEnd.x
                                 || model->naturalPoint.y != dragEnd.y
                         );
-                        if (newText != model->text) {
-                            model->showingPath = FALSE;
-                            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-                            DWORD start, stop;
-                            SendMessage(
-                                textBox, EM_GETSEL,
-                                (WPARAM)&start, (LPARAM)&stop
-                            );
-                            int delta = wcslen(newText) - wcslen(model->text);
-                            SetWindowText(textBox, newText);
-                            SendMessage(
-                                textBox, EM_SETSEL,
-                                start + delta, stop + delta
-                            );
-                        }
                     }
                 }
 
-                if (graphics->dragCount > model->dragCount) {
-                    graphics->drag[model->dragCount] = model->hasMatch
-                        ? model->matchPoint : model->naturalPoint;
+                if (newText != model->text) {
+                    model->showingPath = FALSE;
+                    HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+                    DWORD start, stop;
+                    SendMessage(
+                        textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop
+                    );
+                    int delta = wcslen(newText) - wcslen(model->text);
+                    SetWindowText(textBox, newText);
+                    SendMessage(
+                        textBox, EM_SETSEL, start + delta, stop + delta
+                    );
+                } else {
+                    if (graphics->dragCount > model->dragCount) {
+                        graphics->drag[model->dragCount] = model->hasMatch
+                            ? model->matchPoint : model->naturalPoint;
+                    }
+
+                    redraw(graphics);
                 }
 
-                redraw(graphics);
                 return TRUE;
             } else if (command == IDM_CLICK) {
                 POINT cursor;
