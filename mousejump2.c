@@ -1477,6 +1477,7 @@ typedef struct {
     POINT mirrorStart;
     int dragCount;
     POINT drag[3];
+    BOOL arrowHead;
 } Graphics;
 Graphics graphicsOut[2] = { { .window = NULL }, { .window = NULL } };
 int graphicsOutIndex = 1;
@@ -1582,6 +1583,7 @@ Graphics *getGraphics(Model *model) {
         }
     }
 
+    graphics->arrowHead = model->dragCount >= 3;
     return graphics;
 }
 
@@ -1754,9 +1756,14 @@ void redraw(Graphics *graphics) {
     }
 
     double controlLengthPt = 36;
-    double controlLengthPx = ptToPx(controlLengthPt, graphics->dpi);
     double loopRadiusPt = 24;
+    double arrowRadiusPt = 30;
+    double arrowLengthPt = 30;
+    double controlLengthPx = ptToPx(controlLengthPt, graphics->dpi);
+    double arrowRadiusPx = ptToPx(arrowRadiusPt, graphics->dpi);
+    double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
     POINT dragPoints[7];
+    POINT arrowHeadPoints[3];
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
         for (int i = 0; i < graphics->dragCount - 1; i++) {
@@ -1768,9 +1775,9 @@ void redraw(Graphics *graphics) {
             double length = sqrt(dot(vector, vector));
             Point tangent; // as in (tangent, normal) not (sin, cos, tan)
             if (length > 0) {
-                tangent = scale(vector, controlLengthPx / length);
+                tangent = scale(vector, 1 / length);
             } else {
-                tangent = makePoint(controlLengthPx, 0);
+                tangent = makePoint(1, 0);
             }
 
             Point normal = leftTurn(tangent);
@@ -1779,16 +1786,44 @@ void redraw(Graphics *graphics) {
             cosine = min(1, max(-1, cosine));
             double sine = sqrt(1 - cosine * cosine);
             Point b = add(
-                a, add(scale(tangent, cosine), scale(normal, sine))
+                a,
+                add(
+                    scale(tangent, cosine * controlLengthPx),
+                    scale(normal, sine * controlLengthPx)
+                )
             );
             Point c = add(
-                d, add(scale(tangent, -cosine), scale(normal, sine))
+                d, add(
+                    scale(tangent, -cosine * controlLengthPx),
+                    scale(normal, sine * controlLengthPx)
+                )
             );
             POINT bInt = { (int)round(b.x), (int)round(b.y) };
             POINT cInt = { (int)round(c.x), (int)round(c.y) };
             dragPoints[3 * i + 1] = bInt;
             dragPoints[3 * i + 2] = cInt;
             dragPoints[3 * i + 3] = dInt;
+            if (i == 1 && graphics->arrowHead) {
+                Point e = add(
+                    d,
+                    add(
+                        scale(tangent, -arrowLengthPx),
+                        scale(normal, -arrowRadiusPt)
+                    )
+                );
+                Point f = add(
+                    d,
+                    add(
+                        scale(tangent, -arrowLengthPx),
+                        scale(normal, arrowRadiusPt)
+                    )
+                );
+                POINT eInt = { (int)round(e.x), (int)round(e.y) };
+                POINT fInt = { (int)round(f.x), (int)round(f.y) };
+                arrowHeadPoints[0] = eInt;
+                arrowHeadPoints[1] = dInt;
+                arrowHeadPoints[2] = fInt;
+            }
         }
 
         for (int i = 0; i < 3 * graphics->dragCount - 2; i++) {
@@ -1809,6 +1844,9 @@ void redraw(Graphics *graphics) {
         for (int i = 0; i < 2; i++) {
             SelectObject(memory, pens[i]);
             PolyBezier(memory, dragPoints, 3 * graphics->dragCount - 2);
+            if (graphics->arrowHead && graphics->dragCount >= 3) {
+                Polyline(memory, arrowHeadPoints, 3);
+            }
         }
     }
 
@@ -1872,6 +1910,9 @@ void redraw(Graphics *graphics) {
             )
         );
         PolyBezier(memory, dragPoints, 3 * graphics->dragCount - 2);
+        if (graphics->arrowHead && graphics->dragCount >= 3) {
+            Polyline(memory, arrowHeadPoints, 3);
+        }
     }
 
     // FillRect(memory, &labelBitmapRect, keyBrush);
