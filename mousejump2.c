@@ -1753,13 +1753,42 @@ void redraw(Graphics *graphics) {
         }
     }
 
+    double controlLengthPt = 36;
+    double controlLengthPx = ptToPx(controlLengthPt, graphics->dpi);
+    double loopRadiusPt = 24;
     POINT dragPoints[7];
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
         for (int i = 0; i < graphics->dragCount - 1; i++) {
-            dragPoints[3 * i + 1] = graphics->drag[i];
-            dragPoints[3 * i + 2] = graphics->drag[i + 1];
-            dragPoints[3 * i + 3] = graphics->drag[i + 1];
+            POINT aInt = graphics->drag[i];
+            POINT dInt = graphics->drag[i + 1];
+            Point a = { aInt.x, aInt.y };
+            Point d = { dInt.x, dInt.y };
+            Point vector = add(d, scale(a, -1));
+            double length = sqrt(dot(vector, vector));
+            Point tangent; // as in (tangent, normal) not (sin, cos, tan)
+            if (length > 0) {
+                tangent = scale(vector, controlLengthPx / length);
+            } else {
+                tangent = makePoint(controlLengthPx, 0);
+            }
+
+            Point normal = leftTurn(tangent);
+            double cosine = length / (2 * controlLengthPx);
+            cosine -= (1 - cosine) * loopRadiusPt / controlLengthPt;
+            cosine = min(1, max(-1, cosine));
+            double sine = sqrt(1 - cosine * cosine);
+            Point b = add(
+                a, add(scale(tangent, cosine), scale(normal, sine))
+            );
+            Point c = add(
+                d, add(scale(tangent, -cosine), scale(normal, sine))
+            );
+            POINT bInt = { (int)round(b.x), (int)round(b.y) };
+            POINT cInt = { (int)round(c.x), (int)round(c.y) };
+            dragPoints[3 * i + 1] = bInt;
+            dragPoints[3 * i + 2] = cInt;
+            dragPoints[3 * i + 3] = dInt;
         }
 
         for (int i = 0; i < 3 * graphics->dragCount - 2; i++) {
