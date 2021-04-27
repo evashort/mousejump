@@ -1758,15 +1758,15 @@ void redraw(Graphics *graphics) {
     double controlLengthPt = 55;
     double loopRadiusPt = 36;
     double arrowRadiusPt = 30;
-    double arrowLengthPt = 30;
+    double arrowLengthPt = 35;
     double controlLengthPx = ptToPx(controlLengthPt, graphics->dpi);
     double arrowRadiusPx = ptToPx(arrowRadiusPt, graphics->dpi);
     double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
     POINT dragPoints[7];
     POINT arrowHeadPoints[3];
-    Point tangent = { 1, 0 }; // as in (tangent, normal) not (sin, cos, tan)
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
+        Point finalTangent = { 1, 0 };
         for (int i = 0; i < graphics->dragCount - 1; i++) {
             POINT aInt = graphics->drag[i];
             POINT dInt = graphics->drag[i + 1];
@@ -1774,6 +1774,8 @@ void redraw(Graphics *graphics) {
             Point d = { dInt.x, dInt.y };
             Point vector = add(d, scale(a, -1));
             double length = sqrt(dot(vector, vector));
+            // as in (tangent, normal) not (sin, cos, tan)
+            Point tangent = finalTangent;
             if (length > 0) {
                 tangent = scale(vector, 1 / length);
             }
@@ -1791,30 +1793,29 @@ void redraw(Graphics *graphics) {
                     scale(normal, sine * controlLengthPx)
                 )
             );
-            Point c = add(
-                d, add(
-                    scale(tangent, -cosine * controlLengthPx),
-                    scale(normal, sine * controlLengthPx)
-                )
+            finalTangent = add(
+                scale(tangent, cosine), scale(normal, -sine)
             );
+            Point c = add(d, scale(finalTangent, -controlLengthPx));
             POINT bInt = { (int)round(b.x), (int)round(b.y) };
             POINT cInt = { (int)round(c.x), (int)round(c.y) };
             dragPoints[3 * i + 1] = bInt;
             dragPoints[3 * i + 2] = cInt;
             dragPoints[3 * i + 3] = dInt;
             if (i == 1 && graphics->arrowHead) {
+                Point finalNormal = leftTurn(finalTangent);
                 Point e = add(
                     d,
                     add(
-                        scale(tangent, -arrowLengthPx),
-                        scale(normal, -arrowRadiusPt)
+                        scale(finalTangent, -arrowLengthPx),
+                        scale(finalNormal, -arrowRadiusPt)
                     )
                 );
                 Point f = add(
                     d,
                     add(
-                        scale(tangent, -arrowLengthPx),
-                        scale(normal, arrowRadiusPt)
+                        scale(finalTangent, -arrowLengthPx),
+                        scale(finalNormal, arrowRadiusPt)
                     )
                 );
                 POINT eInt = { (int)round(e.x), (int)round(e.y) };
