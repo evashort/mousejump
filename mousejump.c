@@ -1755,8 +1755,8 @@ void redraw(Graphics *graphics) {
         }
     }
 
-    double controlLengthPt = 36;
-    double loopRadiusPt = 24;
+    double controlLengthPt = 55;
+    double loopRadiusPt = 36;
     double arrowRadiusPt = 30;
     double arrowLengthPt = 30;
     double controlLengthPx = ptToPx(controlLengthPt, graphics->dpi);
@@ -1764,6 +1764,7 @@ void redraw(Graphics *graphics) {
     double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
     POINT dragPoints[7];
     POINT arrowHeadPoints[3];
+    Point tangent = { 1, 0 }; // as in (tangent, normal) not (sin, cos, tan)
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
         for (int i = 0; i < graphics->dragCount - 1; i++) {
@@ -1773,14 +1774,12 @@ void redraw(Graphics *graphics) {
             Point d = { dInt.x, dInt.y };
             Point vector = add(d, scale(a, -1));
             double length = sqrt(dot(vector, vector));
-            Point tangent; // as in (tangent, normal) not (sin, cos, tan)
             if (length > 0) {
                 tangent = scale(vector, 1 / length);
-            } else {
-                tangent = makePoint(1, 0);
             }
 
-            Point normal = leftTurn(tangent);
+            BOOL flipNormal = TRUE;
+            Point normal = scale(leftTurn(tangent), flipNormal ? -1 : 1);
             double cosine = length / (2 * controlLengthPx);
             cosine -= (1 - cosine) * loopRadiusPt / controlLengthPt;
             cosine = min(1, max(-1, cosine));
