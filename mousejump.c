@@ -1640,10 +1640,21 @@ Point keyframes2[KEYFRAME_COUNT] = {
 
 Point interpolateKeyframes(Point *frames, int count, double t) {
     int i = (int)floor(t * (count - 1));
-    double phase = t * (count - 1) - i;
-    Point a = frames[min(max(i, 0), count - 1)];
-    Point b = frames[min(max(i + 1, 0), count - 1)];
-    return add(scale(a, 1 - phase), scale(b, phase));
+    double x = t * (count - 1) - i;
+    Point a = frames[min(max(i - 1, 0), count - 1)];
+    Point b = frames[min(max(i, 0), count - 1)];
+    Point c = frames[min(max(i + 1, 0), count - 1)];
+    Point d = frames[min(max(i + 2, 0), count - 1)];
+    return add(
+        add(
+            scale(a, ((-0.5 * x + 1) * x - 0.5) * x),
+            scale(b, (1.5 * x - 2.5) * x * x + 1)
+        ),
+        add(
+            scale(c, ((-1.5 * x + 2) * x + 0.5) * x),
+            scale(d, (0.5 * x - 0.5) * x * x)
+        )
+    );
 }
 
 Graphics *lastGraphics = &graphicsOut[0];
