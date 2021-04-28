@@ -1639,6 +1639,7 @@ Point keyframes2[KEYFRAME_COUNT] = {
 };
 
 Point interpolateKeyframes(Point *frames, int count, double t) {
+    t = max(0, min(1, t));
     int i = (int)floor(t * (count - 1));
     double x = t * (count - 1) - i;
     Point a = frames[min(max(i - 1, 0), count - 1)];
