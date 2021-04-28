@@ -1611,6 +1611,41 @@ POINT getBubblePositionPx(Graphics *graphics, int index) {
     return positionPx;
 }
 
+#define KEYFRAME_COUNT 10
+Point keyframes1[KEYFRAME_COUNT] = {
+    { -250.75351 / 450, 199.317716 / 450 },
+    { -236.7338 / 450, 159.511926 / 450 },
+    { -210.54139 / 450, 134.923126 / 450 },
+    { -178.79139 / 450, 103.173126 / 450 },
+    { -152.33306 / 450, 114.512416 / 450 },
+    { -93.25481 / 450, 132.136466 / 450 },
+    { -41.85005 / 450, 155.570986 / 450 },
+    { 12.100406 / 450, 138.984536 / 450 },
+    { 48.0081441 / 450, 107.990486 / 450 },
+    { 70.134467 / 450, 0 / 450 },
+};
+
+Point keyframes2[KEYFRAME_COUNT] = {
+    { 217.87244 / 450 - 0/9.0, 223.221796 / 450 },
+    { 170.57139 / 450 - 1/9.0, 270.598516 / 450 },
+    { 93.88563 / 450 - 2/9.0, 289.307386 / 450 },
+    { 16.196495 / 450 - 3/9.0, 283.038356 / 450 },
+    { -18.328431 / 450 - 4/9.0, 233.854206 / 450 },
+    { 17.432134 / 450 - 5/9.0, 228.053036 / 450 },
+    { 61.067624 / 450 - 6/9.0, 189.088076 / 450 },
+    { 106.791312 / 450 - 7/9.0, 165.794376 / 450 },
+    { 182.90179 / 450 - 8/9.0, 116.840896 / 450 },
+    { 143.688378 / 450 - 9/9.0, 0 / 450 },
+};
+
+Point interpolateKeyframes(Point *frames, int count, double t) {
+    int i = (int)floor(t * (count - 1));
+    double phase = t * (count - 1) - i;
+    Point a = frames[min(max(i, 0), count - 1)];
+    Point b = frames[min(max(i + 1, 0), count - 1)];
+    return add(scale(a, 1 - phase), scale(b, phase));
+}
+
 Graphics *lastGraphics = &graphicsOut[0];
 void redraw(Graphics *graphics) {
     if (!memcmp(graphics, lastGraphics, sizeof(Graphics))) {
@@ -1755,18 +1790,17 @@ void redraw(Graphics *graphics) {
         }
     }
 
-    double controlLengthPt = 55;
-    double loopRadiusPt = 36;
+    double ropeLengthPt = 110;
     double arrowRadiusPt = 30;
     double arrowLengthPt = 35;
-    double controlLengthPx = ptToPx(controlLengthPt, graphics->dpi);
+    double ropeLengthPx = ptToPx(ropeLengthPt, graphics->dpi);
     double arrowRadiusPx = ptToPx(arrowRadiusPt, graphics->dpi);
     double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
     POINT dragPoints[7];
     POINT arrowHeadPoints[3];
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
-        Point finalTangent = { 1, 0 };
+        Point lastTangent = { 1, 0 };
         for (int i = 0; i < graphics->dragCount - 1; i++) {
             POINT aInt = graphics->drag[i];
             POINT dInt = graphics->drag[i + 1];
@@ -1775,47 +1809,57 @@ void redraw(Graphics *graphics) {
             Point vector = add(d, scale(a, -1));
             double length = sqrt(dot(vector, vector));
             // as in (tangent, normal) not (sin, cos, tan)
-            Point tangent = finalTangent;
+            Point tangent = lastTangent;
             if (length > 0) {
                 tangent = scale(vector, 1 / length);
             }
 
-            BOOL flipNormal = TRUE;
-            Point normal = scale(leftTurn(tangent), flipNormal ? -1 : 1);
-            double cosine = length / (2 * controlLengthPx);
-            cosine -= (1 - cosine) * loopRadiusPt / controlLengthPt;
-            cosine = min(1, max(-1, cosine));
-            double sine = sqrt(1 - cosine * cosine);
-            Point b = add(
-                a,
-                add(
-                    scale(tangent, cosine * controlLengthPx),
-                    scale(normal, sine * controlLengthPx)
-                )
+            int normalSign = -1;
+            Point normal = leftTurn(tangent);
+            Point control1 = scale(
+                interpolateKeyframes(
+                    keyframes1, KEYFRAME_COUNT, length / ropeLengthPx
+                ),
+                ropeLengthPx
             );
-            finalTangent = add(
-                scale(tangent, cosine), scale(normal, -sine)
+            control1 = add(
+                scale(tangent, control1.x),
+                scale(normal, control1.y * normalSign)
             );
-            Point c = add(d, scale(finalTangent, -controlLengthPx));
+            Point b = add(a, control1);
             POINT bInt = { (int)round(b.x), (int)round(b.y) };
-            POINT cInt = { (int)round(c.x), (int)round(c.y) };
             dragPoints[3 * i + 1] = bInt;
+
+            Point control2 = scale(
+                interpolateKeyframes(
+                    keyframes2, KEYFRAME_COUNT, length / ropeLengthPx
+                ),
+                ropeLengthPx
+            );
+            control2 = add(
+                scale(tangent, control2.x),
+                scale(normal, control2.y * normalSign)
+            );
+            Point c = add(d, control2);
+            POINT cInt = { (int)round(c.x), (int)round(c.y) };
+            lastTangent = scale(control2, -1 / sqrt(dot(control2, control2)));
             dragPoints[3 * i + 2] = cInt;
+
             dragPoints[3 * i + 3] = dInt;
             if (i == 1 && graphics->arrowHead) {
-                Point finalNormal = leftTurn(finalTangent);
+                Point lastNormal = leftTurn(lastTangent);
                 Point e = add(
                     d,
                     add(
-                        scale(finalTangent, -arrowLengthPx),
-                        scale(finalNormal, -arrowRadiusPt)
+                        scale(lastTangent, -arrowLengthPx),
+                        scale(lastNormal, -arrowRadiusPt)
                     )
                 );
                 Point f = add(
                     d,
                     add(
-                        scale(finalTangent, -arrowLengthPx),
-                        scale(finalNormal, arrowRadiusPt)
+                        scale(lastTangent, -arrowLengthPx),
+                        scale(lastNormal, arrowRadiusPt)
                     )
                 );
                 POINT eInt = { (int)round(e.x), (int)round(e.y) };
