@@ -1802,9 +1802,9 @@ void redraw(Graphics *graphics) {
         }
     }
 
-    double ropeLengthPt = 110;
-    double arrowRadiusPt = 30;
-    double arrowLengthPt = 35;
+    double ropeLengthPt = 60;
+    double arrowRadiusPt = 14;
+    double arrowLengthPt = 14;
     double ropeLengthPx = ptToPx(ropeLengthPt, graphics->dpi);
     double arrowRadiusPx = ptToPx(arrowRadiusPt, graphics->dpi);
     double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
