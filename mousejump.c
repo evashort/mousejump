@@ -1805,13 +1805,20 @@ void redraw(Graphics *graphics) {
     double ropeLengthPt = 60;
     double arrowRadiusPt = 14;
     double arrowLengthPt = 14;
+    double edgeDistancePt = 20;
     double ropeLengthPx = ptToPx(ropeLengthPt, graphics->dpi);
     double arrowRadiusPx = ptToPx(arrowRadiusPt, graphics->dpi);
     double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
+    double edgeDistancePx = ptToPx(edgeDistancePt, graphics->dpi);
+    Point screenCenter = {
+        graphics->leftPx + 0.5 * graphics->widthPx,
+        graphics->topPx + 0.5 * graphics->heightPx,
+    };
     POINT dragPoints[7];
     POINT arrowHeadPoints[3];
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
+        // as in (tangent, normal) not (sin, cos, tan)
         Point lastTangent = { 1, 0 };
         for (int i = 0; i < graphics->dragCount - 1; i++) {
             POINT aInt = graphics->drag[i];
@@ -1820,14 +1827,37 @@ void redraw(Graphics *graphics) {
             Point d = { dInt.x, dInt.y };
             Point vector = add(d, scale(a, -1));
             double length = sqrt(dot(vector, vector));
-            // as in (tangent, normal) not (sin, cos, tan)
+            Point idealNormalDirection = {
+                max(0, graphics->leftPx + edgeDistancePx - a.x)
+                    + min(
+                        0,
+                        graphics->leftPx + graphics->widthPx - edgeDistancePx
+                            - a.x
+                    ),
+                max(0, graphics->topPx + edgeDistancePx - a.y)
+                    + min(
+                        0,
+                        graphics->topPx + graphics->heightPx - edgeDistancePx
+                            - a.y
+                    ),
+            };
+            if (idealNormalDirection.x == 0 && idealNormalDirection.y == 0) {
+                idealNormalDirection = i <= 0 ? makePoint(0, -1) : add(
+                    lastTangent,
+                    makePoint(0, -0.00001) // break ties upwards
+                );
+            } else if (i <= 0) {
+                // negative normal of normal is tangent
+                lastTangent = scale(getNormal(idealNormalDirection), -1);
+            }
+
             Point tangent = lastTangent;
             if (length > 0) {
                 tangent = scale(vector, 1 / length);
             }
 
-            int normalSign = -1;
             Point normal = leftTurn(tangent);
+            int normalSign = copysign(1.0, dot(idealNormalDirection, normal));
             Point control1 = scale(
                 interpolateKeyframes(
                     keyframes1, KEYFRAME_COUNT, length / ropeLengthPx
