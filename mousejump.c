@@ -1819,7 +1819,7 @@ void redraw(Graphics *graphics) {
     if (graphics->dragCount > 0) {
         dragPoints[0] = graphics->drag[0];
         // as in (tangent, normal) not (sin, cos, tan)
-        Point lastTangent = { 1, 0 };
+        Point lastTangent = { 0, -1 };
         for (int i = 0; i < graphics->dragCount - 1; i++) {
             POINT aInt = graphics->drag[i];
             POINT dInt = graphics->drag[i + 1];
@@ -1842,20 +1842,11 @@ void redraw(Graphics *graphics) {
                     ),
             };
             if (idealNormalDirection.x == 0 && idealNormalDirection.y == 0) {
-                idealNormalDirection = i <= 0 ? makePoint(0, -1) : add(
-                    lastTangent,
-                    makePoint(0, -0.00001) // break ties upwards
-                );
-            } else if (i <= 0) {
-                // negative normal of normal is tangent
-                lastTangent = scale(getNormal(idealNormalDirection), -1);
+                idealNormalDirection = lastTangent;
             }
 
-            Point tangent = lastTangent;
-            if (length > 0) {
-                tangent = scale(vector, 1 / length);
-            }
-
+            Point tangent = length > 0 ? scale(vector, 1 / length)
+                : getNormal(idealNormalDirection);
             Point normal = leftTurn(tangent);
             int normalSign = copysign(1.0, dot(idealNormalDirection, normal));
             Point control1 = scale(
