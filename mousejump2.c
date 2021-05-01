@@ -229,26 +229,18 @@ int compareStringPointersIgnoreCase(const wchar_t **a, const wchar_t **b) {
 }
 
 int sortedLabelsIn = 0;
-StringArray sortedLabelsOut = { .count = 0, .value = NULL };
-StringArray getSortedLabels(int count) {
+LPWSTR *sortedLabelsOut = NULL;
+LPWSTR *getSortedLabels(int count) {
     if (count == sortedLabelsIn) { return sortedLabelsOut; }
     sortedLabelsIn = count;
     StringArray labels = getLabels();
-    sortedLabelsOut.count = min(count, labels.count);
-    sortedLabelsOut.value = realloc(
-        sortedLabelsOut.value,
-        sortedLabelsOut.count * sizeof(LPWSTR)
-    );
+    sortedLabelsOut = realloc(sortedLabelsOut, count * sizeof(LPWSTR));
     memcpy_s(
-        sortedLabelsOut.value,
-        sortedLabelsOut.count * sizeof(LPWSTR),
-        labels.value,
-        sortedLabelsOut.count * sizeof(LPWSTR)
+        sortedLabelsOut, count * sizeof(LPWSTR),
+        labels.value, count * sizeof(LPWSTR)
     );
     qsort(
-        (void*)sortedLabelsOut.value,
-        sortedLabelsOut.count,
-        sizeof(LPWSTR),
+        (void*)sortedLabelsOut, count, sizeof(LPWSTR),
         compareStringPointersIgnoreCase
     );
     return sortedLabelsOut;
@@ -272,12 +264,28 @@ int labelBinarySearch(
     return lo;
 }
 
-typedef struct {
-    int start;
-    int stop;
-    int matchLength;
-} LabelRange;
-LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
+struct {
+    LPWSTR text; int capacity; int count;
+} labelRangeIn = { .text = NULL };
+typedef struct { int start, stop, matchLength; } LabelRange;
+LabelRange labelRangeOut;
+LabelRange getLabelRange(LPCWSTR text, int count) {
+    if (
+        count == labelRangeIn.count && labelRangeIn.text != NULL
+            && !wcsncmp(text, labelRangeIn.text, labelRangeIn.capacity)
+    ) { return labelRangeOut; }
+
+    int textLength = wcslen(text);
+    if (labelRangeIn.text == NULL || textLength + 1 > labelRangeIn.capacity) {
+        labelRangeIn.capacity = nextPowerOf2(textLength + 1, 64);
+        labelRangeIn.text = realloc(
+            labelRangeIn.text, labelRangeIn.capacity * sizeof(WCHAR)
+        );
+    }
+
+    wcsncpy_s(labelRangeIn.text, labelRangeIn.capacity, text, textLength + 1);
+    labelRangeIn.count = count;
+
     LPWSTR node = L","; int nodeLength = wcslen(node);
     LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
     if (!wcsncmp(text, node, nodeLength)) {
@@ -291,16 +299,17 @@ LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
         while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
     }
 
+    LPWSTR *labels = getSortedLabels(count);
+    textLength = wcslen(text);
     int start = 0;
-    int stop = labels.count;
-    int textLength = wcslen(text);
+    int stop = count;
     int matchLength = 0;
     for (int i = 0; i < textLength; i++) {
         int newStart = labelBinarySearch(
-            labels.value, text[i], start, stop, matchLength, 0
+            labels, text[i], start, stop, matchLength, 0
         );
         int newStop = labelBinarySearch(
-            labels.value, text[i], newStart, stop, matchLength, 1
+            labels, text[i], newStart, stop, matchLength, 1
         );
         if (newStart < newStop) {
             start = newStart;
@@ -309,12 +318,11 @@ LabelRange getLabelRange(LPCWSTR text, StringArray labels) {
         }
     }
 
-    LabelRange result;
-    ZeroMemory(&result, sizeof(result));
-    result.start = start;
-    result.stop = stop;
-    result.matchLength = matchLength;
-    return result;
+    ZeroMemory(&labelRangeOut, sizeof(labelRangeOut));
+    labelRangeOut.start = start;
+    labelRangeOut.stop = stop;
+    labelRangeOut.matchLength = matchLength;
+    return labelRangeOut;
 }
 
 #pragma endregion
@@ -382,15 +390,12 @@ int *getLabelWidths(HDC device, int count) {
 
     ZeroMemory(&labelWidthsIn, sizeof(in));
     labelWidthsIn = in;
-    StringArray labels = getSortedLabels(count);
-    labelWidthsOut = realloc(labelWidthsOut, labels.count * sizeof(int));
-    for (int i = 0; i < labels.count; i++) {
+    LPWSTR *labels = getSortedLabels(count);
+    labelWidthsOut = realloc(labelWidthsOut, count * sizeof(int));
+    for (int i = 0; i < count; i++) {
         RECT rect = { 0, 0 };
         DrawText(
-            device,
-            labels.value[i],
-            -1,
-            &rect,
+            device, labels[i], -1, &rect,
             DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
         );
         labelWidthsOut[i] = rect.right;
@@ -505,10 +510,10 @@ RECT *selectLabelBitmapHelp(
     *labelBitmapIn = in;
     int xPadding = max(paddingPx.left, paddingPx.right);
     int yPadding = max(paddingPx.top, paddingPx.bottom);
-    StringArray labels = getSortedLabels(count);
+    LPWSTR *labels = getSortedLabels(count);
     int *labelWidths = getLabelWidths(memory, count);
     int width = 500;
-    for (int i = 0; i < labels.count; i++) {
+    for (int i = 0; i < count; i++) {
         width = max(width, labelWidths[i] + 2 * xPadding);
     }
 
@@ -516,7 +521,7 @@ RECT *selectLabelBitmapHelp(
     GetTextMetrics(memory, &metrics);
     int x = xPadding;
     int height = metrics.tmHeight + 2 * yPadding;
-    for (int i = 0; i < labels.count; i++) {
+    for (int i = 0; i < count; i++) {
         x += labelWidths[i] + xPadding;
         if (x > width) {
             x = xPadding;
@@ -542,7 +547,7 @@ RECT *selectLabelBitmapHelp(
         int y = yPadding;
         RECT separator = { x, y, x + xPadding, y + metrics.tmHeight };
         FillRect(memory, &separator, brush);
-        for (int i = 0; i < labels.count; i++) {
+        for (int i = 0; i < count; i++) {
             x += xPadding + labelWidths[i];
             if (x > width - xPadding) {
                 x = 0;
@@ -556,11 +561,11 @@ RECT *selectLabelBitmapHelp(
     }
 
     labelBitmapOut->rects = realloc(
-        labelBitmapOut->rects, labels.count * sizeof(RECT)
+        labelBitmapOut->rects, count * sizeof(RECT)
     );
     x = xPadding;
     int y = yPadding;
-    for (int i = 0; i < labels.count; i++) {
+    for (int i = 0; i < count; i++) {
         if (x + labelWidths[i] + xPadding > width) {
             x = xPadding;
             y += metrics.tmHeight + yPadding;
@@ -568,11 +573,11 @@ RECT *selectLabelBitmapHelp(
 
         RECT rect = { x, y, x + labelWidths[i], y + metrics.tmHeight };
         DrawText(
-            memory, labels.value[i], -1, &rect,
+            memory, labels[i], -1, &rect,
             DT_SINGLELINE | DT_NOPREFIX | DT_NOCLIP
         );
 
-        int features = getStringFeatures(labels.value[i]);
+        int features = getStringFeatures(labels[i]);
         rect.left -= paddingPx.left;
         rect.top -= paddingPx.top - getTopCrop(features, metrics);;
         rect.right += paddingPx.right;
@@ -929,6 +934,12 @@ BOOL spineContains(Spine spine, Point point) {
         && point.x < spine.ribStops[(int)point.y - spine.start];
 }
 
+typedef struct {
+    Point edge1, edge2, offset;
+    double width, height;
+    int count;
+} BubblesIn;
+
 struct {
     Spine oldSpine, newSpine;
     int oldCapacity, newCapacity;
@@ -939,20 +950,19 @@ struct {
     .newCapacity = 0,
 };
 Spine getSpine(
-    Point edge1, Point edge2, Point offset, double width, double height,
-    int count, Spine oldSpine, int cliffStart, int cliffStop, HWND dialog
+    BubblesIn in, Spine oldSpine, int cliffStart, int cliffStop, HWND dialog
 ) {
-    double inverseScale = 1 / determinant(edge1, edge2);
+    double inverseScale = 1 / determinant(in.edge1, in.edge2);
     // inverse1 and inverse2 are edges of a 1pt x 1pt square, projected into
     // grid space (in other words, they are the columns of the inverse of the
     // matrix whose columns are the edges of a screen parallelogram).
-    Point inverse1 = scale(makePoint(edge2.y, -edge1.y), inverseScale);
-    Point inverse2 = scale(makePoint(-edge2.x, edge1.x), inverseScale);
-    Point gridOffset = matrixDot(inverse1, inverse2, scale(offset, -1));
+    Point inverse1 = scale(makePoint(in.edge2.y, -in.edge1.y), inverseScale);
+    Point inverse2 = scale(makePoint(-in.edge2.x, in.edge1.x), inverseScale);
+    Point gridOffset = matrixDot(inverse1, inverse2, scale(in.offset, -1));
     // the grid parallelogram is the entire screen area projected into grid
     // space
-    Point gridEdge1 = scale(inverse1, width);
-    Point gridEdge2 = scale(inverse2, height);
+    Point gridEdge1 = scale(inverse1, in.width);
+    Point gridEdge2 = scale(inverse2, in.height);
     // normals radiate out from the grid parallelogram
     Point gridNormal1 = scale(getNormal(inverse1), -1);
     Point gridNormal2 = getNormal(inverse2);
@@ -1054,7 +1064,7 @@ Spine getSpine(
 
     EdgeCell *edgeCells = getEdgeCells(edgeCellCount);
     qsort(edgeCells, edgeCellCount, sizeof(EdgeCell), compareEdgeCells);
-    if (actualCount - count > edgeCellCount) {
+    if (actualCount - in.count > edgeCellCount) {
         // I convinced myself that a borderRadius of 0.5 should be enough to
         // prevent this error from ever occuring, but that was before the
         // cliffStart and cliffStop parameters were added to reduce label
@@ -1069,7 +1079,7 @@ Spine getSpine(
         exit(1);
     }
 
-    for (int j = 0; j < actualCount - count; j++) {
+    for (int j = 0; j < actualCount - in.count; j++) {
         if (edgeCells[j].right) {
             ribStops[edgeCells[j].i] -= 1;
         } else {
@@ -1109,11 +1119,6 @@ int compareScoredPoints(const ScoredPoint *a, const ScoredPoint *b) {
     return 0;
 }
 
-typedef struct {
-    Point edge1, edge2, offset;
-    double width, height;
-    int count;
-} BubblesIn;
 BubblesIn bubblesIn = { { 0, 0 }, { 0, 0 }, 0, 0, 0 };
 struct {
     Point negativeOffset;
@@ -1136,11 +1141,8 @@ Point *getBubbles(
 ) {
     BubblesIn in;
     ZeroMemory(&in, sizeof(in));
-    in.edge1 = edge1;
-    in.edge2 = edge2;
-    in.offset = offset;
-    in.width = width;
-    in.height = height;
+    in.edge1 = edge1; in.edge2 = edge2; in.offset = offset;
+    in.width = width; in.height = height;
     in.count = count;
     if (!memcmp(&in, &bubblesIn, sizeof(in))) {
         return bubblesOut.bubbles;
@@ -1182,8 +1184,7 @@ Point *getBubbles(
     }
 
     Spine spine = bubblesOut.spine = getSpine(
-        edge1, edge2, offset, width, height, count,
-        oldSpine, cliffStart, cliffStop, dialog
+        in, oldSpine, cliffStart, cliffStop, dialog
     );
 
     Point *bubbles = bubblesOut.bubbles;
@@ -1294,19 +1295,29 @@ Point *getBubbles(
     return bubbles;
 }
 
+typedef struct {
+    Point marginSize, edge1, edge2;
+    HWND dialog;
+    double width, height;
+    int count;
+} Layout;
+
 #pragma endregion
-Point getBubblePositionPt(
-    Point marginSize, Point edge1, Point edge2, Point offsetPt, HWND dialog,
-    double width, double height, int count, int index
-) {
-    width += 2 * marginSize.x;
-    height += 2 * marginSize.y;
+Point getBubblePositionPt(Layout layout, Point offset, int index) {
+    double width = layout.width + 2 * layout.marginSize.x;
+    double height = layout.height + 2 * layout.marginSize.y;
     Point *bubbles = getBubbles(
-        edge1, edge2, offsetPt, width, height, count, dialog
+        layout.edge1,
+        layout.edge2,
+        offset,
+        layout.width + 2 * layout.marginSize.x,
+        layout.height + 2 * layout.marginSize.y,
+        layout.count,
+        layout.dialog
     );
     Point result = add(
-        matrixDot(edge1, edge2, bubbles[index]),
-        add(offsetPt, scale(marginSize, -1))
+        matrixDot(layout.edge1, layout.edge2, bubbles[index]),
+        add(offset, scale(layout.marginSize, -1))
     );
     return result;
 }
@@ -1316,7 +1327,7 @@ int getBubbleCount(
     double width, double height
 ) {
     return min(
-        maxCount,
+        min(maxCount, getLabels().count),
         width * height / minCellArea + 2 * gridMargin * (
             2 * gridMargin + (width + height * aspect) / sqrt(
                 aspect * minCellArea
@@ -1362,7 +1373,8 @@ void destroyCache() {
     DeleteObject(keyBitmapOut);
     free(labelTextOut);
     free(labelsOut.value);
-    free(sortedLabelsOut.value);
+    free(sortedLabelsOut);
+    free(labelRangeIn.text);
     DeleteObject(labelFontOut);
     free(labelWidthsOut);
     DeleteObject(labelBitmapOut.bitmap);
@@ -1416,6 +1428,7 @@ typedef struct {
     double textBoxWidthPt;
     double dropdownWidthPt;
     double clientHeightPt;
+    BOOL showLabels;
     BOOL showCaption;
     SIZE minTextBoxSize;
     BOOL inMenuLoop;
@@ -1428,187 +1441,338 @@ typedef struct {
     BOOL showingPath;
 } Model;
 
-double sqrtAspectIn = 0;
-double sqrtAspectOut = 0;
-double getSqrtAspect(double aspect) {
-    if (aspect == sqrtAspectIn) { return sqrtAspectOut; }
-    return sqrtAspectOut = sqrt(aspect);
-}
-
-typedef struct { double width, height, margin; int count; } SqrtCellAreaIn;
-SqrtCellAreaIn sqrtCellAreaIn = { 0, 0, 0, 0 };
-double sqrtCellAreaOut = 0;
-double getSqrtCellArea(
-    double aspectWidth, double aspectHeight, double margin, int count
-) {
-    SqrtCellAreaIn in;
-    ZeroMemory(&in, sizeof(in));
-    in.width = aspectWidth;
-    in.height = aspectHeight;
-    in.margin = margin;
-    in.count = count;
-    if (!memcmp(&in, &sqrtCellAreaIn, sizeof(in))) { return sqrtCellAreaOut; }
-    ZeroMemory(&sqrtCellAreaIn, sizeof(in));
-    sqrtCellAreaIn = in;
-    double temp = margin * (aspectWidth - aspectHeight);
-    sqrtCellAreaOut = (
-        margin * (aspectWidth + aspectHeight) + sqrt(
-            temp * temp + count * aspectWidth * aspectHeight
-        )
-    ) / (count - 4 * margin * margin);
-    return sqrtCellAreaOut;
-}
-
 typedef struct {
-    HWND window, dialog;
-    Point offsetPt;
+    int top, left, width, height, topCrop, bottomCrop;
     UINT dpi;
-    double fontHeightPt;
-    WCHAR fontFamily[LF_FACESIZE];
-    int systemFontChanges;
-    int leftPx, topPx, widthPx, heightPx;
-    int topCrop, bottomCrop;
-    int bubbleCount;
-    LabelRange labelRange;
-    Point marginSize, edge1, edge2;
-    COLORREF colorKey, labelBackground, selectionBackground, borderColor;
-    RECT paddingPx;
-    double borderPx, earHeightPx, earElevationPx, dashPx;
-    POINT mirrorStart;
-    int dragCount;
-    POINT drag[3];
-    BOOL arrowHead;
-} Graphics;
-Graphics graphicsOut[2] = { { .window = NULL }, { .window = NULL } };
-int graphicsOutIndex = 1;
-Graphics *getGraphics(Model *model) {
+} Screen;
+Screen getScreen(HMONITOR *monitor) {
     MONITORINFO monitorInfo;
     ZeroMemory(&monitorInfo, sizeof(monitorInfo));
     monitorInfo.cbSize = sizeof(monitorInfo);
-    if (!GetMonitorInfo(model->monitor, &monitorInfo)) {
+    if (!GetMonitorInfo(*monitor, &monitorInfo)) {
         POINT origin = { 0, 0 };
-        model->monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
-        GetMonitorInfo(model->monitor, &monitorInfo);
+        *monitor = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+        GetMonitorInfo(*monitor, &monitorInfo);
     }
 
-    int topCrop = 1;
-    int bottomCrop = 0;
+    Screen screen;
+    ZeroMemory(&screen, sizeof(screen));
+    screen.left = monitorInfo.rcMonitor.left;
+    screen.top = monitorInfo.rcMonitor.top;
+    screen.width = monitorInfo.rcMonitor.right - screen.left;
+    screen.height = monitorInfo.rcMonitor.bottom - screen.top;
+    screen.topCrop = 1;
+    screen.bottomCrop = 0;
     if (
         monitorInfo.rcWork.top - monitorInfo.rcMonitor.top
             > monitorInfo.rcMonitor.bottom - monitorInfo.rcWork.bottom
     ) {
         // taskbar is on top
-        topCrop = 0;
-        bottomCrop = 1;
+        screen.topCrop = 0;
+        screen.bottomCrop = 1;
     }
 
-    int widthPx = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
-    int heightPx = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
+    GetDpiForMonitor(*monitor, MDT_EFFECTIVE_DPI, &screen.dpi, &screen.dpi);
+    return screen;
+}
+
+typedef struct {
+    int width, height;
     UINT dpi;
-    GetDpiForMonitor(model->monitor, MDT_EFFECTIVE_DPI, &dpi, &dpi);
-    double widthPt = intPxToPt(widthPx, dpi);
-    double heightPt = intPxToPt(heightPx, dpi);
-    int bubbleCount = getBubbleCount(
+    int count;
+    double minCellArea, gridMargin, aspect, angle1, angle2;
+    Point offset;
+} LayoutIn;
+LayoutIn layoutIn = {
+    .width = 0, .height = 0,
+    .dpi = 0,
+    .count = 0,
+    .minCellArea = 0, .gridMargin = 0, .aspect = 0, .angle1 = 0, .angle2 = 0,
+};
+Layout layoutOut;
+Layout getLayout(Model *model, Screen screen) {
+    LayoutIn in;
+    ZeroMemory(&in, sizeof(in));
+    in.width = screen.width; in.height = screen.height;
+    in.dpi = screen.dpi;
+    in.count = model->bubbleCount;
+    in.minCellArea = model->minCellArea; in.gridMargin = model->gridMargin;
+    in.aspect = model->aspect;
+    in.angle1 = model->angle1; in.angle2 = model->angle2;
+    if (!memcmp(&in, &layoutIn, sizeof(in))) { return layoutOut; }
+    ZeroMemory(&layoutIn, sizeof(layoutIn));
+    layoutIn = in;
+
+    ZeroMemory(&layoutOut, sizeof(layoutOut));
+    layoutOut.width = intPxToPt(screen.width, screen.dpi);
+    layoutOut.height = intPxToPt(screen.height, screen.dpi);
+    layoutOut.count = getBubbleCount(
         model->bubbleCount, model->minCellArea, model->gridMargin,
-        model->aspect, widthPt, heightPt
+        model->aspect, layoutOut.width, layoutOut.height
     );
-    StringArray labels = getSortedLabels(bubbleCount);
-    LabelRange labelRange;
-    ZeroMemory(&labelRange, sizeof(labelRange));
-    labelRange = getLabelRange(model->text, labels);
-    double sqrtAspect = getSqrtAspect(model->aspect);
-    double sqrtCellArea = getSqrtCellArea(
-        widthPt / sqrtAspect, heightPt * sqrtAspect, model->gridMargin,
-        labels.count
-    );
-    Point marginSize = {
-        .x = model->gridMargin * sqrtCellArea * sqrtAspect,
-        .y = model->gridMargin * sqrtCellArea / sqrtAspect,
-    };
+
+    double sqrtAspect = sqrt(model->aspect);
+    double aspectWidth = layoutOut.width / sqrtAspect;
+    double aspectHeight = layoutOut.height * sqrtAspect;
+    double temp =  model->gridMargin * (aspectWidth - aspectHeight);
+    double sqrtCellArea = (
+        model->gridMargin * (aspectWidth + aspectHeight) + sqrt(
+            temp * temp + layoutOut.count * layoutOut.width * layoutOut.height
+        )
+    ) / (layoutOut.count - 4 * model->gridMargin * model->gridMargin);
+    layoutOut.marginSize.x = model->gridMargin * sqrtCellArea * sqrtAspect;
+    layoutOut.marginSize.y = model->gridMargin * sqrtCellArea / sqrtAspect;
+
     // get the shape of all screen parallelograms (cells) without worrying
     // about scale yet. shape1 and shape2 represent the edges that
     // approximately correspond to the x and y axes respectively.
     // in the windows API in general and in this function specifically, the
     // positive y direction is downward.
-    Point edge1, edge2;
-    getCellEdges(
-        model->angle1, model->angle2, model->aspect,
-        sqrtCellArea * sqrtCellArea, &edge1, &edge2
+    layoutOut.edge1.x = cos(model->angle1) * model->aspect;
+    layoutOut.edge1.y = sin(model->angle1);
+    layoutOut.edge2.x = cos(model->angle2) * model->aspect;
+    layoutOut.edge2.y = sin(model->angle2);
+    double shapeScale = sqrtCellArea / sqrt(
+        determinant(layoutOut.edge1, layoutOut.edge2)
     );
+    layoutOut.edge1 = scale(layoutOut.edge1, shapeScale);
+    layoutOut.edge2 = scale(layoutOut.edge2, shapeScale);
+
+    return layoutOut;
+}
+
+typedef struct {
+    Layout layout;
+    Point offsetPt;
+    double fontHeightPt;
+    WCHAR fontFamily[LF_FACESIZE];
+    int systemFontChanges;
+    LabelRange labelRange;
+    COLORREF labelBackground, selectionBackground, borderColor;
+    RECT paddingPx;
+    double borderPx, earHeightPx, earElevationPx;
+    POINT mirrorStart;
+} LabelGraphics;
+typedef struct {
+    COLORREF labelBackground, borderColor;
+    double borderPx, dashPx;
+    POINT mirrorStart;
+    int dragCount;
+    POINT drag[3];
+    BOOL arrowHead;
+} DragGraphics;
+typedef struct {
+    BOOL initialized;
+    Screen screen;
+    COLORREF colorKey;
+    BOOL showLabels;
+    LabelGraphics lg;
+    DragGraphics dg;
+} Graphics;
+Graphics graphicsOut[2] = {
+    { .initialized = FALSE }, { .initialized = FALSE }
+};
+int graphicsOutIndex = 1;
+Graphics *getGraphics(Model *model, Screen screen) {
     Graphics *graphics = &graphicsOut[graphicsOutIndex];
     ZeroMemory(graphics, sizeof(Graphics));
-    graphics->window = model->window;
-    graphics->dialog = model->dialog;
-    graphics->offsetPt = model->offsetPt;
-    graphics->dpi = dpi;
-    graphics->fontHeightPt = model->fontHeightPt;
-    wcsncpy(graphics->fontFamily, model->fontFamily, LF_FACESIZE);
-    graphics->systemFontChanges = model->systemFontChanges;
-    graphics->leftPx = monitorInfo.rcMonitor.left;
-    graphics->topPx = monitorInfo.rcMonitor.top;
-    graphics->widthPx = widthPx;
-    graphics->heightPx = heightPx;
-    graphics->topCrop = topCrop;
-    graphics->bottomCrop = bottomCrop;
-    graphics->bubbleCount = bubbleCount;
-    graphics->labelRange = getLabelRange(model->text, labels);
-    graphics->marginSize = marginSize;
-    graphics->edge1 = edge1;
-    graphics->edge2 = edge2;
+    graphics->initialized = TRUE;
+    graphics->screen = screen;
     graphics->colorKey = model->colorKey;
-    graphics->labelBackground = model->labelBackground;
-    graphics->selectionBackground = model->selectionBackground;
-    graphics->borderColor = model->borderColor;
-    graphics->paddingPx.left = ptToThinPx(model->paddingLeftPt, dpi),
-    graphics->paddingPx.top = ptToThinPx(model->paddingTopPt, dpi),
-    graphics->paddingPx.right = ptToThinPx(model->paddingRightPt, dpi),
-    graphics->paddingPx.bottom = ptToThinPx(model->paddingBottomPt, dpi),
-    graphics->borderPx = ptToThinPx(model->borderPt, dpi);
-    graphics->earHeightPx = ptToIntPx(model->earHeightPt, dpi);
-    graphics->earElevationPx = ptToIntPx(model->earElevationPt, dpi);
-    graphics->dashPx = ptToIntPx(model->dashPt, dpi);
-    graphics->mirrorStart.x = widthPx
-        - ptToIntPx(model->mirrorWidthPt, dpi);
-    graphics->mirrorStart.y = heightPx
-        - ptToIntPx(model->mirrorHeightPt, dpi);
-    if (model->dragCount > 0) {
-        graphics->dragCount = min(model->dragCount + 1, 3);
-        for (int i = 0; i < model->dragCount; i++) {
-            graphics->drag[i] = model->drag[i];
-        }
-
-        if (graphics->dragCount > model->dragCount) {
-            graphics->drag[model->dragCount] = model->hasMatch
-                ? model->matchPoint : model->naturalPoint;
-        }
+    graphics->showLabels = model->showLabels;
+    if (graphics->showLabels) {
+        LabelGraphics *lg = &graphics->lg;
+        lg->layout = getLayout(model, screen);
+        lg->offsetPt = model->offsetPt;
+        lg->fontHeightPt = model->fontHeightPt;
+        wcsncpy(lg->fontFamily, model->fontFamily, LF_FACESIZE);
+        lg->systemFontChanges = model->systemFontChanges;
+        lg->labelRange = getLabelRange(model->text, lg->layout.count);
+        lg->selectionBackground = model->selectionBackground;
+        lg->labelBackground = model->labelBackground;
+        lg->borderColor = model->borderColor;
+        lg->paddingPx.left = ptToThinPx(model->paddingLeftPt, screen.dpi),
+        lg->paddingPx.top = ptToThinPx(model->paddingTopPt, screen.dpi),
+        lg->paddingPx.right = ptToThinPx(model->paddingRightPt, screen.dpi),
+        lg->paddingPx.bottom = ptToThinPx(model->paddingBottomPt, screen.dpi),
+        lg->borderPx = ptToThinPx(model->borderPt, screen.dpi);
+        lg->earHeightPx = ptToIntPx(model->earHeightPt, screen.dpi);
+        lg->earElevationPx = ptToIntPx(model->earElevationPt, screen.dpi);
+        lg->mirrorStart.x = screen.width
+            - ptToIntPx(model->mirrorWidthPt, screen.dpi);
+        lg->mirrorStart.y = screen.height
+            - ptToIntPx(model->mirrorHeightPt, screen.dpi);
     }
 
-    graphics->arrowHead = model->dragCount >= 3;
+    if (model->dragCount > 0) {
+        DragGraphics *dg = &graphics->dg;
+        dg->labelBackground = model->labelBackground;
+        dg->borderColor = model->borderColor;
+        dg->borderPx = ptToThinPx(model->borderPt, screen.dpi);
+        dg->dashPx = ptToIntPx(model->dashPt, screen.dpi);
+        dg->dragCount = min(model->dragCount + 1, 3);
+        for (int i = 0; i < model->dragCount; i++) {
+            dg->drag[i] = model->drag[i];
+        }
+
+        if (dg->dragCount > model->dragCount) {
+            dg->drag[model->dragCount] = model->hasMatch
+                ? model->matchPoint : model->naturalPoint;
+        }
+
+        dg->arrowHead = model->dragCount >= 3;
+    }
+
     return graphics;
 }
 
-POINT getBubblePositionPx(Graphics *graphics, int index) {
-    Point positionPt = getBubblePositionPt(
-        graphics->marginSize,
-        graphics->edge1, graphics->edge2,
-        graphics->offsetPt,
-        graphics->dialog,
-        intPxToPt(graphics->widthPx, graphics->dpi),
-        intPxToPt(graphics->heightPx, graphics->dpi),
-        getSortedLabels(graphics->bubbleCount).count,
-        index
-    );
+POINT getBubblePositionPx(
+    Screen screen, Layout layout, Point offset, int index
+) {
+    Point positionPt = getBubblePositionPt(layout, offset, index);
     POINT positionPx = {
         .x = min(
-            graphics->widthPx - 1,
-            max(0, ptToIntPx(positionPt.x, graphics->dpi))
+            screen.width - 1, max(0, ptToIntPx(positionPt.x, screen.dpi))
         ),
         .y = min(
-            graphics->heightPx - 1,
-            max(0, ptToIntPx(positionPt.y, graphics->dpi))
+            screen.height - 1, max(0, ptToIntPx(positionPt.y, screen.dpi))
         ),
     };
     return positionPx;
+}
+
+typedef struct { RECT *labelRects; SIZE earSize; } DrawLabelsOut;
+DrawLabelsOut drawLabels(
+    LabelGraphics *graphics, COLORREF colorKey, Screen screen,
+    HDC device, HDC memory
+) {
+    HDC labelMemory = CreateCompatibleDC(device);
+    SelectObject(
+        labelMemory,
+        getLabelFont(
+            screen.dpi, graphics->fontHeightPt, graphics->fontFamily,
+            graphics->systemFontChanges
+        )
+    );
+    SetBkColor(labelMemory, graphics->labelBackground);
+    SetTextColor(labelMemory, getTextColor(graphics->labelBackground));
+    RECT *labelRects = selectLabelBitmap(
+        device, labelMemory, graphics->layout.count, graphics->paddingPx
+    );
+    HDC selectionMemory = CreateCompatibleDC(device);
+    SelectObject(
+        selectionMemory,
+        getLabelFont(
+            screen.dpi, graphics->fontHeightPt, graphics->fontFamily,
+            graphics->systemFontChanges
+        )
+    );
+    SetBkColor(selectionMemory, graphics->selectionBackground);
+    SetTextColor(
+        selectionMemory, getTextColor(graphics->selectionBackground)
+    );
+    RECT *selectionRects = selectSelectionBitmap(
+        device, selectionMemory, graphics->layout.count
+    );
+    HDC earMemory = CreateCompatibleDC(device);
+    SIZE earSize = selectEarBitmap(
+        device,
+        earMemory,
+        graphics->borderPx,
+        graphics->earElevationPx,
+        graphics->earHeightPx,
+        colorKey,
+        graphics->borderColor,
+        graphics->labelBackground
+    );
+    // RECT labelBitmapRect = {
+    //     ptToIntPx(graphics->offsetPt.x, graphics->dpi) + 100,
+    //     ptToIntPx(graphics->offsetPt.y, graphics->dpi) + 400,
+    //     ptToIntPx(graphics->offsetPt.x, graphics->dpi) + 100 + 600,
+    //     ptToIntPx(graphics->offsetPt.y, graphics->dpi) + 400 + 400,
+    // };
+    // BitBlt(
+    //     memory, labelBitmapRect.left, labelBitmapRect.top,
+    //     labelBitmapRect.right - labelBitmapRect.left,
+    //     labelBitmapRect.bottom - labelBitmapRect.top,
+    //     labelMemory, 0, 0, SRCCOPY
+    // );
+    LPWSTR *labels = getSortedLabels(graphics->layout.count);
+    for (
+        int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
+    ) {
+        POINT positionPx = getBubblePositionPx(
+            screen, graphics->layout, graphics->offsetPt, i
+        );
+        BOOL xFlip = positionPx.x >= graphics->mirrorStart.x;
+        BOOL yFlip = positionPx.y >= graphics->mirrorStart.y;
+        BitBlt(
+            memory,
+            positionPx.x + xFlip * (1 - earSize.cx),
+            positionPx.y + yFlip * (1 - earSize.cy),
+            earSize.cx,
+            earSize.cy,
+            earMemory,
+            xFlip * earSize.cx,
+            yFlip * earSize.cy,
+            SRCCOPY
+        );
+        BitBlt(
+            memory,
+            positionPx.x + graphics->borderPx + xFlip * (
+                1 - 2 * graphics->borderPx
+                    + labelRects[i].left - labelRects[i].right
+            ),
+            positionPx.y + graphics->earElevationPx + yFlip * (
+                1 - 2 * graphics->earElevationPx
+                    + labelRects[i].top - labelRects[i].bottom
+            ),
+            labelRects[i].right - labelRects[i].left,
+            labelRects[i].bottom - labelRects[i].top,
+            labelMemory,
+            labelRects[i].left,
+            labelRects[i].top,
+            SRCCOPY
+        );
+        if (graphics->labelRange.matchLength) {
+            RECT textRect = { 0, 0, 0, 0 };
+            DrawText(
+                labelMemory,
+                labels[i],
+                graphics->labelRange.matchLength,
+                &textRect,
+                DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
+            );
+            BitBlt(
+                memory,
+                positionPx.x + graphics->borderPx
+                    + graphics->paddingPx.left + xFlip * (
+                        1 - 2 * graphics->borderPx
+                            + labelRects[i].left - labelRects[i].right
+                    ),
+                positionPx.y + graphics->earElevationPx
+                    + graphics->paddingPx.top + yFlip * (
+                        1 - 2 * graphics->earElevationPx
+                            + labelRects[i].top - labelRects[i].bottom
+                    ),
+                min(
+                    selectionRects[i].right - selectionRects[i].left,
+                    textRect.right
+                ),
+                selectionRects[i].bottom - selectionRects[i].top,
+                selectionMemory,
+                selectionRects[i].left,
+                selectionRects[i].top,
+                SRCCOPY
+            );
+        }
+    }
+
+    DeleteDC(selectionMemory);
+    DeleteDC(labelMemory);
+    DeleteDC(earMemory);
+    DrawLabelsOut result = { .labelRects = labelRects, .earSize = earSize };
+    return result;
 }
 
 #define KEYFRAME_COUNT 10
@@ -1658,305 +1822,138 @@ Point interpolateKeyframes(Point *frames, int count, double t) {
     );
 }
 
-Graphics *lastGraphics = &graphicsOut[0];
-void redraw(Graphics *graphics) {
-    if (!memcmp(graphics, lastGraphics, sizeof(Graphics))) {
-        return;
-    }
-
-    lastGraphics = graphics;
-    graphicsOutIndex++;
-    graphicsOutIndex %= 2;
-
-    double widthPt = intPxToPt(graphics->widthPx, graphics->dpi);
-    double heightPt = intPxToPt(graphics->heightPx, graphics->dpi);
-    StringArray labels = getSortedLabels(graphics->bubbleCount);
-    HDC device = GetDC(graphics->window);
-    HDC memory = CreateCompatibleDC(device);
-    HBRUSH keyBrush = getBrush(graphics->colorKey, KEY_BRUSH_SLOT);
-    selectKeyBitmap(
-        device, memory,
-        graphics->widthPx, graphics->heightPx, graphics->colorKey
-    );
-    HDC labelMemory = CreateCompatibleDC(device);
-    SelectObject(
-        labelMemory,
-        getLabelFont(
-            graphics->dpi,
-            graphics->fontHeightPt,
-            graphics->fontFamily,
-            graphics->systemFontChanges
-        )
-    );
-    SetBkColor(labelMemory, graphics->labelBackground);
-    SetTextColor(labelMemory, getTextColor(graphics->labelBackground));
-    RECT *labelRects = selectLabelBitmap(
-        device, labelMemory, graphics->bubbleCount, graphics->paddingPx
-    );
-    HDC selectionMemory = CreateCompatibleDC(device);
-    SelectObject(
-        selectionMemory,
-        getLabelFont(
-            graphics->dpi,
-            graphics->fontHeightPt,
-            graphics->fontFamily,
-            graphics->systemFontChanges
-        )
-    );
-    SetBkColor(selectionMemory, graphics->selectionBackground);
-    SetTextColor(
-        selectionMemory, getTextColor(graphics->selectionBackground)
-    );
-    RECT *selectionRects = selectSelectionBitmap(
-        device, selectionMemory, graphics->bubbleCount
-    );
-    HDC earMemory = CreateCompatibleDC(device);
-    SIZE earSize = selectEarBitmap(
-        device,
-        earMemory,
-        graphics->borderPx,
-        graphics->earElevationPx,
-        graphics->earHeightPx,
-        graphics->colorKey,
-        graphics->borderColor,
-        graphics->labelBackground
-    );
-    // RECT labelBitmapRect = {
-    //     ptToIntPx(graphics->offsetPt.x, graphics->dpi) + 100,
-    //     ptToIntPx(graphics->offsetPt.y, graphics->dpi) + 400,
-    //     ptToIntPx(graphics->offsetPt.x, graphics->dpi) + 100 + 600,
-    //     ptToIntPx(graphics->offsetPt.y, graphics->dpi) + 400 + 400,
-    // };
-    // BitBlt(
-    //     memory, labelBitmapRect.left, labelBitmapRect.top,
-    //     labelBitmapRect.right - labelBitmapRect.left,
-    //     labelBitmapRect.bottom - labelBitmapRect.top,
-    //     labelMemory, 0, 0, SRCCOPY
-    // );
-    RECT client = { 0, 0, graphics->widthPx, graphics->heightPx };
-    for (
-        int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
-    ) {
-        POINT positionPx = getBubblePositionPx(graphics, i);
-        BOOL xFlip = positionPx.x >= graphics->mirrorStart.x;
-        BOOL yFlip = positionPx.y >= graphics->mirrorStart.y;
-        BitBlt(
-            memory,
-            positionPx.x + xFlip * (1 - earSize.cx),
-            positionPx.y + yFlip * (1 - earSize.cy),
-            earSize.cx,
-            earSize.cy,
-            earMemory,
-            xFlip * earSize.cx,
-            yFlip * earSize.cy,
-            SRCCOPY
-        );
-        BitBlt(
-            memory,
-            positionPx.x + graphics->borderPx + xFlip * (
-                1 - 2 * graphics->borderPx
-                    + labelRects[i].left - labelRects[i].right
-            ),
-            positionPx.y + graphics->earElevationPx + yFlip * (
-                1 - 2 * graphics->earElevationPx
-                    + labelRects[i].top - labelRects[i].bottom
-            ),
-            labelRects[i].right - labelRects[i].left,
-            labelRects[i].bottom - labelRects[i].top,
-            labelMemory,
-            labelRects[i].left,
-            labelRects[i].top,
-            SRCCOPY
-        );
-        if (graphics->labelRange.matchLength) {
-            RECT textRect = { 0, 0, 0, 0 };
-            DrawText(
-                labelMemory,
-                labels.value[i],
-                graphics->labelRange.matchLength,
-                &textRect,
-                DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX
-            );
-            BitBlt(
-                memory,
-                positionPx.x + graphics->borderPx
-                    + graphics->paddingPx.left + xFlip * (
-                        1 - 2 * graphics->borderPx
-                            + labelRects[i].left - labelRects[i].right
-                    ),
-                positionPx.y + graphics->earElevationPx
-                    + graphics->paddingPx.top + yFlip * (
-                        1 - 2 * graphics->earElevationPx
-                            + labelRects[i].top - labelRects[i].bottom
-                    ),
-                min(
-                    selectionRects[i].right - selectionRects[i].left,
-                    textRect.right
-                ),
-                selectionRects[i].bottom - selectionRects[i].top,
-                selectionMemory,
-                selectionRects[i].left,
-                selectionRects[i].top,
-                SRCCOPY
-            );
-        }
-    }
-
+typedef struct { POINT dragPoints[7]; POINT arrowHeadPoints[3]; } DrawDragOut;
+DrawDragOut drawDrag(DragGraphics *graphics, Screen screen, HDC memory) {
     double ropeLengthPt = 60;
     double arrowRadiusPt = 14;
     double arrowLengthPt = 14;
     double edgeDistancePt = 20;
-    double ropeLengthPx = ptToPx(ropeLengthPt, graphics->dpi);
-    double arrowRadiusPx = ptToPx(arrowRadiusPt, graphics->dpi);
-    double arrowLengthPx = ptToPx(arrowLengthPt, graphics->dpi);
-    double edgeDistancePx = ptToPx(edgeDistancePt, graphics->dpi);
-    Point screenCenter = {
-        graphics->leftPx + 0.5 * graphics->widthPx,
-        graphics->topPx + 0.5 * graphics->heightPx,
-    };
-    POINT dragPoints[7];
-    POINT arrowHeadPoints[3];
-    if (graphics->dragCount > 0) {
-        dragPoints[0] = graphics->drag[0];
-        // as in (tangent, normal) not (sin, cos, tan)
-        Point lastTangent = { 0, -1 };
-        for (int i = 0; i < graphics->dragCount - 1; i++) {
-            POINT aInt = graphics->drag[i];
-            POINT dInt = graphics->drag[i + 1];
-            Point a = { aInt.x, aInt.y };
-            Point d = { dInt.x, dInt.y };
-            Point vector = add(d, scale(a, -1));
-            double length = sqrt(dot(vector, vector));
-            Point idealNormalDirection = {
-                max(0, graphics->leftPx + edgeDistancePx - a.x)
-                    + min(
-                        0,
-                        graphics->leftPx + graphics->widthPx - edgeDistancePx
-                            - a.x
-                    ),
-                max(0, graphics->topPx + edgeDistancePx - a.y)
-                    + min(
-                        0,
-                        graphics->topPx + graphics->heightPx - edgeDistancePx
-                            - a.y
-                    ),
-            };
-            if (idealNormalDirection.x == 0 && idealNormalDirection.y == 0) {
-                idealNormalDirection = lastTangent;
-            }
-
-            Point tangent = length > 0 ? scale(vector, 1 / length)
-                : getNormal(idealNormalDirection);
-            Point normal = leftTurn(tangent);
-            int normalSign = copysign(1.0, dot(idealNormalDirection, normal));
-            Point control1 = scale(
-                interpolateKeyframes(
-                    keyframes1, KEYFRAME_COUNT, length / ropeLengthPx
+    double ropeLengthPx = ptToPx(ropeLengthPt, screen.dpi);
+    double arrowRadiusPx = ptToPx(arrowRadiusPt, screen.dpi);
+    double arrowLengthPx = ptToPx(arrowLengthPt, screen.dpi);
+    double edgeDistancePx = ptToPx(edgeDistancePt, screen.dpi);
+    DrawDragOut result;
+    result.dragPoints[0] = graphics->drag[0];
+    // as in (tangent, normal) not (sin, cos, tan)
+    Point lastTangent = { 0, -1 };
+    for (int i = 0; i < graphics->dragCount - 1; i++) {
+        POINT aInt = graphics->drag[i];
+        POINT dInt = graphics->drag[i + 1];
+        Point a = { aInt.x, aInt.y };
+        Point d = { dInt.x, dInt.y };
+        Point vector = add(d, scale(a, -1));
+        double length = sqrt(dot(vector, vector));
+        Point idealNormalDirection = {
+            max(0, screen.left + edgeDistancePx - a.x)
+                + min(
+                    0, screen.left + screen.width - edgeDistancePx - a.x
                 ),
-                ropeLengthPx
-            );
-            control1 = add(
-                scale(tangent, control1.x),
-                scale(normal, control1.y * normalSign)
-            );
-            Point b = add(a, control1);
-            POINT bInt = { (int)round(b.x), (int)round(b.y) };
-            dragPoints[3 * i + 1] = bInt;
-
-            Point control2 = scale(
-                interpolateKeyframes(
-                    keyframes2, KEYFRAME_COUNT, length / ropeLengthPx
+            max(0, screen.top + edgeDistancePx - a.y)
+                + min(
+                    0, screen.top + screen.height - edgeDistancePx - a.y
                 ),
-                ropeLengthPx
-            );
-            control2 = add(
-                scale(tangent, control2.x),
-                scale(normal, control2.y * normalSign)
-            );
-            Point c = add(d, control2);
-            POINT cInt = { (int)round(c.x), (int)round(c.y) };
-            lastTangent = scale(control2, -1 / sqrt(dot(control2, control2)));
-            dragPoints[3 * i + 2] = cInt;
-
-            dragPoints[3 * i + 3] = dInt;
-            if (i == 1 && graphics->arrowHead) {
-                Point lastNormal = leftTurn(lastTangent);
-                Point e = add(
-                    d,
-                    add(
-                        scale(lastTangent, -arrowLengthPx),
-                        scale(lastNormal, -arrowRadiusPt)
-                    )
-                );
-                Point f = add(
-                    d,
-                    add(
-                        scale(lastTangent, -arrowLengthPx),
-                        scale(lastNormal, arrowRadiusPt)
-                    )
-                );
-                POINT eInt = { (int)round(e.x), (int)round(e.y) };
-                POINT fInt = { (int)round(f.x), (int)round(f.y) };
-                arrowHeadPoints[0] = eInt;
-                arrowHeadPoints[1] = dInt;
-                arrowHeadPoints[2] = fInt;
-            }
-        }
-
-        for (int i = 0; i < 3 * graphics->dragCount - 2; i++) {
-            dragPoints[i].x -= graphics->leftPx;
-            dragPoints[i].y -= graphics->topPx;
-        }
-
-        HPEN pens[2] = {
-            getPen(
-                graphics->labelBackground, graphics->borderPx,
-                DASH_PEN_STYLE, graphics->dashPx, DRAG_PEN_SLOT
-            ),
-            getPen(
-                graphics->borderColor, graphics->borderPx,
-                ALT_DASH_PEN_STYLE, graphics->dashPx, ALT_DRAG_PEN_SLOT
-            ),
         };
-        for (int i = 0; i < 2; i++) {
-            SelectObject(memory, pens[i]);
-            PolyBezier(memory, dragPoints, 3 * graphics->dragCount - 2);
-            if (graphics->arrowHead && graphics->dragCount >= 3) {
-                Polyline(memory, arrowHeadPoints, 3);
-            }
+        if (idealNormalDirection.x == 0 && idealNormalDirection.y == 0) {
+            idealNormalDirection = lastTangent;
+        }
+
+        Point tangent = length > 0 ? scale(vector, 1 / length)
+            : getNormal(idealNormalDirection);
+        Point normal = leftTurn(tangent);
+        int normalSign = copysign(1.0, dot(idealNormalDirection, normal));
+        Point control1 = scale(
+            interpolateKeyframes(
+                keyframes1, KEYFRAME_COUNT, length / ropeLengthPx
+            ),
+            ropeLengthPx
+        );
+        control1 = add(
+            scale(tangent, control1.x),
+            scale(normal, control1.y * normalSign)
+        );
+        Point b = add(a, control1);
+        POINT bInt = { (int)round(b.x), (int)round(b.y) };
+        result.dragPoints[3 * i + 1] = bInt;
+
+        Point control2 = scale(
+            interpolateKeyframes(
+                keyframes2, KEYFRAME_COUNT, length / ropeLengthPx
+            ),
+            ropeLengthPx
+        );
+        control2 = add(
+            scale(tangent, control2.x),
+            scale(normal, control2.y * normalSign)
+        );
+        Point c = add(d, control2);
+        POINT cInt = { (int)round(c.x), (int)round(c.y) };
+        lastTangent = scale(control2, -1 / sqrt(dot(control2, control2)));
+        result.dragPoints[3 * i + 2] = cInt;
+
+        result.dragPoints[3 * i + 3] = dInt;
+        if (i == 1 && graphics->arrowHead) {
+            Point lastNormal = leftTurn(lastTangent);
+            Point e = add(
+                d,
+                add(
+                    scale(lastTangent, -arrowLengthPx),
+                    scale(lastNormal, -arrowRadiusPt)
+                )
+            );
+            Point f = add(
+                d,
+                add(
+                    scale(lastTangent, -arrowLengthPx),
+                    scale(lastNormal, arrowRadiusPt)
+                )
+            );
+            POINT eInt = { (int)round(e.x), (int)round(e.y) };
+            POINT fInt = { (int)round(f.x), (int)round(f.y) };
+            result.arrowHeadPoints[0] = eInt;
+            result.arrowHeadPoints[1] = dInt;
+            result.arrowHeadPoints[2] = fInt;
         }
     }
 
-    DeleteDC(selectionMemory);
-    DeleteDC(labelMemory);
-    DeleteDC(earMemory);
-    ReleaseDC(graphics->window, device);
-    POINT screenPosition = {
-        graphics->leftPx, graphics->topPx + graphics->topCrop
+    for (int i = 0; i < 3 * graphics->dragCount - 2; i++) {
+        result.dragPoints[i].x -= screen.left;
+        result.dragPoints[i].y -= screen.top;
+    }
+
+    HPEN pens[2] = {
+        getPen(
+            graphics->labelBackground, graphics->borderPx,
+            DASH_PEN_STYLE, graphics->dashPx, DRAG_PEN_SLOT
+        ),
+        getPen(
+            graphics->borderColor, graphics->borderPx,
+            ALT_DASH_PEN_STYLE, graphics->dashPx, ALT_DRAG_PEN_SLOT
+        ),
     };
-    SIZE screenSize = {
-        graphics->widthPx,
-        graphics->heightPx - graphics->bottomCrop - graphics->topCrop
-    };
-    POINT memoryPosition = { 0, graphics->topCrop };
-    UpdateLayeredWindow(
-        graphics->window,
-        device,
-        &screenPosition,
-        &screenSize,
-        memory,
-        &memoryPosition,
-        graphics->colorKey,
-        NULL,
-        ULW_COLORKEY
-    );
+    for (int i = 0; i < 2; i++) {
+        SelectObject(memory, pens[i]);
+        PolyBezier(memory, result.dragPoints, 3 * graphics->dragCount - 2);
+        if (graphics->arrowHead && graphics->dragCount >= 3) {
+            Polyline(memory, result.arrowHeadPoints, 3);
+        }
+    }
+
+    return result;
+}
+
+void eraseLabels(
+    LabelGraphics *graphics, HBRUSH keyBrush, DrawLabelsOut drawLabelsOut,
+    Screen screen, HDC memory
+) {
     for (
         int i = graphics->labelRange.start; i < graphics->labelRange.stop; i++
     ) {
-        POINT positionPx = getBubblePositionPx(graphics, i);
+        POINT positionPx = getBubblePositionPx(
+            screen, graphics->layout, graphics->offsetPt, i
+        );
         BOOL xFlip = positionPx.x >= graphics->mirrorStart.x;
         BOOL yFlip = positionPx.y >= graphics->mirrorStart.y;
-        RECT dstRect = labelRects[i];
+        RECT dstRect = drawLabelsOut.labelRects[i];
         OffsetRect(
             &dstRect,
             positionPx.x + (
@@ -1970,29 +1967,88 @@ void redraw(Graphics *graphics) {
         );
         FillRect(memory, &dstRect, keyBrush);
         RECT earRect = {
-            .left = positionPx.x + xFlip * (1 - earSize.cx),
-            .top = positionPx.y + yFlip * (1 - earSize.cy)
+            .left = positionPx.x + xFlip * (1 - drawLabelsOut.earSize.cx),
+            .top = positionPx.y + yFlip * (1 - drawLabelsOut.earSize.cy)
         };
-        earRect.right = earRect.left + earSize.cx;
-        earRect.bottom = earRect.top + earSize.cy;
+        earRect.right = earRect.left + drawLabelsOut.earSize.cx;
+        earRect.bottom = earRect.top + drawLabelsOut.earSize.cy;
         FillRect(memory, &earRect, keyBrush);
     }
 
-    if (graphics->dragCount > 0) {
-        SelectObject(
-            memory,
-            getPen(
-                graphics->colorKey, graphics->borderPx,
-                BOTH_DASH_PEN_STYLE, graphics->dashPx, ERASE_DRAG_PEN_SLOT
-            )
+    // FillRect(memory, &labelBitmapRect, keyBrush);
+}
+
+void eraseDrag(
+    DragGraphics *graphics, COLORREF colorKey, DrawDragOut drawDragOut,
+    HDC memory
+) {
+    SelectObject(
+        memory,
+        getPen(
+            colorKey, graphics->borderPx,
+            BOTH_DASH_PEN_STYLE, graphics->dashPx, ERASE_DRAG_PEN_SLOT
+        )
+    );
+    PolyBezier(memory, drawDragOut.dragPoints, 3 * graphics->dragCount - 2);
+    if (graphics->arrowHead && graphics->dragCount >= 3) {
+        Polyline(memory, drawDragOut.arrowHeadPoints, 3);
+    }
+}
+
+Graphics *lastGraphics = &graphicsOut[0];
+void redraw(Model *model, Screen screen) {
+    Graphics *graphics = getGraphics(model, screen);
+    if (!memcmp(graphics, lastGraphics, sizeof(Graphics))) { return; }
+    lastGraphics = graphics;
+    graphicsOutIndex++;
+    graphicsOutIndex %= 2;
+
+    HDC device = GetDC(model->window);
+    HDC memory = CreateCompatibleDC(device);
+    HBRUSH keyBrush = getBrush(graphics->colorKey, KEY_BRUSH_SLOT);
+    selectKeyBitmap(
+        device, memory, screen.width, screen.height, graphics->colorKey
+    );
+
+    DrawLabelsOut drawLabelsOut;
+    if (graphics->showLabels) {
+        drawLabelsOut = drawLabels(
+            &graphics->lg, graphics->colorKey, screen, device, memory
         );
-        PolyBezier(memory, dragPoints, 3 * graphics->dragCount - 2);
-        if (graphics->arrowHead && graphics->dragCount >= 3) {
-            Polyline(memory, arrowHeadPoints, 3);
-        }
     }
 
-    // FillRect(memory, &labelBitmapRect, keyBrush);
+    DrawDragOut drawDragOut;
+    if (graphics->dg.dragCount > 0) {
+        drawDragOut = drawDrag(&graphics->dg, screen, memory);
+    }
+
+    ReleaseDC(model->window, device);
+
+    POINT screenPosition = { screen.left, screen.top + screen.topCrop };
+    SIZE screenSize = {
+        screen.width,
+        screen.height - screen.bottomCrop - screen.topCrop
+    };
+    POINT memoryPosition = { 0, screen.topCrop };
+    UpdateLayeredWindow(
+        model->window,
+        device,
+        &screenPosition,
+        &screenSize,
+        memory,
+        &memoryPosition,
+        graphics->colorKey,
+        NULL,
+        ULW_COLORKEY
+    );
+
+    if (graphics->showLabels) {
+        eraseLabels(&graphics->lg, keyBrush, drawLabelsOut, screen, memory);
+    }
+
+    if (graphics->dg.dragCount > 0) {
+        eraseDrag(&graphics->dg, graphics->colorKey, drawDragOut, memory);
+    }
 
     DeleteDC(memory);
 }
@@ -2041,13 +2097,14 @@ LRESULT CALLBACK WndProc(
             bounds->bottom - bounds->top,
             SWP_NOZORDER | SWP_NOACTIVATE
         );
-        redraw(getGraphics(getModel(window)));
+        Model *model = getModel(window);
+        redraw(model, getScreen(&model->monitor));
         return 0;
     } else if (message == WM_SETTINGCHANGE) {
         if (wParam == SPI_SETNONCLIENTMETRICS) {
             Model *model = getModel(window);
             model->systemFontChanges++;
-            redraw(getGraphics(model));
+            redraw(model, getScreen(&model->monitor));
             return 0;
         }
     } else if (message == WM_DESTROY) {
@@ -2552,28 +2609,31 @@ LRESULT CALLBACK DlgProc(
                         || (GetKeyState(keys.up) & PRESSED)
                 );
                 Model *model = getModel(dialog);
-                Graphics *graphics = getGraphics(model);
-                Point deltaPt;
+                Screen screen = getScreen(&model->monitor);
+                Point oldOffsetPt = model->offsetPt;
                 if (slow) {
                     model->offsetPt.x += xDirection
-                        * pxToPt(model->smallDeltaPx, graphics->dpi);
+                        * pxToPt(model->smallDeltaPx, screen.dpi);
                     model->offsetPt.y += yDirection
-                        * pxToPt(model->smallDeltaPx, graphics->dpi);
+                        * pxToPt(model->smallDeltaPx, screen.dpi);
                 } else {
                     model->offsetPt.x += xDirection
-                        * pxToPt(model->deltaPx, graphics->dpi);
+                        * pxToPt(model->deltaPx, screen.dpi);
                     model->offsetPt.y += yDirection
-                        * pxToPt(model->deltaPx, graphics->dpi);
+                        * pxToPt(model->deltaPx, screen.dpi);
                 }
 
                 LPWSTR newText = model->text;
-                if (graphics->labelRange.matchLength > 0) {
-                    graphics->offsetPt = model->offsetPt;
+                Layout layout = getLayout(model, screen);
+                LabelRange labelRange = getLabelRange(
+                    model->text, layout.count
+                );
+                if (labelRange.matchLength > 0) {
                     POINT cursorPos = getBubblePositionPx(
-                        graphics, graphics->labelRange.start
+                        screen, layout, model->offsetPt, labelRange.start
                     );
-                    cursorPos.x += graphics->leftPx;
-                    cursorPos.y += graphics->topPx;
+                    cursorPos.x += screen.left;
+                    cursorPos.y += screen.top;
                     setMatchPoint(model, cursorPos);
                 } else {
                     LPWSTR temp = model->text;
@@ -2582,11 +2642,10 @@ LRESULT CALLBACK DlgProc(
                     model->text = temp;
                     POINT cursorPos;
                     GetCursorPos(&cursorPos);
-                    cursorPos.x += ptToIntPx(model->offsetPt.x, graphics->dpi)
-                        - ptToIntPx(graphics->offsetPt.x, graphics->dpi);
-                    cursorPos.y += ptToIntPx(model->offsetPt.y, graphics->dpi)
-                        - ptToIntPx(graphics->offsetPt.y, graphics->dpi);
-                    graphics->offsetPt = model->offsetPt;
+                    cursorPos.x += ptToIntPx(model->offsetPt.x, screen.dpi)
+                        - ptToIntPx(oldOffsetPt.x, screen.dpi);
+                    cursorPos.y += ptToIntPx(model->offsetPt.y, screen.dpi)
+                        - ptToIntPx(oldOffsetPt.y, screen.dpi);
                     SetCursorPos(cursorPos.x, cursorPos.y);
                     if (model->dragCount > 0) {
                         GetCursorPos(&model->naturalPoint);
@@ -2612,12 +2671,7 @@ LRESULT CALLBACK DlgProc(
                         textBox, EM_SETSEL, start + delta, stop + delta
                     );
                 } else {
-                    if (graphics->dragCount > model->dragCount) {
-                        graphics->drag[model->dragCount] = model->hasMatch
-                            ? model->matchPoint : model->naturalPoint;
-                    }
-
-                    redraw(graphics);
+                    redraw(model, screen);
                 }
 
                 return TRUE;
@@ -2722,6 +2776,18 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 return TRUE;
+            } else if (command == IDM_SHOW_LABELS) {
+                Model *model = getModel(dialog);
+                model->showLabels = !model->showLabels;
+                MENUITEMINFO menuItemInfo = {
+                    .cbSize = sizeof(MENUITEMINFO),
+                    .fMask = MIIM_STATE,
+                    .fState = model->showLabels ? MFS_CHECKED : MFS_UNCHECKED,
+                };
+                SetMenuItemInfo(
+                    getDropdownMenu(), IDM_SHOW_LABELS, FALSE, &menuItemInfo
+                );
+                redraw(model, getScreen(&model->monitor));
             } else if (command == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
                 model->showCaption = !model->showCaption;
@@ -2789,29 +2855,23 @@ LRESULT CALLBACK DlgProc(
                     }
                 }
 
-                Graphics *graphics = getGraphics(model);
-                if (graphics->labelRange.matchLength > 0) {
+                Screen screen = getScreen(&model->monitor);
+                Layout layout = getLayout(model, screen);
+                LabelRange labelRange = getLabelRange(
+                    model->text, layout.count
+                );
+                if (labelRange.matchLength > 0) {
                     POINT cursorPos = getBubblePositionPx(
-                        graphics, graphics->labelRange.start
+                        screen, layout, model->offsetPt, labelRange.start
                     );
-                    cursorPos.x += graphics->leftPx;
-                    cursorPos.y += graphics->topPx;
+                    cursorPos.x += screen.left;
+                    cursorPos.y += screen.top;
                     setMatchPoint(model, cursorPos);
                 } else {
                     unsetMatchPoint(model);
                 }
 
-                if (graphics->dragCount > model->dragCount) {
-                    graphics->drag[model->dragCount] = model->hasMatch
-                        ? model->matchPoint : model->naturalPoint;
-                }
-
-                if (graphics->dragCount > 0) {
-                    graphics->drag[model->dragCount - 1]
-                        = model->drag[model->dragCount - 1];
-                }
-
-                redraw(graphics);
+                redraw(model, screen);
                 LPWSTR newText = NULL;
                 if (path.hidePath) {
                     model->showingPath = FALSE;
@@ -2935,6 +2995,7 @@ int CALLBACK WinMain(
         .textBoxWidthPt = 15,
         .dropdownWidthPt = 15,
         .clientHeightPt = 21,
+        .showLabels = TRUE,
         .showCaption = TRUE,
         .minTextBoxSize = { 0, 0 },
         .inMenuLoop = FALSE,
@@ -2980,7 +3041,7 @@ int CALLBACK WinMain(
     );
     SetWindowLongPtr(model.window, GWLP_USERDATA, (LONG)&model);
     model.dialog = CreateDialog(hInstance, L"TOOL", model.window, DlgProc);
-    redraw(getGraphics(&model));
+    redraw(&model, getScreen(&model.monitor));
 
     MSG message;
     while (GetMessage(&message, NULL, 0, 0)) {
