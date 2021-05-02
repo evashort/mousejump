@@ -2310,6 +2310,20 @@ void unsetMatchPoint(Model *model) {
     model->hasMatch = FALSE;
 }
 
+typedef struct {
+    HMONITOR oldMonitor, newMonitor, firstMonitor;
+    BOOL chooseNext;
+} MonitorCallbackVars;
+BOOL __stdcall SwitchMonitorCallback(
+    HMONITOR monitor, HDC device, LPRECT bounds, LPARAM varsParam
+) {
+    MonitorCallbackVars *vars = (MonitorCallbackVars*)varsParam;
+    if (vars->firstMonitor == NULL) { vars->firstMonitor = monitor; }
+    if (vars->chooseNext) { vars->newMonitor = monitor; return FALSE; }
+    if (monitor == vars->oldMonitor) { vars->chooseNext = TRUE; }
+    return TRUE;
+}
+
 const int PRESSED = 0x8000;
 const UINT WM_APP_FITTOTEXT = WM_APP + 0;
 const int ENABLE_DROPDOWN_TIMER = 1;
@@ -2787,6 +2801,30 @@ LRESULT CALLBACK DlgProc(
                 SetMenuItemInfo(
                     getDropdownMenu(), IDM_SHOW_LABELS, FALSE, &menuItemInfo
                 );
+                redraw(model, getScreen(&model->monitor));
+            } else if (command == IDM_SWITCH_MONITOR) {
+                Model *model = getModel(dialog);
+                MonitorCallbackVars vars = {
+                    .oldMonitor = model->monitor,
+                    .newMonitor = NULL,
+                    .firstMonitor = NULL,
+                    .chooseNext = FALSE,
+                };
+                EnumDisplayMonitors(
+                    NULL, NULL, SwitchMonitorCallback, (LPARAM)&vars
+                );
+                if (vars.newMonitor == NULL && vars.chooseNext) {
+                    vars.newMonitor = vars.firstMonitor;
+                }
+
+                if (vars.newMonitor == NULL) {
+                    POINT origin = { 0, 0 };
+                    vars.newMonitor = MonitorFromPoint
+                        (origin, MONITOR_DEFAULTTOPRIMARY
+                    );
+                }
+
+                model->monitor = vars.newMonitor;
                 redraw(model, getScreen(&model->monitor));
             } else if (command == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
