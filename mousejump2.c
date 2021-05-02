@@ -2695,7 +2695,6 @@ LRESULT CALLBACK DlgProc(
                 Model *model = getModel(dialog);
                 ShowWindow(model->window, SW_MINIMIZE);
                 if (model->dragCount > 0) {
-                    model->dragCount = 0;
                     POINT dragStart = model->drag[0];
                     SetCursorPos(dragStart.x, dragStart.y);
                     INPUT mouseDown = {
@@ -2713,14 +2712,23 @@ LRESULT CALLBACK DlgProc(
                         dragStart.x + (int)round(vector.x),
                         dragStart.y + (int)round(vector.y)
                     );
-                    Sleep(100);
+                    Sleep(1000);
+                    if (model->dragCount > 1) {
+                        SetCursorPos(model->drag[1].x, model->drag[1].y);
+                        if (model->dragCount >= 3) {
+                            cursor = model->drag[2];
+                        }
+
+                        Sleep(1000);
+                    }
                     SetCursorPos(cursor.x, cursor.y);
-                    Sleep(100);
+                    Sleep(1000);
                     INPUT mouseUp = {
                         .type = INPUT_MOUSE,
                         .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
                     };
                     SendInput(1, &mouseUp, sizeof(INPUT));
+                    SetTimer(dialog, RESTORE_WINDOW_TIMER, 1000, NULL);
                 } else {
                     INPUT click[2] = {
                         {
@@ -2759,7 +2767,6 @@ LRESULT CALLBACK DlgProc(
                     newText = textFromPath(model->dragCount + 1, L"");
                     click = model->dragCount == 1;
                 } else {
-                    newText = textFromPath(model->dragCount, L"");
                     click = TRUE;
                 }
 
