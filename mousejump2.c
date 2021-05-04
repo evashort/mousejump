@@ -2271,6 +2271,51 @@ LPWSTR setNaturalEdge(LPWSTR text, BOOL naturalEdge) {
     return text;
 }
 
+LPWSTR removeSuffix(LPWSTR text) {
+    LPWSTR node = L","; int nodeLength = wcslen(node);
+    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
+    int prefixLength;
+    LPWSTR suffix = text;
+    while (!wcsncmp(suffix, node, nodeLength)) {
+        suffix += nodeLength;
+        while (!wcsncmp(suffix, node, nodeLength)) { suffix += nodeLength; }
+        prefixLength = suffix - text;
+        while (!wcsncmp(suffix, edge, edgeLength)) { suffix += edgeLength; }
+    }
+
+    LPWSTR prefix = getText(prefixLength + 1, TEMP_TEXT_SLOT);
+    wcsncpy_s(prefix, prefixLength + 1, text, _TRUNCATE);
+    return prefix;
+}
+
+BOOL getDragChecked(Model *model) {
+    if (model->dragCount <= 0) { return FALSE; }
+    POINT start = model->drag[model->dragCount - 1];
+    POINT stop = model->hasMatch ? model->matchPoint : model->naturalPoint;
+    return start.x == stop.x && start.y == stop.y;
+}
+
+LPWSTR dragMenuTexts[4] = {
+    L"Set &drag start\tComma (,)",
+    L"Click, set &drag midpoint\tComma (,)",
+    L"Set &drag end\tComma (,)",
+    L"Click (preserves &drag path)\tComma (,)",
+};
+void updateDragChecked(Model *model, BOOL wasChecked) {
+    BOOL isChecked = getDragChecked(model);
+    if (isChecked != wasChecked) {
+        MENUITEMINFO menuItemInfo = {
+            .cbSize = sizeof(MENUITEMINFO),
+            .fMask = MIIM_STATE | MIIM_STRING,
+            .fState = isChecked ? MFS_CHECKED : MFS_UNCHECKED,
+            .dwTypeData = dragMenuTexts[model->dragCount - isChecked],
+        };
+        SetMenuItemInfo(
+            getDropdownMenu(), IDM_START_DRAGGING, FALSE, &menuItemInfo
+        );
+    }
+}
+
 void setMatchPoint(Model *model, POINT matchPoint) {
     POINT cursorPos;
     GetCursorPos(&cursorPos);
@@ -2554,10 +2599,16 @@ LRESULT CALLBACK DlgProc(
             KillTimer(dialog, wParam);
             Model *model = getModel(dialog);
             ShowWindow(model->window, SW_SHOWNORMAL);
-            if (!model->showingPath) {
-                SetDlgItemText(dialog, IDC_TEXTBOX, L"");
-            }
-
+            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+            DWORD start, stop;
+            SendMessage(textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop);
+            LPWSTR newText = removeSuffix(model->text);
+            SetWindowText(textBox, newText);
+            int length = wcslen(newText);
+            SendMessage(
+                GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
+                min(start, length), min(stop, length)
+            );
             return TRUE;
         }
     } else if (message == WM_NCHITTEST && skipHitTest) {
@@ -2623,6 +2674,7 @@ LRESULT CALLBACK DlgProc(
                         || (GetKeyState(keys.up) & PRESSED)
                 );
                 Model *model = getModel(dialog);
+                BOOL wasChecked = getDragChecked(model);
                 Screen screen = getScreen(&model->monitor);
                 Point oldOffsetPt = model->offsetPt;
                 if (slow) {
@@ -2672,6 +2724,7 @@ LRESULT CALLBACK DlgProc(
                     }
                 }
 
+                updateDragChecked(model, wasChecked);
                 if (newText != model->text) {
                     model->showingPath = FALSE;
                     HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
@@ -2871,6 +2924,7 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
                 Model *model = getModel(dialog);
+                BOOL wasChecked = getDragChecked(model);
                 TextPath path = getTextPath(model->text);
                 model->showingPath = model->showingPath || path.nodeCount > 0;
                 if (model->showingPath) {
@@ -2882,6 +2936,7 @@ LRESULT CALLBACK DlgProc(
                             model->naturalPoint = end;
                             model->drag[model->dragCount] = end;
                             model->dragCount++;
+                            wasChecked = FALSE;
                         }
                     } else if (path.nodeCount < model->dragCount) {
                         model->dragCount = path.nodeCount;
@@ -2893,9 +2948,11 @@ LRESULT CALLBACK DlgProc(
                             SetCursorPos(
                                 model->naturalPoint.x, model->naturalPoint.y
                             );
+                            wasChecked = TRUE;
                         } else {
                             model->naturalPoint
                                 = model->drag[path.nodeCount - 1];
+                            wasChecked = FALSE;
                         }
                     }
                 }
@@ -2916,6 +2973,7 @@ LRESULT CALLBACK DlgProc(
                     unsetMatchPoint(model);
                 }
 
+                updateDragChecked(model, wasChecked);
                 redraw(model, screen);
                 LPWSTR newText = NULL;
                 if (path.hidePath) {
@@ -2988,7 +3046,11 @@ int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
                         (WPARAM)&selectionStart,
                         (LPARAM)&selectionStop
                     );
-                    if (selectionStart < GetWindowTextLength(textBox)) {
+                    if (
+                        selectionStart < GetWindowTextLength(textBox) && (
+                            message->wParam == VK_RIGHT || selectionStop > 0
+                        )
+                    ) {
                         return 0;
                     }
                 }
