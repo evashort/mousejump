@@ -2303,17 +2303,51 @@ LPWSTR dragMenuTexts[4] = {
 };
 void updateDragChecked(Model *model, BOOL wasChecked) {
     BOOL isChecked = getDragChecked(model);
-    if (isChecked != wasChecked) {
-        MENUITEMINFO menuItemInfo = {
-            .cbSize = sizeof(MENUITEMINFO),
-            .fMask = MIIM_STATE | MIIM_STRING,
-            .fState = isChecked ? MFS_CHECKED : MFS_UNCHECKED,
-            .dwTypeData = dragMenuTexts[model->dragCount - isChecked],
-        };
-        SetMenuItemInfo(
-            getDropdownMenu(), IDM_START_DRAGGING, FALSE, &menuItemInfo
-        );
-    }
+    if (isChecked == wasChecked) { return; }
+    MENUITEMINFO info = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STATE | MIIM_STRING,
+        .fState = isChecked ? MFS_CHECKED : MFS_UNCHECKED,
+        .dwTypeData = dragMenuTexts[model->dragCount - isChecked],
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_START_DRAGGING, FALSE, &info);
+}
+
+BOOL getDragEnabled(Model *model) {
+    if (model->dragCount != 1) { return model->dragCount > 0; }
+    POINT start = model->drag[model->dragCount - 1];
+    POINT stop = model->hasMatch ? model->matchPoint : model->naturalPoint;
+    return start.x != stop.x || start.y != stop.y;
+}
+
+LPWSTR clickTexts[2] = {
+    L"&Click\tSpacebar", L"Dra&g\tSpacebar",
+};
+LPWSTR rightClickTexts[2] = {
+    L"&Right-click\tPeriod (.)", L"Drag with &right mouse button\tPeriod (.)",
+};
+LPWSTR wheelClickTexts[2] = {
+    L"&Click\tSingle-quote (')", L"Dra&g\tSingle-quote (')",
+};
+void updateDragEnabled(Model *model, BOOL wasEnabled) {
+    BOOL isEnabled = getDragEnabled(model);
+    if (isEnabled == wasEnabled) { return; }
+    MENUITEMINFO info = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STRING,
+        .dwTypeData = clickTexts[isEnabled],
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_CLICK, FALSE, &info);
+    info.dwTypeData = rightClickTexts[isEnabled];
+    SetMenuItemInfo(getDropdownMenu(), IDM_RIGHT_CLICK, FALSE, &info);
+    info.dwTypeData = wheelClickTexts[isEnabled];
+    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &info);
+    MENUITEMINFO doubleClick = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STATE,
+        .fState = isEnabled ? MFS_DISABLED : MFS_ENABLED,
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_DOUBLE_CLICK, FALSE, &doubleClick);
 }
 
 void setMatchPoint(Model *model, POINT matchPoint) {
@@ -2675,6 +2709,7 @@ LRESULT CALLBACK DlgProc(
                 );
                 Model *model = getModel(dialog);
                 BOOL wasChecked = getDragChecked(model);
+                BOOL wasEnabled = getDragEnabled(model);
                 Screen screen = getScreen(&model->monitor);
                 Point oldOffsetPt = model->offsetPt;
                 if (slow) {
@@ -2725,6 +2760,7 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 updateDragChecked(model, wasChecked);
+                updateDragEnabled(model, wasEnabled);
                 if (newText != model->text) {
                     model->showingPath = FALSE;
                     HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
@@ -2925,6 +2961,7 @@ LRESULT CALLBACK DlgProc(
             } else if (HIWORD(wParam) == EN_CHANGE) {
                 Model *model = getModel(dialog);
                 BOOL wasChecked = getDragChecked(model);
+                BOOL wasEnabled = getDragEnabled(model);
                 TextPath path = getTextPath(model->text);
                 model->showingPath = model->showingPath || path.nodeCount > 0;
                 if (model->showingPath) {
@@ -2974,6 +3011,7 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 updateDragChecked(model, wasChecked);
+                updateDragEnabled(model, wasEnabled);
                 redraw(model, screen);
                 LPWSTR newText = NULL;
                 if (path.hidePath) {
