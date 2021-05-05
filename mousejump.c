@@ -2310,7 +2310,7 @@ void updateDragChecked(Model *model, BOOL wasChecked) {
         .fState = isChecked ? MFS_CHECKED : MFS_UNCHECKED,
         .dwTypeData = dragMenuTexts[model->dragCount - isChecked],
     };
-    SetMenuItemInfo(getDropdownMenu(), IDM_START_DRAGGING, FALSE, &info);
+    SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &info);
 }
 
 BOOL getDragEnabled(Model *model) {
@@ -2625,6 +2625,8 @@ LRESULT CALLBACK DlgProc(
             Button_Enable(button, TRUE);
             if (GetFocus() == NULL) { SetFocus(button); }
             SetWindowRedraw(button, TRUE);
+            // invalidate in case window size changed while redraw was false
+            RedrawWindow(button, NULL, NULL, RDW_INVALIDATE);
             KillTimer(dialog, wParam);
             SetMenu(dialog, NULL);
             applyMinDialogSize(dialog);
@@ -2834,7 +2836,7 @@ LRESULT CALLBACK DlgProc(
 
                 SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
                 return TRUE;
-            } else if (command == IDM_START_DRAGGING) {
+            } else if (command == IDM_DRAG) {
                 Model *model = getModel(dialog);
                 BOOL erase = FALSE;
                 if (model->dragCount > 0) {
