@@ -66,12 +66,12 @@ LPCWSTR str(int number) {
 
 #pragma region brushesAndPens
 
-const int KEY_BRUSH_SLOT = 0;
-const int LABEL_BRUSH_SLOT = 1;
-#define BRUSH_SLOT_COUNT 2
+typedef enum {
+    KEY_BRUSH_SLOT = 0, LABEL_BRUSH_SLOT, BRUSH_SLOT_COUNT,
+} BrushSlot;
 COLORREF brushesIn[BRUSH_SLOT_COUNT];
 HBRUSH brushesOut[BRUSH_SLOT_COUNT] = { NULL };
-HBRUSH getBrush(COLORREF color, int slot) {
+HBRUSH getBrush(COLORREF color, BrushSlot slot) {
     if (brushesOut[slot]) {
         if (color == brushesIn[slot]) { return brushesOut[slot]; }
         DeleteObject(brushesOut[slot]);
@@ -80,20 +80,23 @@ HBRUSH getBrush(COLORREF color, int slot) {
     return brushesOut[slot] = CreateSolidBrush(brushesIn[slot] = color);
 }
 
-const int BORDER_PEN_SLOT = 0;
-const int DRAG_PEN_SLOT = 1;
-const int ALT_DRAG_PEN_SLOT = 2;
-const int ERASE_DRAG_PEN_SLOT = 3;
-#define PEN_SLOT_COUNT 4
+typedef enum {
+    BORDER_PEN_SLOT = 0,
+    DRAG_PEN_SLOT,
+    ALT_DRAG_PEN_SLOT,
+    ERASE_DRAG_PEN_SLOT,
+    PEN_SLOT_COUNT,
+} PenSlot;
 
-const int SOLID_PEN_STYLE = 0;
-const int DASH_PEN_STYLE = 1;
-const int ALT_DASH_PEN_STYLE = 2;
-const int BOTH_DASH_PEN_STYLE = 3;
+typedef enum {
+    SOLID_PEN_STYLE, DASH_PEN_STYLE, ALT_DASH_PEN_STYLE, BOTH_DASH_PEN_STYLE,
+} PenStyle;
 typedef struct { COLORREF color; int width, style, dashLength; } PenIn;
 PenIn pensIn[PEN_SLOT_COUNT];
 HPEN pensOut[PEN_SLOT_COUNT] = { NULL };
-HPEN getPen(COLORREF color, int width, int style, int dashLength, int slot) {
+HPEN getPen(
+    COLORREF color, int width, PenStyle style, int dashLength, PenSlot slot
+) {
     PenIn in;
     ZeroMemory(&in, sizeof(in));
     in.color = color;
@@ -491,7 +494,7 @@ RECT *selectLabelBitmapHelp(
     LabelBitmapIn *labelBitmapIn, LabelBitmapOut *labelBitmapOut
 ) {
     LabelBitmapIn in;
-    ZeroMemory(&labelFontIn, sizeof(in));
+    ZeroMemory(&in, sizeof(in));
     in.count = count;
     in.paddingPx = paddingPx;
     in.foreground = GetTextColor(memory);
@@ -780,12 +783,12 @@ int nextPowerOf2(int n, int start) {
     return result;
 }
 
-const int MODEL_TEXT_SLOT = 0;
-const int TEMP_TEXT_SLOT = 1;
-#define TEXT_SLOT_COUNT 2
+typedef enum {
+    MODEL_TEXT_SLOT = 0, TEMP_TEXT_SLOT, TEXT_SLOT_COUNT
+} TextSlot;
 int textsIn[TEXT_SLOT_COUNT] = { 0, 0 };
 LPWSTR textsOut[TEXT_SLOT_COUNT] = { NULL, NULL };
-LPWSTR getText(int capacity, int slot) {
+LPWSTR getText(int capacity, TextSlot slot) {
     if (textsIn[slot] < capacity) {
         textsIn[slot] = nextPowerOf2(capacity, 64);
         textsOut[slot] = realloc(
@@ -1336,6 +1339,41 @@ int getBubbleCount(
     );
 }
 
+typedef union {
+    int milliseconds;
+    POINT point;
+} ActionParam;
+ActionParam actionParamNone;
+ActionParam actionParamMilliseconds(int milliseconds) {
+    actionParamNone.milliseconds = milliseconds; return actionParamNone;
+}
+ActionParam actionParamPoint(POINT point) {
+    actionParamNone.point = point; return actionParamNone;
+}
+
+// https://stackoverflow.com/questions/7259238/how-to-forward-typedefd-struct-in-h
+typedef struct Model Model;
+
+typedef struct {
+    BOOL (*function)(Model*, ActionParam);
+    ActionParam param;
+} Action;
+struct { Action *actions; int capacity; } actionListOut = { .actions = NULL };
+Action *getActionList(int capacity, Action *oldList) {
+    int oldCapacity = actionListOut.capacity
+        - (oldList - actionListOut.actions);
+    if (capacity <= oldCapacity) { return actionListOut.actions; }
+    memmove_s(
+        actionListOut.actions, actionListOut.capacity * sizeof(Action),
+        oldList, oldCapacity * sizeof(Action)
+    );
+    if (capacity <= actionListOut.capacity) { return actionListOut.actions; }
+    actionListOut.capacity = nextPowerOf2(capacity, 64);
+    return actionListOut.actions = realloc(
+        actionListOut.actions, actionListOut.capacity * sizeof(Action)
+    );
+}
+
 double pxToPt(double px, UINT dpi) { return px * 72 / (double)dpi; }
 double intPxToPt(int px, UINT dpi) {
     return (double)px * 72 / (double)dpi;
@@ -1393,9 +1431,10 @@ void destroyCache() {
     free(bubblesOut.bubbles);
     free(bubblesOut.added);
     free(bubblesOut.removed);
+    free(actionListOut.actions);
 }
 
-typedef struct {
+struct Model {
     HWND window;
     HWND dialog;
     HMONITOR monitor;
@@ -1439,7 +1478,9 @@ typedef struct {
     int dragCount;
     POINT drag[3];
     BOOL showingPath;
-} Model;
+    Action *actions;
+    int actionCount;
+};
 
 typedef struct {
     int top, left, width, height, topCrop, bottomCrop;
@@ -2403,10 +2444,61 @@ BOOL __stdcall SwitchMonitorCallback(
     return TRUE;
 }
 
+void addAction(
+    Model *model, BOOL (*function)(Model*, ActionParam), ActionParam param
+) {
+    model->actions = getActionList(model->actionCount + 1, model->actions);
+    model->actions[model->actionCount].function = function;
+    model->actions[model->actionCount].param = param;
+    model->actionCount++;
+}
+
+void doActions(Model *model) {
+    if (!IsIconic(model->window)) {
+        model->actions += model->actionCount;
+        model->actionCount = 0;
+    }
+
+    BOOL keepGoing = TRUE;
+    while (keepGoing && model->actionCount > 0) {
+        keepGoing = model->actions->function(model, model->actions->param);
+        model->actions++;
+        model->actionCount--;
+    }
+
+    if (model->actionCount <= 0 && IsIconic(model->window)) {
+        ShowWindow(model->window, SW_RESTORE);
+    }
+}
+
 const int PRESSED = 0x8000;
-const UINT WM_APP_FITTOTEXT = WM_APP + 0;
-const int ENABLE_DROPDOWN_TIMER = 1;
-const int RESTORE_WINDOW_TIMER = 2;
+typedef enum { WM_APP_FITTOTEXT = WM_APP } AppMessage;
+typedef enum { ENABLE_DROPDOWN_TIMER = 1, DO_ACTIONS_TIMER } TimerID;
+BOOL sleep(Model *model, ActionParam param) {
+    SetTimer(model->dialog, DO_ACTIONS_TIMER, param.milliseconds, NULL);
+    return FALSE;
+}
+
+BOOL mouseToDragEnd(Model *model, ActionParam param) {
+    HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
+    DWORD start, stop;
+    SendMessage(textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop);
+    LPWSTR newText = removeSuffix(model->text);
+    SetWindowText(textBox, newText);
+    int length = wcslen(newText);
+    SendMessage(
+        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
+        min(start, length), min(stop, length)
+    );
+    return TRUE;
+}
+
+BOOL clearTextbox(Model *model, ActionParam param) {
+    model->showingPath = TRUE;
+    SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
+    return TRUE;
+}
+
 LRESULT CALLBACK DlgProc(
     HWND dialog,
     UINT message,
@@ -2631,20 +2723,9 @@ LRESULT CALLBACK DlgProc(
             SetMenu(dialog, NULL);
             applyMinDialogSize(dialog);
             return TRUE;
-        } else if (wParam == RESTORE_WINDOW_TIMER) {
+        } else if (wParam == DO_ACTIONS_TIMER) {
             KillTimer(dialog, wParam);
-            Model *model = getModel(dialog);
-            ShowWindow(model->window, SW_SHOWNORMAL);
-            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-            DWORD start, stop;
-            SendMessage(textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop);
-            LPWSTR newText = removeSuffix(model->text);
-            SetWindowText(textBox, newText);
-            int length = wcslen(newText);
-            SendMessage(
-                GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
-                min(start, length), min(stop, length)
-            );
+            doActions(getModel(dialog));
             return TRUE;
         }
     } else if (message == WM_NCHITTEST && skipHitTest) {
@@ -2819,7 +2900,9 @@ LRESULT CALLBACK DlgProc(
                         .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
                     };
                     SendInput(1, &mouseUp, sizeof(INPUT));
-                    SetTimer(dialog, RESTORE_WINDOW_TIMER, 1000, NULL);
+                    addAction(model, sleep, actionParamMilliseconds(1000));
+                    addAction(model, clearTextbox, actionParamNone);
+                    doActions(model);
                 } else {
                     INPUT click[2] = {
                         {
@@ -2834,7 +2917,9 @@ LRESULT CALLBACK DlgProc(
                     SendInput(2, click, sizeof(INPUT));
                 }
 
-                SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
+                addAction(model, sleep, actionParamMilliseconds(100));
+                addAction(model, clearTextbox, actionParamNone);
+                doActions(model);
                 return TRUE;
             } else if (command == IDM_DRAG) {
                 Model *model = getModel(dialog);
@@ -2884,7 +2969,9 @@ LRESULT CALLBACK DlgProc(
                         },
                     };
                     SendInput(2, click, sizeof(INPUT));
-                    SetTimer(dialog, RESTORE_WINDOW_TIMER, 100, NULL);
+                    addAction(model, sleep, actionParamMilliseconds(100));
+                    addAction(model, mouseToDragEnd, actionParamNone);
+                    doActions(model);
                 }
 
                 return TRUE;
@@ -3150,6 +3237,8 @@ int CALLBACK WinMain(
         .hasMatch = FALSE,
         .dragCount = 0,
         .showingPath = FALSE,
+        .actions = NULL,
+        .actionCount = 0,
     };
 
     WNDCLASS windowClass = {
