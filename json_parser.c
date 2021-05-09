@@ -138,7 +138,7 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
             LPCWSTR errors[CONTEXT_COUNT] = {
                 L"%1$s string has unescaped %2$s",
                 L"First key in %1$s object has unescaped %2$s",
-                L"Key after %1$s has unescaped %2$s",
+                L"After %1$s, next key has unescaped %2$s",
             };
             return errors[context]; // has unescaped U+1F
         } else if (**json < 0x80) {
@@ -148,7 +148,7 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
             LPWSTR errors[CONTEXT_COUNT] = {
                 L"%1$s string has %2$s",
                 L"First key in %1$s object has %2$s",
-                L"Key after %1$s has %2$s",
+                L"After %1$s, next key has %2$s",
             };
             if (
                 **json < 0xc0
