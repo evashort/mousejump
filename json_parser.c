@@ -56,97 +56,231 @@ BOOL parseNumber(LPCBYTE *json, LPCBYTE stop) {
     return TRUE;
 }
 
-BOOL parseString(LPCBYTE *json, LPCBYTE stop) {
-    if (!chomp('"', json, stop)) { return FALSE; }
+void bytesToHex(LPWSTR dest, size_t destSize, LPCBYTE source, size_t count) {
+    int i = 0;
+    for (; i < min(destSize - 1, 2 * count); i++) {
+        BYTE b = source[i / 2];
+        if (i % 2) { b &= 0xf; } else { b >>= 4; }
+        dest[i] = b < 0xa ? L'0' + b : L'a' + b - 0xa;
+    }
+
+    dest[i] = L'\0';
+}
+
+typedef enum {
+    VALUE_CONTEXT = 0, FIRST_KEY_CONTEXT, KEY_CONTEXT, CONTEXT_COUNT,
+} StringContext;
+#define UNICODE_ESCAPE_ERROR_LENGTH 200
+LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
+    if (!chomp('"', json, stop)) {
+        if (*json >= stop) {
+            LPCWSTR errors[CONTEXT_COUNT] = {
+                L"Missing %1$s string before %2$s",
+                L"Unexpected %2$s at start of %1$s object",
+                L"Unexpected %2$s after %1$s",
+            };
+            return errors[context];
+        } else {
+            LPCWSTR errors[CONTEXT_COUNT] = {
+                L"%1$s string must start with \", not %2$s",
+                L"%1$s object missing \" before first key %2$s",
+                L"After %1$s, missing \" before next key %2$s",
+            };
+            return errors[context];
+        }
+    }
+
     while (TRUE) {
-        if (chomp('"', json, stop)) { return TRUE; }
-        if (chomp('\\', json, stop)) {
+        if (chomp('"', json, stop)) { return NULL; }
+        if (*json + 1 < stop && chomp('\\', json, stop)) {
+            LPWSTR errors[CONTEXT_COUNT] = {
+                L"%1$s string has unknown escape sequence \\12345",
+                L"First key in %1$s object has unknown escape sequence "
+                    L"\\12345",
+                L"After %1$s, next key has unknown escape sequence \\12345",
+            };
+            LPCBYTE escapeStart = *json;
             if (chomp('u', json, stop)) {
                 for (int i = 0; i < 4; i++) {
                     if (
                         !chompRange('0', '9', json, stop)
                             && !chompRange('a', 'f', json, stop)
                             && !chompRange('A', 'F', json, stop)
-                    ) { return FALSE; }
+                    ) {
+                        LPWSTR escape = errors[context];
+                        while (*escape != L'\\') { escape++; } escape++;
+                        int escapeLength = MultiByteToWideChar(
+                            CP_UTF8, MB_PRECOMPOSED,
+                            escapeStart, stop - escapeStart, escape, 5
+                        );
+                        escape[escapeLength] = L'\0';
+                        return errors[context];
+                    }
                 }
-            } else if (!chompAny("\"\\/bfnrt", json, stop)) { return FALSE; }
-        } else if (*json >= stop || **json < 0x20) {
-            return FALSE;
+            } else if (!chompAny("\"\\/bfnrt", json, stop)) {
+                LPWSTR escape = errors[context];
+                while (*escape != L'\\') { escape++; } escape++;
+                int escapeLength = MultiByteToWideChar(
+                    CP_UTF8, MB_PRECOMPOSED,
+                    escapeStart, stop - escapeStart, escape, 1
+                );
+                escape[escapeLength] = L'\0';
+                return errors[context];
+            }
+        } else if (*json >= stop) {
+            LPCWSTR errors[CONTEXT_COUNT] = {
+                L"Unexpected %2$s in %1$s string",
+                L"Unexpected %2$s while parsing first key in %1$s object",
+                L"Unexpected %2$s while parsing key after %1$s",
+            };
+            return errors[context];
+        } else if (**json < 0x20) {
+            LPCWSTR errors[CONTEXT_COUNT] = {
+                // TODO: replace "illegal character %2$s" with "%2$s" (U+...)
+                L"%1$s string has illegal character %2$s",
+                L"First key in %1$s object has illegal character %2$s",
+                L"Key after %1$s has illegal character %2$s",
+            };
+            return errors[context];
         } else if (**json < 0x80) {
             *json += 1;
-        } else if (
+        } else if (**json < 0xc0 || **json >= 0xf8) {
             // https://en.wikipedia.org/wiki/UTF-8#Encoding
-            **json < 0xc0 || *json + 1 >= stop || (json[0][1] & 0xc0) != 0x80
-        ) {
-            return FALSE;
-        } else if (**json < 0xe0) {
-            *json += 2;
-        } else if (*json + 2 >= stop || (json[0][2] & 0xc0) != 0x80) {
-            return FALSE;
-        } else if (**json < 0xf0) {
-            *json += 3;
-        } else if (*json + 3 >= stop || (json[0][3] & 0xc0) != 0x80) {
-            return FALSE;
-        } else if (**json < 0xf8) {
-            *json += 4;
+            LPWSTR errors[CONTEXT_COUNT] = {
+                // TODO: replace "invalid UTF-8 byte 0x12" with "%2$s"
+                L"%1$s string has invalid UTF-8 byte 0x12",
+                L"First key in %1$s object has invalid UTF-8 byte 0x12",
+                L"Key after %1$s has invalid UTF-8 byte 0x12",
+            };
+            LPWSTR error = errors[context];
+            bytesToHex(error + wcslen(error) - 2, 3, *json, 1);
+            return error;
         } else {
-            return FALSE;
+            LPWSTR errors[CONTEXT_COUNT] = {
+                // TODO: replace "incomplete UTF-8 character 0x.." with "%2$s"
+                L"%1$s string has incomplete UTF-8 character 0x123456",
+                L"First key in %1$s object has incomplete UTF-8 character "
+                    L"0x123456",
+                L"Key after %1$s has incomplete UTF-8 character 0x123456",
+            };
+            LPWSTR error = errors[context];
+            if (*json + 1 >= stop || (json[0][1] & 0xc0) != 0x80) {
+                bytesToHex(error + wcslen(error) - 6, 7, *json, 1);
+                return error;
+            } else if (**json < 0xe0) {
+                *json += 2;
+            } else if (*json + 2 >= stop || (json[0][2] & 0xc0) != 0x80) {
+                bytesToHex(error + wcslen(error) - 6, 7, *json, 2);
+                return error;
+            } else if (**json < 0xf0) {
+                *json += 3;
+            } else if (*json + 3 >= stop || (json[0][3] & 0xc0) != 0x80) {
+                bytesToHex(error + wcslen(error) - 6, 7, *json, 3);
+                return error;
+            } else if (**json < 0xf8) {
+                *json += 4;
+            }
         }
     }
 }
 
 LPCBYTE WHITESPACE = " \n\r\t";
-BOOL parseValue(LPCBYTE *json, LPCBYTE stop, int depth);
+LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, int depth);
 
-BOOL parseArray(LPCBYTE *json, LPCBYTE stop, int depth) {
-    if (!chomp('[', json, stop)) { return FALSE; }
+LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, int depth) {
+    if (!chomp('[', json, stop)) {
+        if (*json >= stop) { return L"Missing %1$s array before %2$s"; }
+        return L"%1$s array must start with [, not %2$s";
+    }
+
     while (chompAny(WHITESPACE, json, stop));
-    if (chomp(']', json, stop)) { return TRUE; }
+    if (chomp(']', json, stop)) { return NULL; }
     while (TRUE) {
-        if (!parseValue(json, stop, depth + 1)) { return FALSE; }
+        LPCWSTR error = parseValue(json, stop, depth + 1);
+        if (error) { return error; }
         while (chompAny(WHITESPACE, json, stop));
-        if (chomp(']', json, stop)) { return TRUE; }
-        if (!chomp(',', json, stop)) { return FALSE; }
+        if (chomp(']', json, stop)) { return NULL; }
+        if (*json >= stop) {
+            return L"Unexpected %2$s after %1$s";
+        } else if (!chomp(',', json, stop)) {
+            return L"Missing comma or ] between %1$s and %2$s";
+        }
+
         while (chompAny(WHITESPACE, json, stop));
     }
 }
 
-BOOL parseObject(LPCBYTE *json, LPCBYTE stop, int depth) {
-    if (!chomp('{', json, stop)) { return FALSE; }
+LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, int depth) {
+    if (!chomp('{', json, stop)) {
+        if (*json >= stop) { return L"Missing %1$s object before %2$s"; }
+        return L"%1$s object must start with {, not %2$s";
+    }
+
     while (chompAny(WHITESPACE, json, stop));
-    if (chomp('}', json, stop)) { return TRUE; }
+    if (chomp('}', json, stop)) { return NULL; }
+    StringContext context = FIRST_KEY_CONTEXT;
     while (TRUE) {
-        if  (!parseString(json, stop)) { return FALSE; }
+        LPCWSTR error = parseString(json, stop, context);
+        if (error) { return error; }
+        context = KEY_CONTEXT;
         while (chompAny(WHITESPACE, json, stop));
-        if (!chomp(':', json, stop)) { return FALSE; }
-        if (!parseValue(json, stop, depth + 1)) { return FALSE; }
+        if (!chomp(':', json, stop)) {
+            return L"Missing colon between %1$s key and %2$s";
+        }
+        error = parseValue(json, stop, depth + 1);
+        if (error) { return error; }
         while (chompAny(WHITESPACE, json, stop));
-        if (chomp('}', json, stop)) { return TRUE; }
-        if (!chomp(',', json, stop)) { return FALSE; }
+        if (chomp('}', json, stop)) { return NULL; }
+        if (*json >= stop) {
+            return L"Unexpected %2$s after %1$s";
+        } else if (!chomp(',', json, stop)) {
+            return L"Missing comma or } between %1$s value and %2$s";
+        }
+
         while (chompAny(WHITESPACE, json, stop));
     }
 }
 
-BOOL parseValue(LPCBYTE *json, LPCBYTE stop, int depth) {
-    if (depth > 250) { return FALSE; }
+LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, int depth) {
+    if (depth > 250) {
+        return L"JSON structure is more than 250 levels deep";
+    }
+
     while (chompAny(WHITESPACE, json, stop));
-    if (*json >= stop) { return FALSE; }
+    if (*json >= stop) { return L"Missing %1$s value before %2$s"; }
     if (**json == '{') { return parseObject(json, stop, depth); }
     if (**json == '[') { return parseArray(json, stop, depth); }
-    if (**json == '"') { return parseString(json, stop); }
-    if (**json == '-' || (**json >= '0' && **json <= '9')) {
-        return parseNumber(json, stop);
+    if (**json == '"') { return parseString(json, stop, VALUE_CONTEXT); }
+    LPCBYTE temp = *json;
+    BOOL valid;
+    if (*temp == '-' || (*temp >= '0' && *temp <= '9')) {
+        valid = parseNumber(&temp, stop);
+    } else {
+        valid = chompToken("true", &temp, stop)
+            || chompToken("false", &temp, stop)
+            || chompToken("null", &temp, stop);
     }
 
-    return chompToken("true", json, stop)
-        || chompToken("false", json, stop)
-        || chompToken("null", json, stop);
+    if (
+        !valid || chompRange('0', '9', &temp, stop)
+            || chompRange('a', 'z', &temp, stop)
+            || chompRange('A', 'Z', &temp, stop)
+            || chompAny("_.+-", &temp, stop)
+    ) { return L"Could not parse %1$s value %2$s"; }
+    *json = temp;
+    return NULL;
 }
 
-BOOL parseJSON(LPCBYTE json, LPCBYTE stop) {
-    if (!parseValue(&json, stop, 0)) { return FALSE; }
-    while (chompAny(WHITESPACE, &json, stop));
-    return json >= stop;
+LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop) {
+    // TODO: replace with parseObject
+    LPCWSTR error = parseValue(json, stop, 0);
+    if (error) { return error; }
+    while (chompAny(WHITESPACE, json, stop));
+    if (*json < stop) {
+        return L"Expected end of file after %1$s object, not %2$s";
+    }
+
+    return NULL;
 }
 
 OVERLAPPED fileReadIn;
@@ -218,8 +352,10 @@ int main() {
         if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { continue; }
         wcsncpy(name, info.cFileName, path + MAX_PATH - name);
         LPBYTE stop;
-        LPBYTE json = readFile(path, &stop);
-        BOOL valid = parseJSON(json, stop);
+        LPBYTE buffer = readFile(path, &stop);
+        LPBYTE json = buffer;
+        LPCWSTR error = parseJSON(&json, stop);
+        BOOL valid = !error;
         if (info.cFileName[0] != L'i') {
             BOOL expected = info.cFileName[0] == L'y';
             if (valid != expected) {
@@ -227,7 +363,7 @@ int main() {
             }
         }
 
-        free(json);
+        free(buffer);
     } while (FindNextFile(find, &info));
 
     FindClose(find);
