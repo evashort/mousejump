@@ -136,49 +136,41 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
             return errors[context];
         } else if (**json < 0x20) {
             LPCWSTR errors[CONTEXT_COUNT] = {
-                // TODO: replace "illegal character %2$s" with "%2$s" (U+...)
                 L"%1$s string has illegal character %2$s",
                 L"First key in %1$s object has illegal character %2$s",
                 L"Key after %1$s has illegal character %2$s",
             };
-            return errors[context];
+            return errors[context]; // has illegal character U+1F
         } else if (**json < 0x80) {
             *json += 1;
-        } else if (**json < 0xc0 || **json >= 0xf8) {
+        } else {
             // https://en.wikipedia.org/wiki/UTF-8#Encoding
             LPWSTR errors[CONTEXT_COUNT] = {
-                // TODO: replace "invalid UTF-8 byte 0x12" with "%2$s"
-                L"%1$s string has invalid UTF-8 byte 0x12",
-                L"First key in %1$s object has invalid UTF-8 byte 0x12",
-                L"Key after %1$s has invalid UTF-8 byte 0x12",
+                L"%1$s string has %2$s",
+                L"First key in %1$s object has %2$s",
+                L"Key after %1$s has %2$s",
             };
-            LPWSTR error = errors[context];
-            bytesToHex(error + wcslen(error) - 2, 3, *json, 1);
-            return error;
-        } else {
-            LPWSTR errors[CONTEXT_COUNT] = {
-                // TODO: replace "incomplete UTF-8 character 0x.." with "%2$s"
-                L"%1$s string has incomplete UTF-8 character 0x123456",
-                L"First key in %1$s object has incomplete UTF-8 character "
-                    L"0x123456",
-                L"Key after %1$s has incomplete UTF-8 character 0x123456",
-            };
-            LPWSTR error = errors[context];
-            if (*json + 1 >= stop || (json[0][1] & 0xc0) != 0x80) {
-                bytesToHex(error + wcslen(error) - 6, 7, *json, 1);
-                return error;
+            if (
+                **json < 0xc0
+                    || *json + 1 >= stop || (json[0][1] & 0xc0) != 0x80
+            ) {
+                // has invalid UTF-8 byte 0x95
+                // has incomplete UTF-8 character 0xd3
+                return errors[context];
             } else if (**json < 0xe0) {
                 *json += 2;
             } else if (*json + 2 >= stop || (json[0][2] & 0xc0) != 0x80) {
-                bytesToHex(error + wcslen(error) - 6, 7, *json, 2);
-                return error;
+                // has incomplete UTF-8 character 0xe481
+                return errors[context];
             } else if (**json < 0xf0) {
                 *json += 3;
             } else if (*json + 3 >= stop || (json[0][3] & 0xc0) != 0x80) {
-                bytesToHex(error + wcslen(error) - 6, 7, *json, 3);
-                return error;
+                // has incomplete UTF-8 character 0xf48182
+                return errors[context];
             } else if (**json < 0xf8) {
                 *json += 4;
+            } else {
+                return errors[context]; // has invalid UTF-8 byte 0xfb
             }
         }
     }
