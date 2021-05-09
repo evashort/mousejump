@@ -136,11 +136,11 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
             return errors[context];
         } else if (**json < 0x20) {
             LPCWSTR errors[CONTEXT_COUNT] = {
-                L"%1$s string has illegal character %2$s",
-                L"First key in %1$s object has illegal character %2$s",
-                L"Key after %1$s has illegal character %2$s",
+                L"%1$s string has unescaped %2$s",
+                L"First key in %1$s object has unescaped %2$s",
+                L"Key after %1$s has unescaped %2$s",
             };
-            return errors[context]; // has illegal character U+1F
+            return errors[context]; // has unescaped U+1F
         } else if (**json < 0x80) {
             *json += 1;
         } else {
