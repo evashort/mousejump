@@ -70,7 +70,11 @@ void bytesToHex(LPWSTR dest, size_t destSize, LPCBYTE source, size_t count) {
 typedef enum {
     VALUE_CONTEXT = 0, FIRST_KEY_CONTEXT, KEY_CONTEXT, CONTEXT_COUNT,
 } StringContext;
-#define UNICODE_ESCAPE_ERROR_LENGTH 200
+/*
+Invalid escape sequence \u1234 in first key of %1$s object0
+*/
+#define ESCAPE_ERROR_LENGTH 200
+WCHAR parseStringOut[ESCAPE_ERROR_LENGTH];
 LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
     if (!chomp('"', json, stop)) {
         if (*json >= stop) {
@@ -92,85 +96,90 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
 
     while (TRUE) {
         if (chomp('"', json, stop)) { return NULL; }
-        if (*json + 1 < stop && chomp('\\', json, stop)) {
-            LPWSTR errors[CONTEXT_COUNT] = {
-                L"%1$s string has unknown escape sequence \\12345",
-                L"First key in %1$s object has unknown escape sequence "
-                    L"\\12345",
-                L"After %1$s, next key has unknown escape sequence \\12345",
-            };
+        if (chomp('\\', json, stop)) {
             LPCBYTE escapeStart = *json;
+            int badEscapeLength = 0;
             if (chomp('u', json, stop)) {
                 for (int i = 0; i < 4; i++) {
                     if (
                         !chompRange('0', '9', json, stop)
                             && !chompRange('a', 'f', json, stop)
                             && !chompRange('A', 'F', json, stop)
-                    ) {
-                        LPWSTR escape = errors[context];
-                        while (*escape != L'\\') { escape++; } escape++;
-                        int escapeLength = MultiByteToWideChar(
-                            CP_UTF8, MB_PRECOMPOSED,
-                            escapeStart, stop - escapeStart, escape, 5
-                        );
-                        escape[escapeLength] = L'\0';
-                        return errors[context];
-                    }
+                    ) { badEscapeLength = 5; break; }
                 }
-            } else if (!chompAny("\"\\/bfnrt", json, stop)) {
-                LPWSTR escape = errors[context];
-                while (*escape != L'\\') { escape++; } escape++;
-                int escapeLength = MultiByteToWideChar(
-                    CP_UTF8, MB_PRECOMPOSED,
-                    escapeStart, stop - escapeStart, escape, 1
+            } else if (!chompAny("\"\\/bfnrt", json, stop) && *json < stop) {
+                badEscapeLength = 1;
+            }
+
+            if (badEscapeLength) {
+                LPCWSTR errorStart = L"Invalid escape sequence \\";
+                LPCWSTR errorEnds[CONTEXT_COUNT] = {
+                    L" in %1$s",
+                    L" in first key of %1$s object",
+                    L" in key after %1$s",
+                };
+                int startLength = wcsnlen_s(
+                    errorStart, ESCAPE_ERROR_LENGTH - badEscapeLength - 1
                 );
-                escape[escapeLength] = L'\0';
-                return errors[context];
+                LPWSTR error = parseStringOut;
+                wcsncpy_s(
+                    error, ESCAPE_ERROR_LENGTH, errorStart, startLength
+                );
+                int actualEscapeLength = MultiByteToWideChar(
+                    CP_UTF8, MB_PRECOMPOSED,
+                    escapeStart, stop - escapeStart,
+                    // give this function extra space cause it sometimes
+                    // complains about ERROR_INSUFFICIENT_BUFFER when given
+                    // invalid characters
+                    error + startLength, ESCAPE_ERROR_LENGTH - startLength
+                );
+                actualEscapeLength = min(actualEscapeLength, badEscapeLength);
+                wcscpy_s(
+                    error + startLength + actualEscapeLength,
+                    ESCAPE_ERROR_LENGTH - startLength - actualEscapeLength,
+                    errorEnds[context]
+                );
+                return error;
             }
         } else if (*json >= stop) {
             LPCWSTR errors[CONTEXT_COUNT] = {
-                L"Unexpected %2$s in %1$s string",
-                L"Unexpected %2$s while parsing first key in %1$s object",
-                L"Unexpected %2$s while parsing key after %1$s",
+                L"Unexpected %2$s in %1$s",
+                L"Unexpected %2$s in first key of %1$s object",
+                L"Unexpected %2$s in key after %1$s",
             };
-            return errors[context];
+            return errors[context]; // Unexpected end of file
         } else if (**json < 0x20) {
             LPCWSTR errors[CONTEXT_COUNT] = {
-                L"%1$s string has unescaped %2$s",
-                L"First key in %1$s object has unescaped %2$s",
-                L"After %1$s, next key has unescaped %2$s",
+                L"Unescaped %2$s in %1$s",
+                L"Unescaped %2$s in first key of %1$s object",
+                L"Unescaped %2$s in key after %1$s",
             };
-            return errors[context]; // has unescaped U+1F
+            return errors[context]; // Unescaped U+1F
         } else if (**json < 0x80) {
             *json += 1;
         } else {
             // https://en.wikipedia.org/wiki/UTF-8#Encoding
             LPWSTR errors[CONTEXT_COUNT] = {
-                L"%1$s string has %2$s",
-                L"First key in %1$s object has %2$s",
-                L"After %1$s, next key has %2$s",
+                L"%2$s in %1$s",
+                L"%2$s in first key of %1$s object",
+                L"%2$s in key after %1$s",
             };
-            if (
-                **json < 0xc0
-                    || *json + 1 >= stop || (json[0][1] & 0xc0) != 0x80
-            ) {
-                // has invalid UTF-8 byte 0x95
-                // has incomplete UTF-8 character 0xd3
-                return errors[context];
+            if (**json < 0xc0) {
+                return errors[context]; // Invalid UTF-8 byte 0x95
+            } else if (*json + 1 >= stop || (json[0][1] & 0xc0) != 0x80) {
+                return errors[context]; // Incomplete UTF-8 character 0xd3
             } else if (**json < 0xe0) {
                 *json += 2;
             } else if (*json + 2 >= stop || (json[0][2] & 0xc0) != 0x80) {
-                // has incomplete UTF-8 character 0xe481
-                return errors[context];
+                return errors[context]; // Incomplete UTF-8 character 0xe481
             } else if (**json < 0xf0) {
                 *json += 3;
             } else if (*json + 3 >= stop || (json[0][3] & 0xc0) != 0x80) {
-                // has incomplete UTF-8 character 0xf48182
-                return errors[context];
+                return errors[context]; // Incomplete UTF-8 character 0xf48182
             } else if (**json < 0xf8) {
                 *json += 4;
             } else {
-                return errors[context]; // has invalid UTF-8 byte 0xfb
+                return errors[context]; // Invalid UTF-8 byte 0xfb
             }
         }
     }
