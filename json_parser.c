@@ -285,13 +285,17 @@ LPCWSTR getToken(LPCBYTE json, LPCBYTE stop, BOOL uppercase) {
         if (uppercase) { *tokenOut = L'E'; }
         return tokenOut;
     } else if (*json < 0x20) {
-        *tokenOut = 'U'; tokenOut[1] = '+';
-        LPCWSTR hexDigits = L"0123456789ABCDEF";
-        if (*json < 0x10) {
-            tokenOut[3] = hexDigits[*json]; tokenOut[4] = L'\0';
-        } else {
-            tokenOut[3] = L'1';
-            tokenOut[4] = hexDigits[*json - 0x10]; tokenOut[5] = L'\0';
+        LPCWSTR names[0x20] = {
+            L"null character", L"U+0001", L"U+0002", L"U+0003", L"U+0004",
+            L"U+0005", L"U+0006", L"U+0007", L"U+0008", L"tab character",
+            L"newline", L"U+000B", L"U+000C", L"carriage return", L"U+000E",
+            L"U+000F", L"U+0010", L"U+0011", L"U+0012", L"U+0013", L"U+0014",
+            L"U+0015", L"U+0016", L"U+0017", L"U+0018", L"U+0019", L"U+001A",
+            L"U+001B", L"U+001C", L"U+001D", L"U+001E", L"U+001F",
+        };
+        wcsncpy_s(tokenOut, MAX_TOKEN_LENGTH, names[*json], _TRUNCATE);
+        if (uppercase) {
+            *tokenOut = L"NUUUUUUUUTNUUCUUUUUUUUUUUUUUUUUU"[*json];
         }
 
         return tokenOut;
