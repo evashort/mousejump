@@ -67,11 +67,23 @@ void bytesToHex(LPWSTR dest, size_t destSize, LPCBYTE source, size_t count) {
     dest[i] = L'\0';
 }
 
+int percentEscape(LPWSTR string, int oldLength) {
+    int newLength = oldLength;
+    for (int i = 0; i < oldLength; i++) { newLength += string[i] == L'%'; }
+    int newI = newLength - 1;
+    for (int i = oldLength - 1; i >= 0; i--) {
+        string[newI] = string[i];
+        if (string[newI] == L'%') { newI--; string[newI] = L'%'; }
+    }
+
+    return newLength;
+}
+
 typedef enum {
     VALUE_CONTEXT = 0, FIRST_KEY_CONTEXT, KEY_CONTEXT, CONTEXT_COUNT,
 } StringContext;
 /*
-Invalid escape sequence \u1234 in first key of %1$s object0
+Invalid escape sequence \u%%%%%%%% in first key of %1$s object0
 */
 #define ESCAPE_ERROR_LENGTH 200
 WCHAR parseStringOut[ESCAPE_ERROR_LENGTH];
@@ -119,7 +131,10 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
                     L" in key after %1$s",
                 };
                 int startLength = wcsnlen_s(
-                    errorStart, ESCAPE_ERROR_LENGTH - badEscapeLength - 1
+                    // multiply badEscapeLength by to for the worst case where
+                    // every character of the escape sequence is %
+                    // TODO: test \% and \u%%%%
+                    errorStart, ESCAPE_ERROR_LENGTH - 2 * badEscapeLength - 1
                 );
                 LPWSTR error = parseStringOut;
                 wcsncpy_s(
@@ -134,6 +149,9 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
                     error + startLength, ESCAPE_ERROR_LENGTH - startLength
                 );
                 actualEscapeLength = min(actualEscapeLength, badEscapeLength);
+                actualEscapeLength = percentEscape(
+                    error + startLength, actualEscapeLength
+                );
                 wcscpy_s(
                     error + startLength + actualEscapeLength,
                     ESCAPE_ERROR_LENGTH - startLength - actualEscapeLength,
@@ -340,7 +358,11 @@ LPBYTE readFile(LPCWSTR path, LPBYTE *stop) {
     return NULL;
 }
 
-
+#define MAX_FORMAT_LENGTH 200
+#define MAX_STACK_LENGTH 150
+#define MAX_TOKEN_LENGTH 100
+#define FORMATTED_ERROR_LENGTH MAX_FORMAT_LENGTH + MAX_STACK_LENGTH \
+    + MAX_TOKEN_LENGTH - 2
 int main() {
     WCHAR path[MAX_PATH] = L"../JSONTestSuite/test_parsing/";
     LPWSTR name = path + wcsnlen(path, MAX_PATH);
@@ -355,13 +377,23 @@ int main() {
         LPBYTE stop;
         LPBYTE buffer = readFile(path, &stop);
         LPBYTE json = buffer;
-        LPCWSTR error = parseJSON(&json, stop);
-        BOOL valid = !error;
-        if (info.cFileName[0] != L'i') {
-            BOOL expected = info.cFileName[0] == L'y';
-            if (valid != expected) {
-                wprintf(L"%s\n", info.cFileName);
-            }
+        LPWSTR errorFormat = parseJSON(&json, stop);
+        WCHAR error[FORMATTED_ERROR_LENGTH];
+        if (errorFormat) {
+            WCHAR stack[MAX_STACK_LENGTH] = L"root";
+            WCHAR token[MAX_TOKEN_LENGTH] = L"1";
+            *token = L'e';
+            if (json < stop) { *token = *json; }
+            int order[2];
+            _swprintf_p(
+                error, FORMATTED_ERROR_LENGTH, errorFormat, stack, token
+            );
+        } else {
+            wcsncpy_s(error, FORMATTED_ERROR_LENGTH, L"No error!", _TRUNCATE);
+        }
+
+        if (errorFormat || info.cFileName[0] == L'n') {
+            wprintf(L"%-50s %s\n", info.cFileName, error);
         }
 
         free(buffer);
