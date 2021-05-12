@@ -266,6 +266,24 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, int depth) {
 }
 
 LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop) {
+    // https://en.wikipedia.org/wiki/Byte_order_mark#Usage
+    if (*json + 2 < stop) {
+        if (**json == 0xfe && json[0][1] == 0xff) {
+            return L"Found byte order mark indicating UTF-16BE encoding. "
+                L"Please save the file with UTF-8 encoding.";
+        } else if (**json == 0xff && json[0][1] == 0xfe) {
+            return L"Found byte order mark indicating UTF-16LE encoding. "
+                L"Please save the file with UTF-8 encoding.";
+        } else if (**json == 0 && json[0][1] != 0) {
+            return L"Found null byte suggesting UTF-16BE encoding. "
+                L"Please save the file with UTF-8 encoding.";
+        } else if (**json != 0 && json[0][1] == 0) {
+            return L"Found null byte suggesting UTF-16LE encoding. "
+                L"Please save the file with UTF-8 encoding.";
+        }
+    }
+
+    chompToken("\xEF\xBB\xBF", json, stop);
     // TODO: replace with parseObject
     LPCWSTR error = parseValue(json, stop, 0);
     if (error) { return error; }
