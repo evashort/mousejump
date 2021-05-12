@@ -56,29 +56,6 @@ BOOL parseNumber(LPCBYTE *json, LPCBYTE stop) {
     return TRUE;
 }
 
-void bytesToHex(LPWSTR dest, size_t destSize, LPCBYTE source, size_t count) {
-    int i = 0;
-    for (; i < min(destSize - 1, 2 * count); i++) {
-        BYTE b = source[i / 2];
-        if (i % 2) { b &= 0xf; } else { b >>= 4; }
-        dest[i] = b < 0xa ? L'0' + b : L'a' + b - 0xa;
-    }
-
-    dest[i] = L'\0';
-}
-
-int percentEscape(LPWSTR string, int oldLength) {
-    int newLength = oldLength;
-    for (int i = 0; i < oldLength; i++) { newLength += string[i] == L'%'; }
-    int newI = newLength - 1;
-    for (int i = oldLength - 1; i >= 0; i--) {
-        string[newI] = string[i];
-        if (string[newI] == L'%') { newI--; string[newI] = L'%'; }
-    }
-
-    return newLength;
-}
-
 typedef enum {
     VALUE_CONTEXT = 0, FIRST_KEY_CONTEXT, KEY_CONTEXT, CONTEXT_COUNT,
 } StringContext;
@@ -302,12 +279,75 @@ LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop) {
 
 #define MAX_TOKEN_LENGTH 80
 WCHAR tokenOut[MAX_TOKEN_LENGTH];
-LPCWSTR getToken(LPCBYTE json, LPCBYTE stop) {
-    int tokenLength = MultiByteToWideChar(
-        CP_UTF8, MB_PRECOMPOSED,
-        // give this function extra space because it sometimes complains about
-        // ERROR_INSUFFICIENT_BUFFER when given invalid characters
-        json, stop - json, tokenOut, MAX_TOKEN_LENGTH
+LPCWSTR getToken(LPCBYTE json, LPCBYTE stop, BOOL uppercase) {
+    if (json >= stop) {
+        wcsncpy_s(tokenOut, MAX_TOKEN_LENGTH, L"end of file", _TRUNCATE);
+        if (uppercase) { *tokenOut = L'E'; }
+        return tokenOut;
+    } else if (*json < 0x20) {
+        *tokenOut = 'U'; tokenOut[1] = '+';
+        LPCWSTR hexDigits = L"0123456789ABCDEF";
+        if (*json < 0x10) {
+            tokenOut[3] = hexDigits[*json]; tokenOut[4] = L'\0';
+        } else {
+            tokenOut[3] = L'1';
+            tokenOut[4] = hexDigits[*json - 0x10]; tokenOut[5] = L'\0';
+        }
+
+        return tokenOut;
+    } else if (*json >= 0x80) {
+        // https://en.wikipedia.org/wiki/UTF-8#Encoding
+        int byteCount = 0;
+        if (*json < 0xc0) {
+            _snwprintf_s(
+                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+                L"invalid UTF-8 byte 0x%02x", *json, json[1]
+            );
+        } else if (json + 1 >= stop || (json[1] & 0xc0) != 0x80) {
+            _snwprintf_s(
+                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+                L"incomplete UTF-8 character 0x%02x", *json
+            );
+        } else if (*json < 0xe0) {
+            byteCount = 2;
+        } else if (json + 2 >= stop || (json[2] & 0xc0) != 0x80) {
+            _snwprintf_s(
+                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+                L"incomplete UTF-8 character 0x%02x%02x", *json, json[1]
+            );
+        } else if (*json < 0xf0) {
+            byteCount = 3;
+        } else if (json + 3 >= stop || (json[3] & 0xc0) != 0x80) {
+            _snwprintf_s(
+                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+                L"incomplete UTF-8 character 0x%02x%02x%02x", *json, json[1],
+                json[2]
+            );
+        } else if (*json < 0xf8) {
+            byteCount = 4;
+        } else {
+            _snwprintf_s(
+                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+                L"invalid UTF-8 byte 0x%02x", *json, json[1]
+            );
+        }
+
+        if (byteCount <= 0) {
+            if (uppercase) { *tokenOut = L'I'; }
+            return tokenOut;
+        }
+    }
+
+    LPCBYTE temp = json;
+    while (
+        chompRange('0', '9', &temp, stop)
+            || chompRange('a', 'z', &temp, stop)
+            || chompRange('A', 'Z', &temp, stop)
+            || chompAny("_.+-", &temp, stop)
+    );
+    int tokenLength = min(max(temp - json, 1), MAX_TOKEN_LENGTH);
+    MultiByteToWideChar(
+        CP_UTF8, MB_PRECOMPOSED, json, stop - json, tokenOut, tokenLength
     );
     if (tokenLength >= MAX_TOKEN_LENGTH) {
         tokenLength--;
@@ -315,16 +355,6 @@ LPCWSTR getToken(LPCBYTE json, LPCBYTE stop) {
     }
 
     tokenOut[tokenLength] = L'\0';
-    LPWSTR tokenStop = tokenOut;
-    while (
-        (*tokenStop >= L'0' && *tokenStop <= L'9')
-            || (*tokenStop >= L'a' && *tokenStop <= L'z')
-            || (*tokenStop >= L'A' && *tokenStop <= L'Z')
-            || *tokenStop == L'_' || *tokenStop == L'.' || *tokenStop == L'+'
-            || *tokenStop == L'-'
-    ) { tokenStop++; }
-    if (tokenStop == tokenOut) { tokenStop++; }
-    *tokenStop = L'\0';
     return tokenOut;
 }
 
@@ -406,7 +436,9 @@ int main() {
         WCHAR error[FORMATTED_ERROR_LENGTH];
         if (errorFormat) {
             WCHAR stack[MAX_STACK_LENGTH] = L"root";
-            LPCWSTR token = getToken(json, stop);
+            LPCWSTR token = getToken(
+                json, stop, !wcsncmp(errorFormat, L"%2$", 3)
+            );
             int order[2];
             _swprintf_p(
                 error, FORMATTED_ERROR_LENGTH, errorFormat, stack, token
