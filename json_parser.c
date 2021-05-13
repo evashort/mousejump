@@ -150,7 +150,7 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
                                 L" %1$s",
                         };
                         LPCWSTR *errors = escapeErrors;
-                        if (getCharSize(temp, stop, &errors) > 0) {
+                        if (getCharSize(temp, stop, &errors) <= 0) {
                             *json = temp;
                         }
 
@@ -178,10 +178,40 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
     }
 }
 
-LPCBYTE WHITESPACE = " \n\r\t";
-LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, int depth);
+#define MAX_FRAME_COUNT 250
+// https://stackoverflow.com/a/798311
+#define STRINGIFY_HELP(x) L#x
+#define STRINGIFY(x) STRINGIFY_HELP(x)
+typedef struct { int index; LPCBYTE key; } Frame;
+typedef struct { int count; Frame frames[MAX_FRAME_COUNT]; } Stack;
+LPCWSTR pushElement(Stack *stack, int index) {
+    if (stack->count >= MAX_FRAME_COUNT) {
+        return L"JSON structure is more than " STRINGIFY(MAX_FRAME_COUNT)
+            L" levels deep";
+    }
 
-LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, int depth) {
+    stack->frames[stack->count].index = index;
+    stack->frames[stack->count].key = NULL;
+    stack->count++;
+    return NULL;
+}
+
+LPCWSTR pushMember(Stack *stack, LPCBYTE key) {
+    if (stack->count >= MAX_FRAME_COUNT) {
+        return L"JSON structure is more than " STRINGIFY(MAX_FRAME_COUNT)
+            L" levels deep";
+    }
+
+    stack->frames[stack->count].index = -1;
+    stack->frames[stack->count].key = key;
+    stack->count++;
+    return NULL;
+}
+
+LPCBYTE WHITESPACE = " \n\r\t";
+LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, Stack *stack);
+
+LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
     if (!chomp('[', json, stop)) {
         if (*json >= stop) { return L"Missing %1$s array before %2$s"; }
         return L"%1$s array must start with [, not %2$s";
@@ -189,11 +219,14 @@ LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, int depth) {
 
     while (chompAny(WHITESPACE, json, stop));
     if (chomp(']', json, stop)) { return NULL; }
-    while (TRUE) {
-        LPCWSTR error = parseValue(json, stop, depth + 1);
+    for (int i = 0; TRUE; i++) {
+        LPCWSTR error = pushElement(stack, i);
+        if (error) { return error; }
+        error = parseValue(json, stop, stack);
         if (error) { return error; }
         while (chompAny(WHITESPACE, json, stop));
-        if (chomp(']', json, stop)) { return NULL; }
+        if (chomp(']', json, stop)) { stack->count--; return NULL; }
+        LPCBYTE beforeComma = *json;
         if (*json >= stop) {
             return L"Unexpected %2$s after %1$s";
         } else if (!chomp(',', json, stop)) {
@@ -201,10 +234,16 @@ LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, int depth) {
         }
 
         while (chompAny(WHITESPACE, json, stop));
+        if (*json < stop && **json == ']' || **json == ',') {
+            if (**json == ']') { *json = beforeComma; }
+            return L"Extra comma after %1$s";
+        }
+
+        stack->count--;
     }
 }
 
-LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, int depth) {
+LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
     if (!chomp('{', json, stop)) {
         if (*json >= stop) { return L"Missing %1$s object before %2$s"; }
         return L"%1$s object must start with {, not %2$s";
@@ -214,17 +253,23 @@ LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, int depth) {
     if (chomp('}', json, stop)) { return NULL; }
     StringContext context = FIRST_KEY_CONTEXT;
     while (TRUE) {
+        LPCBYTE key = *json;
         LPCWSTR error = parseString(json, stop, context);
+        if (error) { return error; }
+        if (context == KEY_CONTEXT) { stack->count--; }
+        error = pushMember(stack, key);
         if (error) { return error; }
         context = KEY_CONTEXT;
         while (chompAny(WHITESPACE, json, stop));
         if (!chomp(':', json, stop)) {
             return L"Missing colon between %1$s key and %2$s";
         }
-        error = parseValue(json, stop, depth + 1);
+
+        error = parseValue(json, stop, stack);
         if (error) { return error; }
         while (chompAny(WHITESPACE, json, stop));
-        if (chomp('}', json, stop)) { return NULL; }
+        if (chomp('}', json, stop)) { stack->count--; return NULL; }
+        LPCBYTE beforeComma = *json;
         if (*json >= stop) {
             return L"Unexpected %2$s after %1$s";
         } else if (!chomp(',', json, stop)) {
@@ -232,18 +277,18 @@ LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, int depth) {
         }
 
         while (chompAny(WHITESPACE, json, stop));
+        if (*json < stop && **json == '}' || **json == ',') {
+            if (**json == '}') { *json = beforeComma; }
+            return L"Extra comma after %1$s value";
+        }
     }
 }
 
-LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, int depth) {
-    if (depth > 250) {
-        return L"JSON structure is more than 250 levels deep";
-    }
-
+LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
     while (chompAny(WHITESPACE, json, stop));
     if (*json >= stop) { return L"Missing %1$s value before %2$s"; }
-    if (**json == '{') { return parseObject(json, stop, depth); }
-    if (**json == '[') { return parseArray(json, stop, depth); }
+    if (**json == '{') { return parseObject(json, stop, stack); }
+    if (**json == '[') { return parseArray(json, stop, stack); }
     if (**json == '"') { return parseString(json, stop, VALUE_CONTEXT); }
     LPCBYTE temp = *json;
     BOOL valid;
@@ -265,7 +310,7 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, int depth) {
     return NULL;
 }
 
-LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop) {
+LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
     // https://en.wikipedia.org/wiki/Byte_order_mark#Usage
     if (*json + 2 < stop) {
         if (**json == 0xfe && json[0][1] == 0xff) {
@@ -285,7 +330,7 @@ LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop) {
 
     chompToken("\xEF\xBB\xBF", json, stop);
     // TODO: replace with parseObject
-    LPCWSTR error = parseValue(json, stop, 0);
+    LPCWSTR error = parseValue(json, stop, stack);
     if (error) { return error; }
     while (chompAny(WHITESPACE, json, stop));
     if (*json < stop) {
@@ -380,6 +425,80 @@ LPCWSTR getToken(LPCBYTE json, LPCBYTE stop, BOOL uppercase) {
     return tokenOut;
 }
 
+#define MAX_STACK_LENGTH 150
+WCHAR stackOut[MAX_STACK_LENGTH];
+LPCWSTR getStack(const Stack *stack, LPCBYTE stop) {
+    if (stack->count <= 0) { return L"top-level"; }
+    LPWSTR stackStop = stackOut + MAX_STACK_LENGTH - 1;
+    *stackStop = L'\0';
+    for (int i = stack->count - 1; i >= 0; i--) {
+        LPCBYTE key = stack->frames[i].key;
+        int index = stack->frames[i].index;
+        if (key) {
+            LPCBYTE keyStop = key + 1;
+            for (; keyStop < stop; keyStop++) {
+                if (*keyStop == '"' && keyStop[-1] != '\\') {
+                    keyStop++; break;
+                }
+            }
+            LPCBYTE temp = key + 1;
+            if (!chompRange('0', '9', &temp, keyStop - 1)) {
+                while (
+                    chompRange('0', '9', &temp, keyStop - 1)
+                        || chompRange('a', 'z', &temp, keyStop - 1)
+                        || chompRange('A', 'Z', &temp, keyStop - 1)
+                        || chomp('_', &temp, keyStop - 1)
+                );
+                if (temp > key + 1 && temp >= keyStop - 1) {
+                    key++; keyStop--;
+                }
+            }
+
+            int keyLength = MultiByteToWideChar(
+                CP_UTF8, MB_PRECOMPOSED, key, keyStop - key, NULL, 0
+            );
+            LPWSTR keyStart = stackStop - keyLength;
+            LPWSTR stackStart = keyStart - 2 * (i > 0);
+            if (stackStart < stackOut) {
+                stackStop--;
+                *stackStop = L'\u2026'; // horizontal ellipsis
+                if (i < stack->count - 1) { return stackStop; }
+                keyStart += stackOut - stackStart;
+                stackStart = stackOut;
+            }
+
+            if (i > 0) { stackStart[1] = L'.'; }
+            MultiByteToWideChar(
+                CP_UTF8, MB_PRECOMPOSED, key, keyStop - key,
+                keyStart, stackStop - keyStart
+            );
+            stackStop = stackStart + (i > 0);
+        } else {
+            int digitCount = index <= 0;
+            for (int test = abs(index); test > 0; test /= 10) {
+                digitCount++;
+            }
+            if ((digitCount) > 1) {
+                digitCount = digitCount;
+            }
+
+            LPWSTR digitStart = stackStop - 1 - digitCount;
+            LPWSTR stackStart = digitStart - 1 - (i > 0);
+            if (stackStart < stackOut) {
+                stackStop[-1] = L'\u2026'; // horizontal ellipsis
+                return stackStop - 1;
+            }
+
+            digitStart[-1] = L'[';
+            _itow_s(index, digitStart, digitCount + 1, 10);
+            stackStop[-1] = L']';
+            stackStop = stackStart + (i > 0);
+        }
+    }
+
+    return stackStop + (*stackStop == L'.');
+}
+
 OVERLAPPED fileReadIn;
 struct { DWORD errorCode; DWORD byteCount; } fileReadOut;
 void CALLBACK fileReadComplete(
@@ -454,16 +573,17 @@ int main() {
         LPBYTE stop;
         LPBYTE buffer = readFile(path, &stop);
         LPBYTE json = buffer;
-        LPCWSTR errorFormat = parseJSON(&json, stop);
+        Stack stack = { .count = 0 };
+        LPCWSTR errorFormat = parseJSON(&json, stop, &stack);
         WCHAR error[FORMATTED_ERROR_LENGTH];
         if (errorFormat) {
-            WCHAR stack[MAX_STACK_LENGTH] = L"root";
+            LPCWSTR stackString = getStack(&stack, stop);
             LPCWSTR token = getToken(
                 json, stop, !wcsncmp(errorFormat, L"%2$", 3)
             );
             int order[2];
             _swprintf_p(
-                error, FORMATTED_ERROR_LENGTH, errorFormat, stack, token
+                error, FORMATTED_ERROR_LENGTH, errorFormat, stackString, token
             );
         } else {
             wcsncpy_s(error, FORMATTED_ERROR_LENGTH, L"No error!", _TRUNCATE);
