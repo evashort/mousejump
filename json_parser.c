@@ -310,7 +310,7 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
     return NULL;
 }
 
-LPCWSTR parseJSON(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
+LPCWSTR parseJSONHelp(LPCBYTE *json, LPCBYTE stop, Stack *stack) {
     // https://en.wikipedia.org/wiki/Byte_order_mark#Usage
     if (*json + 2 < stop) {
         if (**json == 0xfe && json[0][1] == 0xff) {
@@ -499,6 +499,43 @@ LPCWSTR getStack(const Stack *stack, LPCBYTE stop) {
     return stackStop + (*stackStop == L'.');
 }
 
+#define SETTINGS_FILENAME L"settings.json"
+#define MAX_LOCATION_LENGTH sizeof(SETTINGS_FILENAME) \
+    + sizeof(STRINGIFY(INT_MAX)) + sizeof(L" line : ") - 2
+WCHAR locationOut[MAX_LOCATION_LENGTH];
+LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
+    int lineNumber = 1;
+    for (; start < offset; start++) { lineNumber += *start == '\n'; }
+    _snwprintf_s(
+        locationOut, MAX_LOCATION_LENGTH, _TRUNCATE,
+        L"%s line %d: ", SETTINGS_FILENAME, lineNumber
+    );
+    return locationOut;
+}
+
+#define MAX_FORMAT_LENGTH 200
+#define FORMATTED_ERROR_LENGTH MAX_LOCATION_LENGTH + MAX_FORMAT_LENGTH \
+    + MAX_STACK_LENGTH + MAX_TOKEN_LENGTH - 3
+WCHAR parseJSONOut[FORMATTED_ERROR_LENGTH];
+LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop) {
+    LPCBYTE json = buffer;
+    Stack stack = { .count = 0 };
+    LPCWSTR errorFormat = parseJSONHelp(&json, stop, &stack);
+    if (errorFormat == NULL) { return NULL; }
+    LPCWSTR location = getLocation(buffer, json);
+    wcsncpy_s(parseJSONOut, MAX_LOCATION_LENGTH, location, _TRUNCATE);
+    int locationLength = wcsnlen_s(location, MAX_LOCATION_LENGTH);
+    LPCWSTR stackString = getStack(&stack, stop);
+    BOOL uppercase = !wcsncmp(errorFormat, L"%2$", 3);
+    LPCWSTR token = getToken(json, stop, uppercase);
+    _swprintf_p(
+        parseJSONOut + locationLength,
+        FORMATTED_ERROR_LENGTH - locationLength,
+        errorFormat, stackString, token
+    );
+    return parseJSONOut;
+}
+
 OVERLAPPED fileReadIn;
 struct { DWORD errorCode; DWORD byteCount; } fileReadOut;
 void CALLBACK fileReadComplete(
@@ -508,7 +545,7 @@ void CALLBACK fileReadComplete(
     fileReadOut.byteCount = byteCount;
 }
 
-LPBYTE readFile(LPCWSTR path, LPBYTE *stop) {
+LPBYTE readFile(LPCWSTR path, LPCBYTE *stop) {
     // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
     HANDLE file = CreateFile(
         path,
@@ -555,23 +592,6 @@ LPBYTE readFile(LPCWSTR path, LPBYTE *stop) {
     return NULL;
 }
 
-#define SETTINGS_FILENAME L"settings.json"
-#define MAX_LOCATION_LENGTH sizeof(SETTINGS_FILENAME) \
-    + sizeof(STRINGIFY(INT_MAX)) + sizeof(L" line : ") - 2
-WCHAR locationOut[MAX_LOCATION_LENGTH];
-LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
-    int lineNumber = 1;
-    for (; start < offset; start++) { lineNumber += *start == '\n'; }
-    _snwprintf_s(
-        locationOut, MAX_LOCATION_LENGTH, _TRUNCATE,
-        L"%s line %d: ", SETTINGS_FILENAME, lineNumber
-    );
-    return locationOut;
-}
-
-#define MAX_FORMAT_LENGTH 200
-#define FORMATTED_ERROR_LENGTH MAX_LOCATION_LENGTH + MAX_FORMAT_LENGTH \
-    + MAX_STACK_LENGTH + MAX_TOKEN_LENGTH - 3
 int main() {
     WCHAR path[MAX_PATH] = L"../JSONTestSuite/test_parsing/";
     LPWSTR name = path + wcsnlen(path, MAX_PATH);
@@ -583,34 +603,13 @@ int main() {
     do {
         if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { continue; }
         wcsncpy(name, info.cFileName, path + MAX_PATH - name);
-        LPBYTE stop;
+        LPCBYTE stop;
         LPBYTE buffer = readFile(path, &stop);
-        LPBYTE json = buffer;
-        Stack stack = { .count = 0 };
-        LPCWSTR errorFormat = parseJSON(&json, stop, &stack);
-        WCHAR error[FORMATTED_ERROR_LENGTH];
-        if (errorFormat) {
-            wcsncpy_s(
-                error, MAX_LOCATION_LENGTH,
-                getLocation(buffer, json), _TRUNCATE
+        LPCWSTR error = parseJSON(buffer, stop);
+        if (error || info.cFileName[0] == L'n') {
+            wprintf(
+                L"%-50s %s\n", info.cFileName, error ? error : L"No error!"
             );
-            int locationLength = wcsnlen_s(error, MAX_LOCATION_LENGTH);
-            LPCWSTR stackString = getStack(&stack, stop);
-            LPCWSTR token = getToken(
-                json, stop, !wcsncmp(errorFormat, L"%2$", 3)
-            );
-            int order[2];
-            _swprintf_p(
-                error + locationLength,
-                FORMATTED_ERROR_LENGTH - locationLength,
-                errorFormat, stackString, token
-            );
-        } else {
-            wcsncpy_s(error, FORMATTED_ERROR_LENGTH, L"No error!", _TRUNCATE);
-        }
-
-        if (errorFormat || info.cFileName[0] == L'n') {
-            wprintf(L"%-50s %s\n", info.cFileName, error);
         }
 
         free(buffer);
