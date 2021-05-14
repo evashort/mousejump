@@ -555,10 +555,23 @@ LPBYTE readFile(LPCWSTR path, LPBYTE *stop) {
     return NULL;
 }
 
+#define SETTINGS_FILENAME L"settings.json"
+#define MAX_LOCATION_LENGTH sizeof(SETTINGS_FILENAME) \
+    + sizeof(STRINGIFY(INT_MAX)) + sizeof(L" line : ") - 2
+WCHAR locationOut[MAX_LOCATION_LENGTH];
+LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
+    int lineNumber = 1;
+    for (; start < offset; start++) { lineNumber += *start == '\n'; }
+    _snwprintf_s(
+        locationOut, MAX_LOCATION_LENGTH, _TRUNCATE,
+        L"%s line %d: ", SETTINGS_FILENAME, lineNumber
+    );
+    return locationOut;
+}
+
 #define MAX_FORMAT_LENGTH 200
-#define MAX_STACK_LENGTH 150
-#define FORMATTED_ERROR_LENGTH MAX_FORMAT_LENGTH + MAX_STACK_LENGTH \
-    + MAX_TOKEN_LENGTH - 2
+#define FORMATTED_ERROR_LENGTH MAX_LOCATION_LENGTH + MAX_FORMAT_LENGTH \
+    + MAX_STACK_LENGTH + MAX_TOKEN_LENGTH - 3
 int main() {
     WCHAR path[MAX_PATH] = L"../JSONTestSuite/test_parsing/";
     LPWSTR name = path + wcsnlen(path, MAX_PATH);
@@ -577,13 +590,20 @@ int main() {
         LPCWSTR errorFormat = parseJSON(&json, stop, &stack);
         WCHAR error[FORMATTED_ERROR_LENGTH];
         if (errorFormat) {
+            wcsncpy_s(
+                error, MAX_LOCATION_LENGTH,
+                getLocation(buffer, json), _TRUNCATE
+            );
+            int locationLength = wcsnlen_s(error, MAX_LOCATION_LENGTH);
             LPCWSTR stackString = getStack(&stack, stop);
             LPCWSTR token = getToken(
                 json, stop, !wcsncmp(errorFormat, L"%2$", 3)
             );
             int order[2];
             _swprintf_p(
-                error, FORMATTED_ERROR_LENGTH, errorFormat, stackString, token
+                error + locationLength,
+                FORMATTED_ERROR_LENGTH - locationLength,
+                errorFormat, stackString, token
             );
         } else {
             wcsncpy_s(error, FORMATTED_ERROR_LENGTH, L"No error!", _TRUNCATE);
