@@ -35,25 +35,118 @@ BOOL chompToken(LPCBYTE bite, LPCBYTE *json, LPCBYTE stop) {
     return FALSE;
 }
 
-BOOL parseNumber(LPCBYTE *json, LPCBYTE stop) {
-    chomp('-', json, stop);
-    if (!chomp('0', json, stop)) {
-        if (!chompRange('1', '9', json, stop)) { return FALSE; }
-        while (chompRange('0', '9', json, stop));
-    }
-
-    if (chomp('.', json, stop)) {
-        if (!chompRange('0', '9', json, stop)) { return FALSE; }
-        while (chompRange('0', '9', json, stop));
-    }
-
-    if (chompAny("eE", json, stop)) {
-        chompAny("+-", json, stop);
-        if (!chompRange('0', '9', json, stop)) { return FALSE; }
-        while (chompRange('0', '9', json, stop));
+BOOL parseInt(LPCBYTE *json, LPCBYTE stop, int *integer) {
+    BOOL negative = chomp('-', json, stop);
+    if (chomp('0', json, stop)) { *integer = 0; return TRUE; }
+    if (*json >= stop || **json < '1' || **json > '9') { return FALSE; }
+    *integer = **json - '0';
+    *json += 1;
+    if (negative) {
+        *integer = -*integer;
+        for (; *json < stop && **json >= '0' && **json <= '9'; *json += 1) {
+            int digit = **json - '0';
+            if (*integer < (INT_MIN + digit) / 10) { return TRUE; }
+            *integer *= 10; *integer -= digit;
+        }
+    } else {
+        for (; *json < stop && **json >= '0' && **json <= '9'; *json += 1) {
+            int digit = **json - '0';
+            if (*integer > (INT_MAX - digit) / 10) { return TRUE; }
+            *integer *= 10; *integer += digit;
+        }
     }
 
     return TRUE;
+}
+
+typedef enum {
+    JSON_UNKNOWN = 0, JSON_OBJECT = 0x1, JSON_ARRAY = 0x2, JSON_STRING = 0x4,
+    JSON_NUMBER = 0x8, JSON_INT = 0x10, JSON_BOOL = 0x20, JSON_NULL = 0x40,
+} JSON_TYPE;
+#define JSON_TYPE_COUNT 7
+#define MAX_JSON_TYPE_LENGTH 48
+/*
+object, array, string, number, boolean, or null0
+*/
+WCHAR jsonTypeOut[MAX_JSON_TYPE_LENGTH];
+LPCWSTR jsonTypeToString(JSON_TYPE jsonType) {
+    LPCWSTR strings[JSON_TYPE_COUNT];
+    int count = 0;
+    if (jsonType & JSON_OBJECT) { strings[count] = L"object"; count++; }
+    if (jsonType & JSON_ARRAY) { strings[count] = L"array"; count++; }
+    if (jsonType & JSON_STRING) { strings[count] = L"string"; count++; }
+    if (jsonType & JSON_NUMBER) {
+        strings[count] = L"number"; count++;
+    } else if (jsonType & JSON_INT) { strings[count] = L"int"; count++; }
+    if (jsonType & JSON_BOOL) { strings[count] = L"boolean"; count++; }
+    if (jsonType & JSON_NULL) { strings[count] = L"null"; count++; }
+    if (count <= 0) { return L"unknown"; }
+    if (count <= 1) { return strings[0]; }
+    if (count <= 2) {
+        _snwprintf_s(
+            jsonTypeOut, MAX_JSON_TYPE_LENGTH, _TRUNCATE,
+            L"%s or %s", strings[0], strings[1]
+        );
+        return jsonTypeOut;
+    }
+
+    int offset = 0;
+    for (int i = 0; i < count - 1; i++) {
+        _snwprintf_s(
+            jsonTypeOut + offset, MAX_JSON_TYPE_LENGTH - offset, _TRUNCATE,
+            L"%s, ", strings[i]
+        );
+        offset += wcsnlen_s(
+            jsonTypeOut + offset, MAX_JSON_TYPE_LENGTH - offset
+        );
+    }
+    _snwprintf_s(
+        jsonTypeOut + offset, MAX_JSON_TYPE_LENGTH - offset, _TRUNCATE,
+        L"or %s", strings[count - 1]
+    );
+    return jsonTypeOut;
+}
+
+JSON_TYPE parseType(LPCBYTE *json, LPCBYTE stop) {
+    if (*json >= stop) { return JSON_UNKNOWN; }
+    if (**json == '{') { return JSON_OBJECT; }
+    if (**json == '[') { return JSON_ARRAY; }
+    if (**json == '"') { return JSON_STRING; }
+    JSON_TYPE result = JSON_UNKNOWN;
+    LPCBYTE start = *json;
+    int integer;
+    if (chompToken("null", json, stop)) {
+        result = JSON_NULL;
+    } else if (
+        chompToken("true", json, stop) || chompToken("false", json, stop)
+    ) {
+        result = JSON_BOOL;
+    } else if (parseInt(json, stop, &integer)) {
+        result = JSON_INT | JSON_NUMBER;
+        if (integer != 0) {
+            while (chompRange('0', '9', json, stop)) { result = JSON_NUMBER; }
+        }
+
+        if (chomp('.', json, stop)) {
+            result = JSON_UNKNOWN;
+            while (chompRange('0', '9', json, stop)) { result = JSON_NUMBER; }
+        }
+
+        if (result != JSON_UNKNOWN && chompAny("eE", json, stop)) {
+            result = JSON_UNKNOWN;
+            chompAny("+-", json, stop);
+            while (chompRange('0', '9', json, stop)) { result = JSON_NUMBER; }
+        }
+    }
+
+    if (
+        result == JSON_UNKNOWN
+            || chompRange('0', '9', json, stop)
+            || chompRange('a', 'z', json, stop)
+            || chompRange('A', 'Z', json, stop)
+            || chompAny("_.+-", json, stop)
+    ) { *json = start; return JSON_UNKNOWN; }
+    return result;
 }
 
 typedef enum {
@@ -192,7 +285,10 @@ int compareHookWithStack(LPCBYTE hookKey, LPCBYTE stackKey) {
 
 #define HOOK_FRAME_COUNT 5
 typedef struct {
-    LPCWSTR (*call)(LPCBYTE *json, LPCBYTE stop, void* param);
+    LPCWSTR (*call)(
+        LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, void* param
+    );
+    JSON_TYPE jsonType;
     void* param;
     LPCBYTE frames[HOOK_FRAME_COUNT];
     int frameCount;
@@ -332,44 +428,51 @@ LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     }
 }
 
+#define TYPE_ERROR_LENGTH 20 + 2 * MAX_JSON_TYPE_LENGTH - 2
+WCHAR parseValueOut[TYPE_ERROR_LENGTH];
 LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     while (chompAny(WHITESPACE, json, stop));
     if (*json >= stop) { return L"Missing %1$s value before %2$s"; }
     LPCBYTE start = *json;
+    JSON_TYPE jsonType = parseType(json, stop);
+    if (jsonType == JSON_UNKNOWN) {
+        return L"Could not parse %1$s value %2$s";
+    }
+
     LPCWSTR error = NULL;
-    if (**json == '{') {
+    if (jsonType == JSON_OBJECT) {
         error = parseObject(json, stop, state);
-    } else if (**json == '[') {
+    } else if (jsonType == JSON_ARRAY) {
         error = parseArray(json, stop, state);
-    } else if (**json == '"') {
+    } else if (jsonType == JSON_STRING) {
         error = parseString(json, stop, VALUE_CONTEXT);
-    } else if (
-        !(
-            parseNumber(json, stop)
-                || chompToken("true", json, stop)
-                || chompToken("false", json, stop)
-                || chompToken("null", json, stop)
-        )
-            || chompRange('0', '9', json, stop)
-            || chompRange('a', 'z', json, stop)
-            || chompRange('A', 'Z', json, stop)
-            || chompAny("_.+-", json, stop)
-    ) {
-        *json = start;
-        error = L"Could not parse %1$s value %2$s";
     }
 
     if (error != NULL) { return error; }
 
     if (
-        state->count > 0
-            && state->stack->count >= state->hooks[0].frameCount
+        state->count > 0 && state->stack->count >= state->hooks[0].frameCount
     ) {
-        error = state->hooks[0].call(&start, *json, state->hooks[0].param);
-        if (error) {
-            *json = start;
+        JSON_TYPE hookType = state->hooks[0].jsonType;
+        if (hookType & jsonType) {
+            error = state->hooks[0].call(
+                &start, *json, jsonType, state->hooks[0].param
+            );
+            if (error) { *json = start; }
             return error;
         }
+
+        *json = start;
+        if ((jsonType & JSON_NUMBER) && (hookType & JSON_INT)) {
+            return L"Could not parse %1$s value %2$s as an int";
+        }
+
+        _snwprintf_s(
+            parseValueOut, TYPE_ERROR_LENGTH, _TRUNCATE,
+            L"%%1$s must be %s, not %s",
+            jsonTypeToString(hookType), jsonTypeToString(jsonType)
+        );
+        return parseValueOut;
     }
 
     return NULL;
@@ -394,7 +497,6 @@ LPCWSTR parseJSONHelp(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     }
 
     chompToken("\xEF\xBB\xBF", json, stop);
-    // TODO: replace with parseObject
     LPCWSTR error = parseValue(json, stop, state);
     if (error) { return error; }
     while (chompAny(WHITESPACE, json, stop));
@@ -492,8 +594,8 @@ LPCWSTR getToken(LPCBYTE json, LPCBYTE stop, BOOL uppercase) {
 
 #define MAX_STACK_LENGTH 150
 WCHAR stackOut[MAX_STACK_LENGTH];
-LPCWSTR getStack(const Stack *stack, LPCBYTE stop) {
-    if (stack->count <= 0) { return L"top-level"; }
+LPCWSTR getStack(const Stack *stack, LPCBYTE stop, BOOL uppercase) {
+    if (stack->count <= 0) { return uppercase ? L"Top-level" : L"top-level"; }
     LPWSTR stackStop = stackOut + MAX_STACK_LENGTH - 1;
     *stackStop = L'\0';
     for (int i = stack->count - 1; i >= 0; i--) {
@@ -583,24 +685,65 @@ LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
 #define FORMATTED_ERROR_LENGTH MAX_LOCATION_LENGTH + MAX_FORMAT_LENGTH \
     + MAX_STACK_LENGTH + MAX_TOKEN_LENGTH - 3
 WCHAR parseJSONOut[FORMATTED_ERROR_LENGTH];
-LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop) {
+LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
     LPCBYTE json = buffer;
     Stack stack = { .count = 0 };
-    ParserState state = { .stack = &stack, .hooks = NULL, .count = 0 };
+    ParserState state = {
+        .stack = &stack, .hooks = hooks, .count = hookCount
+    };
     LPCWSTR errorFormat = parseJSONHelp(&json, stop, &state);
     if (errorFormat == NULL) { return NULL; }
     LPCWSTR location = getLocation(buffer, json);
     wcsncpy_s(parseJSONOut, MAX_LOCATION_LENGTH, location, _TRUNCATE);
     int locationLength = wcsnlen_s(location, MAX_LOCATION_LENGTH);
-    LPCWSTR stackString = getStack(&stack, stop);
-    BOOL uppercase = !wcsncmp(errorFormat, L"%2$", 3);
-    LPCWSTR token = getToken(json, stop, uppercase);
+    BOOL uppercaseStack = !wcsncmp(errorFormat, L"%1$", 3);
+    LPCWSTR stackString = getStack(&stack, stop, uppercaseStack);
+    BOOL uppercaseToken = !wcsncmp(errorFormat, L"%2$", 3);
+    LPCWSTR token = getToken(json, stop, uppercaseToken);
     _swprintf_p(
         parseJSONOut + locationLength,
         FORMATTED_ERROR_LENGTH - locationLength,
         errorFormat, stackString, token
     );
     return parseJSONOut;
+}
+
+LPCWSTR parseNothing(
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, void *param
+) {
+    return NULL;
+}
+
+LPCWSTR parseColor(
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, void *param
+) {
+    chomp('"', json, stop);
+    if (!chomp('#', json, stop)) { return L"%1$s must start with #%2$.0s"; }
+    int length = stop - 1 - *json;
+    if (length != 3 && length != 6) {
+        return L"%1$s must have 3 or 6 characters after #%2$.0s";
+    }
+
+    while (
+        chompRange('0', '9', json, stop)
+            || chompRange('a', 'f', json, stop)
+            || chompRange('A', 'F', json, stop)
+    );
+    if (*json < stop - 1) {
+        return L"%1$s contains non-hex characters%2$.0s";
+    }
+
+    *json -= length;
+    char buffer[3];
+    long channels[3];
+    for (int i = 0; i < 3; i++) {
+        strncpy_s(buffer, 3, *json + i * length / 3, 2);
+        if (length == 3) { buffer[1] = buffer[0]; }
+        channels[i] = strtol(buffer, NULL, 16);
+    }
+
+    *(COLORREF*)param = RGB(channels[0], channels[1], channels[2]);
+    return NULL;
 }
 
 OVERLAPPED fileReadIn;
@@ -660,6 +803,26 @@ LPBYTE readFile(LPCWSTR path, LPCBYTE *stop) {
 }
 
 int main() {
+    COLORREF color = RGB(1, 2, 3);
+    Hook hooks[2] = {
+        { .call = parseNothing, .jsonType = JSON_OBJECT, .frameCount = 0 },
+        {
+            .call = parseColor,
+            .jsonType = JSON_STRING,
+            .param = &color,
+            .frames = { "labelColor" },
+            .frameCount = 1,
+        }
+    };
+    LPCBYTE stop;
+    LPBYTE buffer = readFile(SETTINGS_FILENAME, &stop);
+    LPCWSTR error = parseJSON(buffer, stop, hooks, 2);
+    if (error) { wprintf(L"%s\n", error); }
+    wprintf(
+        L"red = %d, green = %d, blue = %d\n",
+        GetRValue(color), GetGValue(color), GetBValue(color)
+    );
+
     WCHAR path[MAX_PATH] = L"../JSONTestSuite/test_parsing/";
     LPWSTR name = path + wcsnlen(path, MAX_PATH);
     // https://docs.microsoft.com/en-us/windows/win32/fileio/listing-the-files-in-a-directory
@@ -672,7 +835,7 @@ int main() {
         wcsncpy(name, info.cFileName, path + MAX_PATH - name);
         LPCBYTE stop;
         LPBYTE buffer = readFile(path, &stop);
-        LPCWSTR error = parseJSON(buffer, stop);
+        LPCWSTR error = parseJSON(buffer, stop, NULL, 0);
         if (error || info.cFileName[0] == L'n') {
             wprintf(
                 L"%-50s %s\n", info.cFileName, error ? error : L"No error!"
