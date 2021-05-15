@@ -200,11 +200,6 @@ int getCharSize(LPCBYTE json, LPCBYTE stop, LPCWSTR **errors) {
     return 0;
 }
 
-/*
-Invalid escape sequence \u%%%%%%%% in first key of %1$s object0
-*/
-#define ESCAPE_ERROR_LENGTH 200
-WCHAR parseStringOut[ESCAPE_ERROR_LENGTH];
 LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
     if (!chomp('"', json, stop)) {
         if (*json >= stop) {
@@ -286,7 +281,8 @@ int compareHookWithStack(LPCBYTE hookKey, LPCBYTE stackKey) {
 #define HOOK_FRAME_COUNT 5
 typedef struct {
     LPCWSTR (*call)(
-        LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, void* param
+        LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index,
+        void* param, BOOL silent
     );
     JSON_TYPE jsonType;
     void* param;
@@ -321,7 +317,14 @@ int hookBinarySearch(
 
 #define MAX_FRAME_COUNT 250
 typedef struct { int index; LPCBYTE key; } Frame;
-typedef struct { Frame frames[MAX_FRAME_COUNT]; int count; } Stack;
+typedef struct {
+    Frame frames[MAX_FRAME_COUNT];
+    int count;
+    LPCWSTR warning;
+    LPCBYTE warningLocation;
+    Frame warningFrames[MAX_FRAME_COUNT];
+    int warningCount;
+} Stack;
 typedef struct { Stack *stack; Hook *hooks; int count; } ParserState;
 ParserState addFrame(ParserState state, int index, LPCBYTE key) {
     if (state.stack->count >= MAX_FRAME_COUNT) {
@@ -453,26 +456,43 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     if (
         state->count > 0 && state->stack->count >= state->hooks[0].frameCount
     ) {
+        LPCWSTR warning = NULL;
         JSON_TYPE hookType = state->hooks[0].jsonType;
         if (hookType & jsonType) {
-            error = state->hooks[0].call(
-                &start, *json, jsonType, state->hooks[0].param
+            int index = -1;
+            if (state->stack->count > 0) {
+                index = state->stack->frames[state->stack->count - 1].index;
+            }
+
+            // Tell hook not to return an error rather than ignoring the error
+            // to avoid later errors overwriting earlier ones in the hook's
+            // internal buffer
+            warning = state->hooks[0].call(
+                &start, *json, jsonType, index, state->hooks[0].param,
+                state->stack->warning != NULL // silent
             );
-            if (error) { *json = start; }
-            return error;
+        } else if (state->stack->warning == NULL) {
+            if ((jsonType & JSON_NUMBER) && (hookType & JSON_INT)) {
+                warning = L"Could not parse %1$s value %2$s as an int";
+            } else {
+                _snwprintf_s(
+                    parseValueOut, TYPE_ERROR_LENGTH, _TRUNCATE,
+                    L"%%1$s must be %s, not %s",
+                    jsonTypeToString(hookType), jsonTypeToString(jsonType)
+                );
+                warning = parseValueOut;
+            }
         }
 
-        *json = start;
-        if ((jsonType & JSON_NUMBER) && (hookType & JSON_INT)) {
-            return L"Could not parse %1$s value %2$s as an int";
+        if (warning != NULL) {
+            state->stack->warning = warning;
+            state->stack->warningLocation = start;
+            memcpy(
+                state->stack->warningFrames, state->stack->frames,
+                state->stack->count * sizeof(Frame)
+            );
+            state->stack->warningCount = state->stack->count;
         }
-
-        _snwprintf_s(
-            parseValueOut, TYPE_ERROR_LENGTH, _TRUNCATE,
-            L"%%1$s must be %s, not %s",
-            jsonTypeToString(hookType), jsonTypeToString(jsonType)
-        );
-        return parseValueOut;
     }
 
     return NULL;
@@ -687,12 +707,21 @@ LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
 WCHAR parseJSONOut[FORMATTED_ERROR_LENGTH];
 LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
     LPCBYTE json = buffer;
-    Stack stack = { .count = 0 };
+    Stack stack = { .count = 0, .warning = NULL };
     ParserState state = {
         .stack = &stack, .hooks = hooks, .count = hookCount
     };
     LPCWSTR errorFormat = parseJSONHelp(&json, stop, &state);
-    if (errorFormat == NULL) { return NULL; }
+    if (errorFormat == NULL) {
+        errorFormat = stack.warning;
+        if (errorFormat == NULL) { return NULL; }
+        json = stack.warningLocation;
+        stack.count = stack.warningCount;
+        memcpy(
+            stack.frames, stack.warningFrames, stack.count * sizeof(Frame)
+        );
+    }
+
     LPCWSTR location = getLocation(buffer, json);
     wcsncpy_s(parseJSONOut, MAX_LOCATION_LENGTH, location, _TRUNCATE);
     int locationLength = wcsnlen_s(location, MAX_LOCATION_LENGTH);
@@ -709,19 +738,24 @@ LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
 }
 
 LPCWSTR parseNothing(
-    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, void *param
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
+    BOOL silent
 ) {
     return NULL;
 }
 
 LPCWSTR parseColor(
-    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, void *param
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
+    BOOL silent
 ) {
     chomp('"', json, stop);
-    if (!chomp('#', json, stop)) { return L"%1$s must start with #%2$.0s"; }
+    if (!chomp('#', json, stop)) {
+        return silent ? NULL : L"%1$s must start with #%2$.0s";
+    }
     int length = stop - 1 - *json;
     if (length != 3 && length != 6) {
-        return L"%1$s must have 3 or 6 characters after #%2$.0s";
+        return silent ? NULL
+            : L"%1$s must have 3 or 6 characters after #%2$.0s";
     }
 
     while (
@@ -730,7 +764,7 @@ LPCWSTR parseColor(
             || chompRange('A', 'F', json, stop)
     );
     if (*json < stop - 1) {
-        return L"%1$s contains non-hex characters%2$.0s";
+        return silent ? NULL : L"%1$s contains non-hex characters%2$.0s";
     }
 
     *json -= length;
@@ -803,25 +837,38 @@ LPBYTE readFile(LPCWSTR path, LPCBYTE *stop) {
 }
 
 int main() {
-    COLORREF color = RGB(1, 2, 3);
-    Hook hooks[2] = {
+    COLORREF labelColor = RGB(1, 2, 3);
+    COLORREF borderColor = RGB(4, 5, 6);
+    Hook hooks[3] = {
         { .call = parseNothing, .jsonType = JSON_OBJECT, .frameCount = 0 },
         {
             .call = parseColor,
             .jsonType = JSON_STRING,
-            .param = &color,
+            .param = &borderColor,
+            .frames = { "borderColor" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseColor,
+            .jsonType = JSON_STRING,
+            .param = &labelColor,
             .frames = { "labelColor" },
             .frameCount = 1,
-        }
+        },
     };
     LPCBYTE stop;
     LPBYTE buffer = readFile(SETTINGS_FILENAME, &stop);
     LPCWSTR error = parseJSON(buffer, stop, hooks, 2);
     if (error) { wprintf(L"%s\n", error); }
     wprintf(
-        L"red = %d, green = %d, blue = %d\n",
-        GetRValue(color), GetGValue(color), GetBValue(color)
+        L"labelColor: red = %d, green = %d, blue = %d\n",
+        GetRValue(labelColor), GetGValue(labelColor), GetBValue(labelColor)
     );
+    wprintf(
+        L"borderColor: red = %d, green = %d, blue = %d\n",
+        GetRValue(borderColor), GetGValue(borderColor), GetBValue(borderColor)
+    );
+    return 0;
 
     WCHAR path[MAX_PATH] = L"../JSONTestSuite/test_parsing/";
     LPWSTR name = path + wcsnlen(path, MAX_PATH);
