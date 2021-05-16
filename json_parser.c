@@ -284,7 +284,6 @@ typedef struct {
         LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index,
         void* param, BOOL errorVisible
     );
-    JSON_TYPE jsonType;
     void* param;
     LPCBYTE frames[HOOK_FRAME_COUNT];
     int frameCount;
@@ -436,8 +435,6 @@ LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     }
 }
 
-#define TYPE_ERROR_LENGTH 20 + 2 * MAX_JSON_TYPE_LENGTH - 2
-WCHAR parseValueOut[TYPE_ERROR_LENGTH];
 LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     while (chompAny(WHITESPACE, json, stop));
     if (*json >= stop) { return L"Missing %1$s value before %2$s"; }
@@ -463,31 +460,18 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
             && state->stack->count >= state->hooks[0].frameCount
             && state->stack->count > state->stack->poisonedCount
     ) {
-        LPCWSTR warning = NULL;
-        JSON_TYPE hookType = state->hooks[0].jsonType;
-        if (hookType & jsonType) {
-            int index = -1;
-            if (state->stack->count > 0) {
-                index = state->stack->frames[state->stack->count - 1].index;
-            }
+        int index = -1;
+        if (state->stack->count > 0) {
+            index = state->stack->frames[state->stack->count - 1].index;
+        }
 
-            // Let hooks know if their error won't be displayed so they can
-            // avoid overwriting the internal buffer that a previous error was
-            // stored in
-            warning = state->hooks[0].call(
-                &start, *json, jsonType, index, state->hooks[0].param,
-                state->stack->warning == NULL // errorVisible
-            );
-        } else if ((jsonType & JSON_NUMBER) && (hookType & JSON_INT)) {
-            warning = L"Could not parse %1$s value %2$s as an int";
-        } else if (state->stack->warning == NULL) {
-            _snwprintf_s(
-                parseValueOut, TYPE_ERROR_LENGTH, _TRUNCATE,
-                L"%%1$s must be %s, not %s",
-                jsonTypeToString(hookType), jsonTypeToString(jsonType)
-            );
-            warning = parseValueOut;
-        } else { warning = L"dummy type error"; }
+        // Let hooks know if their error won't be displayed so they can
+        // avoid overwriting the internal buffer that a previous error was
+        // stored in
+        LPCWSTR warning = state->hooks[0].call(
+            &start, *json, jsonType, index, state->hooks[0].param,
+            state->stack->warning == NULL // errorVisible
+        );
         if (warning != NULL) {
             state->stack->poisonedCount = state->stack->count;
             if (state->stack->warning == NULL) {
@@ -745,17 +729,34 @@ LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
     return parseJSONOut;
 }
 
-LPCWSTR parseNothing(
+#define TYPE_ERROR_LENGTH 20 + 2 * MAX_JSON_TYPE_LENGTH - 2
+WCHAR checkTypeOut[TYPE_ERROR_LENGTH];
+LPCWSTR checkType(JSON_TYPE actual, JSON_TYPE expected, BOOL errorVisible) {
+    if (actual & expected) {
+        return NULL;
+    } else if ((actual & JSON_NUMBER) && (expected & JSON_INT)) {
+        return L"Could not parse %1$s value %2$s as an int";
+    } else if (errorVisible) {
+        _snwprintf_s(
+            checkTypeOut, TYPE_ERROR_LENGTH, _TRUNCATE,
+            L"%%1$s must be %s, not %s",
+            jsonTypeToString(expected), jsonTypeToString(actual)
+        );
+        return checkTypeOut;
+    } else { return L"dummy type error"; }
+}
+
+LPCWSTR expectObject(
     LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
     BOOL errorVisible
-) {
-    return NULL;
-}
+) { return checkType(jsonType, JSON_OBJECT, errorVisible); }
 
 LPCWSTR parseColor(
     LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
     BOOL errorVisible
 ) {
+    LPCWSTR error = checkType(jsonType, JSON_STRING, errorVisible);
+    if (error != NULL) { return error; }
     chomp('"', json, stop);
     if (!chomp('#', json, stop)) { return L"%1$s must start with #%2$.0s"; }
     int length = stop - 1 - *json;
@@ -845,17 +846,15 @@ int main() {
     COLORREF labelColor = RGB(1, 2, 3);
     COLORREF borderColor = RGB(4, 5, 6);
     Hook hooks[3] = {
-        { .call = parseNothing, .jsonType = JSON_OBJECT, .frameCount = 0 },
+        { .call = expectObject, .frameCount = 0 },
         {
             .call = parseColor,
-            .jsonType = JSON_STRING,
             .param = &borderColor,
             .frames = { "borderColor" },
             .frameCount = 1,
         },
         {
             .call = parseColor,
-            .jsonType = JSON_STRING,
             .param = &labelColor,
             .frames = { "labelColor" },
             .frameCount = 1,
@@ -873,7 +872,6 @@ int main() {
         L"borderColor: red = %d, green = %d, blue = %d\n",
         GetRValue(borderColor), GetGValue(borderColor), GetBValue(borderColor)
     );
-    return 0;
 
     WCHAR path[MAX_PATH] = L"../JSONTestSuite/test_parsing/";
     LPWSTR name = path + wcsnlen(path, MAX_PATH);
