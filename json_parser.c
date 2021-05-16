@@ -282,7 +282,7 @@ int compareHookWithStack(LPCBYTE hookKey, LPCBYTE stackKey) {
 typedef struct {
     LPCWSTR (*call)(
         LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index,
-        void* param, BOOL silent
+        void* param, BOOL errorVisible
     );
     JSON_TYPE jsonType;
     void* param;
@@ -320,6 +320,7 @@ typedef struct { int index; LPCBYTE key; } Frame;
 typedef struct {
     Frame frames[MAX_FRAME_COUNT];
     int count;
+    int poisonedCount;
     LPCWSTR warning;
     LPCBYTE warningLocation;
     Frame warningFrames[MAX_FRAME_COUNT];
@@ -340,6 +341,10 @@ ParserState addFrame(ParserState state, int index, LPCBYTE key) {
     state.count = hookBinarySearch(
         state.hooks, state.count - start, key, state.stack->count, TRUE
     );
+    if (state.stack->poisonedCount > state.stack->count) {
+        state.stack->poisonedCount = state.stack->count;
+    }
+
     state.stack->count++;
     return state;
 }
@@ -454,7 +459,9 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     if (error != NULL) { return error; }
 
     if (
-        state->count > 0 && state->stack->count >= state->hooks[0].frameCount
+        state->count > 0
+            && state->stack->count >= state->hooks[0].frameCount
+            && state->stack->count > state->stack->poisonedCount
     ) {
         LPCWSTR warning = NULL;
         JSON_TYPE hookType = state->hooks[0].jsonType;
@@ -464,34 +471,35 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
                 index = state->stack->frames[state->stack->count - 1].index;
             }
 
-            // Tell hook not to return an error rather than ignoring the error
-            // to avoid later errors overwriting earlier ones in the hook's
-            // internal buffer
+            // Let hooks know if their error won't be displayed so they can
+            // avoid overwriting the internal buffer that a previous error was
+            // stored in
             warning = state->hooks[0].call(
                 &start, *json, jsonType, index, state->hooks[0].param,
-                state->stack->warning != NULL // silent
+                state->stack->warning == NULL // errorVisible
             );
+        } else if ((jsonType & JSON_NUMBER) && (hookType & JSON_INT)) {
+            warning = L"Could not parse %1$s value %2$s as an int";
         } else if (state->stack->warning == NULL) {
-            if ((jsonType & JSON_NUMBER) && (hookType & JSON_INT)) {
-                warning = L"Could not parse %1$s value %2$s as an int";
-            } else {
-                _snwprintf_s(
-                    parseValueOut, TYPE_ERROR_LENGTH, _TRUNCATE,
-                    L"%%1$s must be %s, not %s",
-                    jsonTypeToString(hookType), jsonTypeToString(jsonType)
-                );
-                warning = parseValueOut;
-            }
-        }
-
-        if (warning != NULL) {
-            state->stack->warning = warning;
-            state->stack->warningLocation = start;
-            memcpy(
-                state->stack->warningFrames, state->stack->frames,
-                state->stack->count * sizeof(Frame)
+            _snwprintf_s(
+                parseValueOut, TYPE_ERROR_LENGTH, _TRUNCATE,
+                L"%%1$s must be %s, not %s",
+                jsonTypeToString(hookType), jsonTypeToString(jsonType)
             );
-            state->stack->warningCount = state->stack->count;
+            warning = parseValueOut;
+        } else { warning = L"dummy type error"; }
+        if (warning != NULL) {
+            state->stack->poisonedCount = state->stack->count;
+            if (state->stack->warning == NULL) {
+                // save stack trace of first warning only
+                state->stack->warning = warning;
+                state->stack->warningLocation = start;
+                memcpy(
+                    state->stack->warningFrames, state->stack->frames,
+                    state->stack->count * sizeof(Frame)
+                );
+                state->stack->warningCount = state->stack->count;
+            }
         }
     }
 
@@ -707,9 +715,9 @@ LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
 WCHAR parseJSONOut[FORMATTED_ERROR_LENGTH];
 LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
     LPCBYTE json = buffer;
-    Stack stack = { .count = 0, .warning = NULL };
+    Stack stack = { .count = 0, .warning = NULL, .poisonedCount = 0 };
     ParserState state = {
-        .stack = &stack, .hooks = hooks, .count = hookCount
+        .stack = &stack, .hooks = hooks, .count = hookCount,
     };
     LPCWSTR errorFormat = parseJSONHelp(&json, stop, &state);
     if (errorFormat == NULL) {
@@ -739,23 +747,20 @@ LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
 
 LPCWSTR parseNothing(
     LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
-    BOOL silent
+    BOOL errorVisible
 ) {
     return NULL;
 }
 
 LPCWSTR parseColor(
     LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
-    BOOL silent
+    BOOL errorVisible
 ) {
     chomp('"', json, stop);
-    if (!chomp('#', json, stop)) {
-        return silent ? NULL : L"%1$s must start with #%2$.0s";
-    }
+    if (!chomp('#', json, stop)) { return L"%1$s must start with #%2$.0s"; }
     int length = stop - 1 - *json;
     if (length != 3 && length != 6) {
-        return silent ? NULL
-            : L"%1$s must have 3 or 6 characters after #%2$.0s";
+        return L"%1$s must have 3 or 6 characters after #%2$.0s";
     }
 
     while (
@@ -764,7 +769,7 @@ LPCWSTR parseColor(
             || chompRange('A', 'F', json, stop)
     );
     if (*json < stop - 1) {
-        return silent ? NULL : L"%1$s contains non-hex characters%2$.0s";
+        return L"%1$s contains non-hex characters%2$.0s";
     }
 
     *json -= length;
