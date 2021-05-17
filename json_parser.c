@@ -770,7 +770,7 @@ LPCWSTR parseColor(
             || chompRange('A', 'F', json, stop)
     );
     if (*json < stop - 1) {
-        return L"%1$s contains non-hex characters%2$.0s";
+        return L"%1$s contains non-hexadecimal character %2$.1s";
     }
 
     *json -= length;
@@ -862,7 +862,7 @@ int main() {
     };
     LPCBYTE stop;
     LPBYTE buffer = readFile(SETTINGS_FILENAME, &stop);
-    LPCWSTR error = parseJSON(buffer, stop, hooks, 2);
+    LPCWSTR error = parseJSON(buffer, stop, hooks, 3);
     if (error) { wprintf(L"%s\n", error); }
     wprintf(
         L"labelColor: red = %d, green = %d, blue = %d\n",
