@@ -2544,16 +2544,18 @@ LRESULT CALLBACK DlgProc(
         LRESULT margins = SendMessage(textBox, EM_GETMARGINS, 0, 0);
         rect.right += 4 + LOWORD(margins) + HIWORD(margins);
         rect.bottom += 2; // 1px padding top, 1px padding bottom
-        AdjustWindowRectEx(
+        UINT dpi = GetDpiForWindow(dialog);
+        AdjustWindowRectExForDpi(
             &rect,
             GetWindowLongPtr(textBox, GWL_STYLE),
             FALSE, // bMenu
-            GetWindowLongPtr(textBox, GWL_EXSTYLE)
+            GetWindowLongPtr(textBox, GWL_EXSTYLE),
+            dpi
         );
         SIZE oldMinSize = getMinDialogClientSize(model, model->dpi);
         model->minTextBoxSize.cx = rect.right - rect.left;
         model->minTextBoxSize.cy = rect.bottom - rect.top;
-        model->dpi = GetDpiForWindow(dialog);
+        model->dpi = dpi;
         SIZE extraSize = getMinDialogClientSize(model, model->dpi);
         RECT client; GetClientRect(dialog, &client);
         if (oldMinSize.cy > 0 && extraSize.cy != oldMinSize.cy) {
@@ -2581,6 +2583,7 @@ LRESULT CALLBACK DlgProc(
         // draw labels after dialog size has been finalized to avoid dialog
         // size noticeably changing after labels are drawn
         if (!model->drawnYet) {
+            model->drawnYet = TRUE;
             RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
         }
 
@@ -2725,6 +2728,8 @@ LRESULT CALLBACK DlgProc(
         ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
         client.right = buttonRect.right;
         SetMenu(dialog, getDropdownMenu());
+        // using AdjustWindowRectExForDpi causes problems because Windows
+        // never actually redraws the title bar to reflect DPI changes
         AdjustWindowRectEx(
             &client,
             GetWindowLongPtr(dialog, GWL_STYLE),
