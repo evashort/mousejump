@@ -1,13 +1,14 @@
 // rc mousejump.rc && cl mousejump.c /link mousejump.res && mousejump.exe
 
-// https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadbitmapa#remarks
-#define OEMRESOURCE
+// https://docs.microsoft.com/en-us/windows/win32/controls/common-control-versions
+#define _WIN32_IE 0x0600
 
 #define UNICODE
 #include <math.h>
 #include "mousejump.h"
 #include <stdlib.h>
 #include <ShellScalingApi.h>
+#include <commctrl.h>
 #include <windows.h>
 
 // GET_X_LPARAM, GET_Y_LPARAM
@@ -16,6 +17,11 @@
 #pragma comment(lib, "user32")
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "SHCore")
+#pragma comment(lib, "comctl32")
+// https://docs.microsoft.com/en-us/windows/win32/controls/cookbook-overview
+#pragma comment(linker,"\"/manifestdependency:type='win32' \
+name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
+processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #pragma region debug
 int debugCount = 0;
@@ -740,16 +746,6 @@ ArrowKeyMap getArrowKeyMap(BOOL slow) {
     );
 }
 
-HBITMAP dropdownBitmapOut = NULL;
-HBITMAP getDropdownBitmap() {
-    // predefined bitmaps are scaled based on the program's initial DPI.
-    // unfortunately, reloading them when the DPI changes does not change
-    // their scale.
-    if (dropdownBitmapOut) { return dropdownBitmapOut; }
-    // http://www.bcbj.org/articles/vol1/9711/Bitmaps_on_demand.htm
-    return dropdownBitmapOut = LoadBitmap(NULL, MAKEINTRESOURCE(OBM_COMBO));
-}
-
 HMENU dropdownMenuOut = NULL;
 HMENU getDropdownMenu() {
     if (dropdownMenuOut) { return dropdownMenuOut; }
@@ -1422,7 +1418,6 @@ void destroyCache() {
     DeleteObject(earBitmapOut);
     free(acceleratorsOut.value);
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
-    DeleteObject(dropdownBitmapOut);
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
     for (int i = 0; i < TEXT_SLOT_COUNT; i++) { free(textsOut[i]); }
     free(edgeCellsOut.edgeCells);
@@ -1437,7 +1432,9 @@ void destroyCache() {
 struct Model {
     HWND window;
     HWND dialog;
+    HWND tooltip;
     HMONITOR monitor;
+    BOOL drawnYet;
     COLORREF colorKey;
     Point offsetPt;
     double deltaPx;
@@ -1465,12 +1462,14 @@ struct Model {
     double mirrorWidthPt;
     double mirrorHeightPt;
     double textBoxWidthPt;
+    double textBoxHeightPt;
     double dropdownWidthPt;
-    double clientHeightPt;
+    double dropdownHeightPt;
     BOOL showLabels;
     BOOL showCaption;
     SIZE minTextBoxSize;
-    BOOL inMenuLoop;
+    // used only for calculating the previous dialog size after WM_DPICHANGED
+    UINT dpi;
     LPWSTR text;
     POINT naturalPoint;
     POINT matchPoint;
@@ -2107,6 +2106,7 @@ Model *getModel(HWND window) {
 }
 
 BOOL skipHitTest = FALSE;
+BOOL ignoreDestroy = FALSE;
 
 LRESULT CALLBACK WndProc(
     HWND window,
@@ -2114,7 +2114,10 @@ LRESULT CALLBACK WndProc(
     WPARAM wParam,
     LPARAM lParam
 ) {
-    if (message == WM_ACTIVATE) {
+    if (message == WM_PAINT) {
+        Model *model = getModel(window);
+        redraw(model, getScreen(&model->monitor));
+    } else if (message == WM_ACTIVATE) {
         if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
             Model *model = getModel(window);
             // The main window initially receives WM_ACTIVATE before its user
@@ -2149,7 +2152,7 @@ LRESULT CALLBACK WndProc(
             return 0;
         }
     } else if (message == WM_DESTROY) {
-        PostQuitMessage(0);
+        if (!ignoreDestroy) { PostQuitMessage(0); }
         return 0;
     }
 
@@ -2166,91 +2169,28 @@ BOOL CALLBACK SetFontNoRedraw(HWND child, LPARAM font){
     return TRUE;
 }
 
-BOOL shouldShowDropdown(HWND dialog, Model *model) {
-    return model->showCaption || model->inMenuLoop
-        || GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX);
+BOOL shouldShowDropdown(Model *model) {
+    return model->showCaption || GetMenu(model->dialog) != NULL
+        || GetFocus() != GetDlgItem(model->dialog, IDC_TEXTBOX);
 }
 
-SIZE getMinDialogClientSize(HWND dialog) {
-    Model *model = getModel(dialog);
-    SIZE clientSize = model->minTextBoxSize;
-    if (clientSize.cy == 0) { return clientSize; }
-    UINT dpi = GetDpiForWindow(dialog);
-    int textBoxWidth = ptToIntPx(model->textBoxWidthPt, dpi);
-    clientSize.cx = max(clientSize.cx, textBoxWidth);
-    if (shouldShowDropdown(dialog, model)) {
-        clientSize.cx += ptToIntPx(model->dropdownWidthPt, dpi);
-    }
-
-    int clientHeight = ptToIntPx(model->clientHeightPt, dpi);
-    clientSize.cy = max(clientSize.cy, clientHeight);
-    return clientSize;
-}
-
-DWORD getFinalStyle(HWND dialog) {
-    DWORD style = GetWindowLongPtr(dialog, GWL_STYLE);
-    Model *model = getModel(dialog);
-    if (getModel(dialog)->showCaption) {
-        return style | WS_THICKFRAME | WS_CAPTION;
-    } else {
-        return style & ~WS_THICKFRAME & ~WS_CAPTION;
-    }
-}
-
-typedef struct {
-    SIZE clientSize;
-    BOOL showCaption;
-    BOOL showMenuBar;
-} MinDialogSizeIn;
-MinDialogSizeIn minDialogSizeIn = { .clientSize = { 0, 0 } };
-SIZE minDialogSizeOut;
-SIZE getMinDialogSize(HWND dialog) {
-    Model *model = getModel(dialog);
-    MinDialogSizeIn in;
-    ZeroMemory(&in, sizeof(in));
-    in.clientSize = getMinDialogClientSize(dialog);
-    in.showCaption = model->showCaption;
-    in.showMenuBar = GetMenu(dialog) != NULL;
-    if (in.clientSize.cy == 0) { return in.clientSize; }
-    if (!memcmp(&in, &minDialogSizeIn, sizeof(in))) {
-        return minDialogSizeOut;
-    }
-
-    ZeroMemory(&minDialogSizeIn, sizeof(in));
-    minDialogSizeIn = in;
-    RECT frame = { 0, 0, in.clientSize.cx, in.clientSize.cy };
-    AdjustWindowRectEx(
-        &frame,
-        getFinalStyle(dialog),
-        in.showMenuBar,
-        GetWindowLongPtr(dialog, GWL_EXSTYLE)
-    );
-    minDialogSizeOut.cx = frame.right - frame.left;
-    minDialogSizeOut.cy = frame.bottom - frame.top;
-    return minDialogSizeOut;
-}
-
-void applyMinDialogSize(HWND dialog) {
-    RECT newFrame;
-    ZeroMemory(&newFrame, sizeof(newFrame));
-    *(LPSIZE)&newFrame.right = getMinDialogSize(dialog);
-    if (newFrame.bottom == 0) { return; }
-    RECT frame;
-    ZeroMemory(&frame, sizeof(frame));
-    GetWindowRect(dialog, &frame);
-    OffsetRect(&frame, -frame.left, -frame.top);
-    if (getModel(dialog)->showCaption) {
-        newFrame.right = max(newFrame.right, frame.right);
-    }
-
-    if (!memcmp(&frame, &newFrame, sizeof(frame))) { return; }
-    SetWindowPos(
-        dialog,
-        NULL,
-        0, 0,
-        newFrame.right, newFrame.bottom,
-        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
-    );
+SIZE getMinDialogClientSize(Model *model, UINT dpi) {
+    if (model->minTextBoxSize.cy == 0) { return model->minTextBoxSize; }
+    SIZE client = {
+        .cx = max(
+            model->minTextBoxSize.cx, ptToIntPx(model->textBoxWidthPt, dpi)
+        ) + (
+            shouldShowDropdown(model)
+                ? ptToIntPx(model->dropdownWidthPt, dpi) : 0
+        ),
+        .cy = max(
+            model->minTextBoxSize.cy,
+            ptToIntPx(
+                max(model->textBoxHeightPt, model->dropdownHeightPt), dpi
+            )
+        ),
+    };
+    return client;
 }
 
 typedef struct {
@@ -2473,7 +2413,7 @@ void doActions(Model *model) {
 
 const int PRESSED = 0x8000;
 typedef enum { WM_APP_FITTOTEXT = WM_APP } AppMessage;
-typedef enum { ENABLE_DROPDOWN_TIMER = 1, DO_ACTIONS_TIMER } TimerID;
+typedef enum { DO_ACTIONS_TIMER } TimerID;
 BOOL sleep(Model *model, ActionParam param) {
     SetTimer(model->dialog, DO_ACTIONS_TIMER, param.milliseconds, NULL);
     return FALSE;
@@ -2507,7 +2447,6 @@ LRESULT CALLBACK DlgProc(
 ) {
     if (message == WM_INITDIALOG) {
         Model *model = getModel(dialog);
-        model->inMenuLoop = FALSE;
         MENUITEMINFO menuItemInfo = {
             .cbSize = sizeof(MENUITEMINFO),
             .fMask = MIIM_STATE,
@@ -2520,19 +2459,61 @@ LRESULT CALLBACK DlgProc(
             FALSE,
             &menuItemInfo
         );
-        SetWindowLongPtr(dialog, GWL_STYLE, getFinalStyle(dialog));
+        DWORD style = GetWindowLongPtr(dialog, GWL_STYLE);
+        SetWindowLongPtr(
+            dialog, GWL_STYLE,
+            model->showCaption ? style | WS_THICKFRAME | WS_CAPTION
+                : style & ~WS_THICKFRAME & ~WS_CAPTION
+        );
+        // if you specify margins other than (3, 3), Windows will change them
+        // back when the font changes
+        SendMessage(
+            GetDlgItem(dialog, IDC_TEXTBOX),
+            EM_SETMARGINS,
+            EC_LEFTMARGIN | EC_RIGHTMARGIN,
+            MAKELPARAM(3, 3)
+        );
+        UINT dpi = GetDpiForWindow(dialog);
+        int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
+        // https://stackoverflow.com/questions/13616491/how-to-use-bs-splitbutton-in-c
+        BUTTON_SPLITINFO splitInfo = {
+            .mask = BCSIF_SIZE | BCSIF_STYLE,
+            .size = { dropdownWidth, dropdownWidth },
+            .uSplitStyle = BCSS_ALIGNLEFT,
+        };
+        Button_SetSplitInfo(GetDlgItem(dialog, IDC_DROPDOWN), &splitInfo);
         SendMessage(
             dialog,
             WM_SETFONT,
-            (WPARAM)getSystemFont(GetDpiForWindow(dialog)),
+            (WPARAM)getSystemFont(dpi),
             FALSE
         );
-        // https://docs.microsoft.com/en-us/windows/win32/controls/bm-setimage
+        // https://docs.microsoft.com/en-us/windows/win32/controls/create-a-tooltip-for-a-control
+        // https://docs.microsoft.com/en-us/windows/win32/controls/implement-balloon-tooltips
+        model->tooltip = CreateWindow(
+            TOOLTIPS_CLASS,
+            NULL,
+            WS_POPUP | TTS_NOPREFIX | TTS_BALLOON | TTS_CLOSE,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            dialog,
+            NULL,
+            GetWindowInstance(NULL),
+            NULL
+        );
+        TOOLINFO toolInfo = {
+            .cbSize = sizeof(TOOLINFO),
+            .uFlags = TTF_IDISHWND | TTF_SUBCLASS | TTF_CENTERTIP,
+            .hwnd = dialog,
+            .uId = (UINT_PTR)GetDlgItem(dialog, IDC_TEXTBOX),
+            .hinst = NULL,
+            .lpszText = L"Type the label text to move the mouse",
+            .lParam = 0,
+            .lpReserved = NULL,
+        };
+        SendMessage(model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&toolInfo);
         SendMessage(
-            GetDlgItem(dialog, IDC_DROPDOWN),
-            BM_SETIMAGE,
-            (WPARAM)IMAGE_BITMAP,
-            (LPARAM)getDropdownBitmap()
+            model->tooltip,
+            TTM_SETTITLE, TTI_INFO_LARGE, (LPARAM)L"Move to label"
         );
         return TRUE;
     } else if (message == WM_SETFONT) {
@@ -2542,14 +2523,6 @@ LRESULT CALLBACK DlgProc(
         } else {
             EnumChildWindows(dialog, SetFontNoRedraw, wParam);
         }
-
-        // for some reason Windows adds margins when the font changes
-        SendMessage(
-            GetDlgItem(dialog, IDC_TEXTBOX),
-            EM_SETMARGINS,
-            EC_LEFTMARGIN | EC_RIGHTMARGIN,
-            MAKELPARAM(0, 0)
-        );
 
         PostMessage(dialog, WM_APP_FITTOTEXT, 0, 0);
         return TRUE;
@@ -2577,39 +2550,84 @@ LRESULT CALLBACK DlgProc(
             FALSE, // bMenu
             GetWindowLongPtr(textBox, GWL_EXSTYLE)
         );
+        SIZE oldMinSize = getMinDialogClientSize(model, model->dpi);
         model->minTextBoxSize.cx = rect.right - rect.left;
         model->minTextBoxSize.cy = rect.bottom - rect.top;
-        applyMinDialogSize(dialog);
+        model->dpi = GetDpiForWindow(dialog);
+        SIZE extraSize = getMinDialogClientSize(model, model->dpi);
+        RECT client; GetClientRect(dialog, &client);
+        if (oldMinSize.cy > 0 && extraSize.cy != oldMinSize.cy) {
+            extraSize.cx -= oldMinSize.cx;
+            extraSize.cy -= oldMinSize.cy;
+        } else {
+            extraSize.cx -= client.right;
+            extraSize.cy -= client.bottom;
+            if (model->showCaption) {
+                extraSize.cx = max(0, extraSize.cx);
+                extraSize.cy = max(0, extraSize.cy);
+            }
+        }
+
+        if (extraSize.cx != 0 || extraSize.cy != 0) {
+            RECT frame; GetWindowRect(dialog, &frame);
+            SetWindowPos(
+                dialog, NULL, 0, 0,
+                frame.right + extraSize.cx - frame.left,
+                frame.bottom + extraSize.cy - frame.top,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        }
+
+        // draw labels after dialog size has been finalized to avoid dialog
+        // size noticeably changing after labels are drawn
+        if (!model->drawnYet) {
+            RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
+        }
+
         return TRUE;
     } else if (message == WM_SIZE) {
         RECT client;
         GetClientRect(dialog, &client);
         Model *model = getModel(dialog);
         UINT dpi = GetDpiForWindow(dialog);
+        int textBoxHeight = max(
+            model->minTextBoxSize.cy, ptToIntPx(model->textBoxHeightPt, dpi)
+        );
         int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
-        if (shouldShowDropdown(dialog, model)) {
+        int dropdownHeight = max(
+            model->minTextBoxSize.cy, ptToIntPx(model->dropdownHeightPt, dpi)
+        );
+        if (shouldShowDropdown(model)) {
             client.right -= dropdownWidth;
         }
 
         SetWindowPos(
             GetDlgItem(dialog, IDC_TEXTBOX),
-            NULL, 0, 0, client.right, client.bottom, 0
+            NULL,
+            0, (client.bottom - textBoxHeight) / 2,
+            client.right, textBoxHeight,
+            0
         );
         SetWindowPos(
             GetDlgItem(dialog, IDC_DROPDOWN),
             NULL,
-            client.right, 0,
-            dropdownWidth, client.bottom,
+            client.right, (client.bottom - dropdownHeight) / 2,
+            dropdownWidth, dropdownHeight,
             0
         );
         return TRUE;
     } else if (message == WM_GETMINMAXINFO) {
         if (getModel(dialog)->showCaption) {
             LPMINMAXINFO minMaxInfo = (LPMINMAXINFO)lParam;
-            SIZE minSize = getMinDialogSize(dialog);
-            minMaxInfo->ptMinTrackSize.x = minSize.cx;
-            minMaxInfo->ptMinTrackSize.y = minSize.cy;
-            minMaxInfo->ptMaxTrackSize.y = minSize.cy;
+            SIZE minSize = getMinDialogClientSize(
+                getModel(dialog), GetDpiForWindow(dialog)
+            );
+            RECT client, frame;
+            GetClientRect(dialog, &client); GetWindowRect(dialog, &frame);
+            minMaxInfo->ptMinTrackSize.x
+                = frame.right + minSize.cx - client.right - frame.left;
+            minMaxInfo->ptMinTrackSize.y = minSize.cy
+                = frame.bottom + minSize.cy - client.bottom - frame.top;
         }
 
         return 0;
@@ -2645,10 +2663,17 @@ LRESULT CALLBACK DlgProc(
             return 0;
         }
     } else if (message == WM_DPICHANGED) {
+        Model *model = getModel(dialog);
+        UINT dpi = HIWORD(wParam);
+        int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
+        BUTTON_SPLITINFO splitInfo = {
+            .mask = BCSIF_SIZE, .size = { dropdownWidth, dropdownWidth },
+        };
+        Button_SetSplitInfo(GetDlgItem(dialog, IDC_DROPDOWN), &splitInfo);
         SendMessage(
             dialog,
             WM_SETFONT,
-            (WPARAM)getSystemFont(GetDpiForWindow(dialog)),
+            (WPARAM)getSystemFont(dpi),
             FALSE
         );
         return TRUE;
@@ -2682,7 +2707,7 @@ LRESULT CALLBACK DlgProc(
         if (PtInRect(&client, clientPoint)) {
             TrackPopupMenu(
                 GetSubMenu(getDropdownMenu(), 0),
-                TPM_RIGHTBUTTON,
+                TPM_RIGHTBUTTON | TPM_RIGHTALIGN,
                 point.x, point.y,
                 0,
                 dialog,
@@ -2691,43 +2716,84 @@ LRESULT CALLBACK DlgProc(
         }
 
         return TRUE;
-    } else if (message == WM_SYSCOMMAND) {
-        if ((wParam & 0xFFF0) == SC_KEYMENU) {
-            SetMenu(dialog, getDropdownMenu());
-            return 0;
-        }
-    } else if (message == WM_ENTERMENULOOP) {
-        getModel(dialog)->inMenuLoop = TRUE;
-        applyMinDialogSize(dialog);
-        return TRUE;
+    } else if (message == WM_SYSCOMMAND && (wParam & 0xFFF0) == SC_KEYMENU) {
+        if (GetMenu(dialog) != NULL) { return 0; }
+        RECT client, buttonRect;
+        GetClientRect(dialog, &client);
+        GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+        Model *model = getModel(dialog);
+        ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
+        client.right = buttonRect.right;
+        SetMenu(dialog, getDropdownMenu());
+        AdjustWindowRectEx(
+            &client,
+            GetWindowLongPtr(dialog, GWL_STYLE),
+            TRUE,
+            GetWindowLongPtr(dialog, GWL_EXSTYLE)
+        );
+        SetWindowPos(
+            dialog, NULL, 0, 0,
+            client.right - client.left, client.bottom - client.top,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        );
+        return 0;
     } else if (message == WM_EXITMENULOOP) {
-        HWND button = GetDlgItem(dialog, IDC_DROPDOWN);
-        if (Button_GetCheck(button)) {
-            Button_SetCheck(button, BST_UNCHECKED);
-            SetWindowRedraw(button, FALSE);
-            Button_Enable(button, FALSE);
+        if (GetMenu(dialog) == NULL) { return 0; }
+        RECT client, buttonRect;
+        GetClientRect(dialog, &client);
+        GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+        Model *model = getModel(dialog);
+        if (
+            !model->showCaption
+                && GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX)
+        ) {
+            ScreenToClient(dialog, (LPPOINT)&buttonRect.left);
+            client.right = buttonRect.left;
+        } else {
+            ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
+            client.right = buttonRect.right;
         }
 
-        getModel(dialog)->inMenuLoop = FALSE;
-        SetTimer(dialog, ENABLE_DROPDOWN_TIMER, 0, NULL);
-        return TRUE;
-    } else if (message == WM_TIMER) {
-        if (wParam == ENABLE_DROPDOWN_TIMER) {
-            HWND button = GetDlgItem(dialog, IDC_DROPDOWN);
-            Button_Enable(button, TRUE);
-            if (GetFocus() == NULL) { SetFocus(button); }
-            SetWindowRedraw(button, TRUE);
-            // invalidate in case window size changed while redraw was false
-            RedrawWindow(button, NULL, NULL, RDW_INVALIDATE);
-            KillTimer(dialog, wParam);
-            SetMenu(dialog, NULL);
-            applyMinDialogSize(dialog);
-            return TRUE;
-        } else if (wParam == DO_ACTIONS_TIMER) {
-            KillTimer(dialog, wParam);
-            doActions(getModel(dialog));
+        SetMenu(dialog, NULL);
+        AdjustWindowRectEx(
+            &client,
+            GetWindowLongPtr(dialog, GWL_STYLE),
+            FALSE,
+            GetWindowLongPtr(dialog, GWL_EXSTYLE)
+        );
+        SetWindowPos(
+            dialog, NULL, 0, 0,
+            client.right - client.left, client.bottom - client.top,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        );
+        return 0;
+    } else if (
+        message == WM_NOTIFY && ((LPNMHDR)lParam)->code == BCN_DROPDOWN
+    ) {
+        NMBCDROPDOWN *dropDown = (NMBCDROPDOWN*)lParam;
+        if (dropDown->hdr.idFrom == IDC_DROPDOWN) {
+            // https://docs.microsoft.com/en-us/windows/win32/controls/handle-the-bcn-dropdown-notification-from-a-split-button
+            RECT buttonRect = dropDown->rcButton;
+            ClientToScreen(dropDown->hdr.hwndFrom, (LPPOINT)&buttonRect.left);
+            ClientToScreen(
+                dropDown->hdr.hwndFrom, (LPPOINT)&buttonRect.right
+            );
+            TPMPARAMS popupParams;
+            popupParams.cbSize = sizeof(popupParams);
+            popupParams.rcExclude = buttonRect;
+            TrackPopupMenuEx(
+                GetSubMenu(getDropdownMenu(), 0),
+                TPM_VERTICAL | TPM_LEFTBUTTON,
+                buttonRect.left, buttonRect.top,
+                dialog,
+                &popupParams
+            );
             return TRUE;
         }
+    } else if (message == WM_TIMER && wParam == DO_ACTIONS_TIMER) {
+        KillTimer(dialog, wParam);
+        doActions(getModel(dialog));
+        return TRUE;
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
     } else if (message == WM_COMMAND) {
@@ -2746,11 +2812,8 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (command == IDC_DROPDOWN) {
                 // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
-                HWND button = GetDlgItem(dialog, IDC_DROPDOWN);
-                Button_SetCheck(button, BST_CHECKED);
-                SetWindowRedraw(button, TRUE);
                 RECT buttonRect;
-                GetWindowRect(button, &buttonRect);
+                GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
                 TPMPARAMS popupParams;
                 popupParams.cbSize = sizeof(popupParams);
                 popupParams.rcExclude = buttonRect;
@@ -2764,6 +2827,14 @@ LRESULT CALLBACK DlgProc(
                 );
 
                 return TRUE;
+            } else if (command == IDM_TO_LABEL) {
+                HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+                SendMessage(textBox, EM_SETSEL, 0, -1);
+                SetFocus(textBox);
+                // unfortunately neither of these work when the mouse is not
+                // over the control associated with the tooltip
+                SendMessage(getModel(dialog)->tooltip, TTM_ACTIVATE, TRUE, 0);
+                SendMessage(getModel(dialog)->tooltip, TTM_POPUP, 0, 0);
             } else if (
                 command >= IDM_LEFT && command <= IDM_DOWN || (
                     command >= IDM_SLIGHTLY_LEFT
@@ -3014,6 +3085,8 @@ LRESULT CALLBACK DlgProc(
             } else if (command == IDM_HIDE_INTERFACE) {
                 Model *model = getModel(dialog);
                 model->showCaption = !model->showCaption;
+                RECT oldClient; GetClientRect(dialog, &oldClient);
+                ClientToScreen(dialog, (LPPOINT)&oldClient.left);
                 DWORD selectionStart, selectionStop;
                 SendMessage(
                     GetDlgItem(dialog, IDC_TEXTBOX),
@@ -3021,11 +3094,25 @@ LRESULT CALLBACK DlgProc(
                     (WPARAM)&selectionStart,
                     (LPARAM)&selectionStop
                 );
-                SetMenu(dialog, NULL);
+                ignoreDestroy = TRUE;
                 DestroyWindow(dialog);
+                ignoreDestroy = FALSE;
                 model->minTextBoxSize.cx = model->minTextBoxSize.cy = 0;
                 model->dialog = CreateDialog(
                     GetModuleHandle(NULL), L"TOOL", model->window, DlgProc
+                );
+                RECT client; GetClientRect(model->dialog, &client);
+                RECT frame; GetWindowRect(model->dialog, &frame);
+                ClientToScreen(model->dialog, (LPPOINT)&client.left);
+                SetWindowPos(
+                    model->dialog,
+                    NULL,
+                    frame.left - client.left + oldClient.left,
+                    frame.top - client.top + oldClient.top,
+                    frame.right + oldClient.right - client.right - frame.left,
+                    frame.bottom + oldClient.bottom - client.bottom
+                        - frame.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE
                 );
                 SetDlgItemText(model->dialog, IDC_TEXTBOX, model->text);
                 SendMessage(
@@ -3040,7 +3127,25 @@ LRESULT CALLBACK DlgProc(
                 HIWORD(wParam) == EN_SETFOCUS
                     || HIWORD(wParam) == EN_KILLFOCUS
             ) {
-                applyMinDialogSize(dialog);
+                if (LOWORD(wParam) != IDC_TEXTBOX) { return TRUE; }
+                Model *model = getModel(dialog);
+                if (model->showCaption) { return TRUE; }
+                RECT buttonRect;
+                GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+                if (GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX)) {
+                    buttonRect.right = buttonRect.left;
+                }
+
+                ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
+                RECT client; GetClientRect(dialog, &client);
+                RECT frame; GetWindowRect(dialog, &frame);
+                SetWindowPos(
+                    dialog, NULL, 0, 0,
+                    frame.right + buttonRect.right - client.right
+                        - frame.left,
+                    frame.bottom - frame.top,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+                );
                 return TRUE;
             } else if (HIWORD(wParam) == EN_UPDATE) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
@@ -3127,8 +3232,8 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             }
         }
-    } else if (message == WM_CLOSE) {
-        PostQuitMessage(0);
+    } else if (message == WM_DESTROY) {
+        if (!ignoreDestroy) { PostQuitMessage(0); }
         return TRUE;
     } else if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == 70 || message == WM_SYSKEYDOWN || message == 71 || message == 28 || message == 134 || message == 799 || message == 1024 || message == 307 || message == 309 || message == 32 || message == 131 || message == 133 || message == 20 || message == 310 || message == 15) {
 
@@ -3200,6 +3305,7 @@ int CALLBACK WinMain(
         .monitor = MonitorFromWindow(
             GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY
         ),
+        .drawnYet = FALSE,
         .colorKey = RGB(255, 0, 255),
         .offsetPt = { 0, 0 },
         .deltaPx = 12,
@@ -3226,13 +3332,13 @@ int CALLBACK WinMain(
         .dashPt = 3,
         .mirrorWidthPt = 100,
         .mirrorHeightPt = 100,
-        .textBoxWidthPt = 15,
-        .dropdownWidthPt = 15,
-        .clientHeightPt = 21,
+        .textBoxWidthPt = 23.25,
+        .textBoxHeightPt = 17.25,
+        .dropdownWidthPt = 14.25,
+        .dropdownHeightPt = 17.25,
         .showLabels = TRUE,
         .showCaption = TRUE,
         .minTextBoxSize = { 0, 0 },
-        .inMenuLoop = FALSE,
         .text = L"",
         .hasMatch = FALSE,
         .dragCount = 0,
@@ -3277,7 +3383,6 @@ int CALLBACK WinMain(
     );
     SetWindowLongPtr(model.window, GWLP_USERDATA, (LONG)&model);
     model.dialog = CreateDialog(hInstance, L"TOOL", model.window, DlgProc);
-    redraw(&model, getScreen(&model.monitor));
 
     MSG message;
     while (GetMessage(&message, NULL, 0, 0)) {
