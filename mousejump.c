@@ -2490,6 +2490,9 @@ LRESULT CALLBACK DlgProc(
             (WPARAM)getSystemFont(dpi),
             FALSE
         );
+        model->toolInfo.hwnd = dialog;
+        model->toolInfo.lpszText = NULL;
+        model->tooltip = NULL;
         return TRUE;
     } else if (message == WM_SETFONT) {
         // https://stackoverflow.com/a/17075471
@@ -2739,6 +2742,15 @@ LRESULT CALLBACK DlgProc(
             client.right - client.left, client.bottom - client.top,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
         );
+        if (model->toolInfo.lpszText != NULL) {
+            ignorePop = TRUE;
+            SendMessage(
+                model->tooltip, TTM_TRACKACTIVATE, FALSE,
+                (LPARAM)&model->toolInfo
+            );
+            ignorePop = FALSE;
+        }
+
         return 0;
     } else if (message == WM_EXITMENULOOP) {
         if (GetMenu(dialog) == NULL) { return 0; }
@@ -2746,10 +2758,8 @@ LRESULT CALLBACK DlgProc(
         GetClientRect(dialog, &client);
         GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
         Model *model = getModel(dialog);
-        if (
-            !model->showCaption
-                && GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX)
-        ) {
+        BOOL focused = GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX);
+        if (!model->showCaption && focused) {
             ScreenToClient(dialog, (LPPOINT)&buttonRect.left);
             client.right = buttonRect.left;
         } else {
@@ -2769,6 +2779,13 @@ LRESULT CALLBACK DlgProc(
             client.right - client.left, client.bottom - client.top,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
         );
+        if (model->toolInfo.lpszText != NULL && focused) {
+            SendMessage(
+                model->tooltip, TTM_TRACKACTIVATE, TRUE,
+                (LPARAM)&model->toolInfo
+            );
+        }
+
         return 0;
     } else if (
         message == WM_NOTIFY && ((LPNMHDR)lParam)->code == BCN_DROPDOWN
@@ -3387,7 +3404,6 @@ int CALLBACK WinMain(
     srand(478956);
 
     Model model = {
-        .tooltip = NULL,
         .toolInfo = {
             .cbSize = sizeof(TOOLINFO),
             .uFlags = TTF_IDISHWND | TTF_CENTERTIP | TTF_TRACK | TTF_ABSOLUTE,
