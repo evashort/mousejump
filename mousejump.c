@@ -1433,6 +1433,7 @@ struct Model {
     HWND window;
     HWND dialog;
     HWND tooltip;
+    TOOLINFO toolInfo;
     HMONITOR monitor;
     BOOL drawnYet;
     COLORREF colorKey;
@@ -2107,6 +2108,7 @@ Model *getModel(HWND window) {
 
 BOOL skipHitTest = FALSE;
 BOOL ignoreDestroy = FALSE;
+BOOL ignorePop = FALSE;
 
 LRESULT CALLBACK WndProc(
     HWND window,
@@ -2488,33 +2490,6 @@ LRESULT CALLBACK DlgProc(
             (WPARAM)getSystemFont(dpi),
             FALSE
         );
-        // https://docs.microsoft.com/en-us/windows/win32/controls/create-a-tooltip-for-a-control
-        // https://docs.microsoft.com/en-us/windows/win32/controls/implement-balloon-tooltips
-        model->tooltip = CreateWindow(
-            TOOLTIPS_CLASS,
-            NULL,
-            WS_POPUP | TTS_NOPREFIX | TTS_BALLOON | TTS_CLOSE,
-            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-            dialog,
-            NULL,
-            GetWindowInstance(NULL),
-            NULL
-        );
-        TOOLINFO toolInfo = {
-            .cbSize = sizeof(TOOLINFO),
-            .uFlags = TTF_IDISHWND | TTF_SUBCLASS | TTF_CENTERTIP,
-            .hwnd = dialog,
-            .uId = (UINT_PTR)GetDlgItem(dialog, IDC_TEXTBOX),
-            .hinst = NULL,
-            .lpszText = L"Type the label text to move the mouse",
-            .lParam = 0,
-            .lpReserved = NULL,
-        };
-        SendMessage(model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&toolInfo);
-        SendMessage(
-            model->tooltip,
-            TTM_SETTITLE, TTI_INFO_LARGE, (LPARAM)L"Move to label"
-        );
         return TRUE;
     } else if (message == WM_SETFONT) {
         // https://stackoverflow.com/a/17075471
@@ -2604,8 +2579,9 @@ LRESULT CALLBACK DlgProc(
             client.right -= dropdownWidth;
         }
 
+        HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
         SetWindowPos(
-            GetDlgItem(dialog, IDC_TEXTBOX),
+            textBox,
             NULL,
             0, (client.bottom - textBoxHeight) / 2,
             client.right, textBoxHeight,
@@ -2618,7 +2594,29 @@ LRESULT CALLBACK DlgProc(
             dropdownWidth, dropdownHeight,
             0
         );
-        return TRUE;
+        if (model->toolInfo.lpszText != NULL) {
+            RECT frame; GetWindowRect(textBox, &frame);
+            SendMessage(
+                model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
+                    (frame.left + frame.right) / 2, frame.bottom
+                )
+            );
+        }
+
+        return 0;
+    } else if (message == WM_MOVE) {
+        Model *model = getModel(dialog);
+        if (model->toolInfo.lpszText != NULL) {
+            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+            RECT frame; GetWindowRect(textBox, &frame);
+            SendMessage(
+                model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
+                    (frame.left + frame.right) / 2, frame.bottom
+                )
+            );
+        }
+
+        return 0;
     } else if (message == WM_GETMINMAXINFO) {
         if (getModel(dialog)->showCaption) {
             LPMINMAXINFO minMaxInfo = (LPMINMAXINFO)lParam;
@@ -2795,6 +2793,14 @@ LRESULT CALLBACK DlgProc(
             );
             return TRUE;
         }
+    } else if (message == WM_NOTIFY && ((LPNMHDR)lParam)->code == TTN_POP) {
+        Model *model = getModel(dialog);
+        if (((LPNMHDR)lParam)->hwndFrom == model->tooltip && !ignorePop) {
+            // This program uses lpszText to indicate whether the tooltip has
+            // been closed or just hidden because the focused changed.
+            model->toolInfo.lpszText = NULL;
+            return TRUE;
+        }
     } else if (message == WM_TIMER && wParam == DO_ACTIONS_TIMER) {
         KillTimer(dialog, wParam);
         doActions(getModel(dialog));
@@ -2836,10 +2842,54 @@ LRESULT CALLBACK DlgProc(
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                 SendMessage(textBox, EM_SETSEL, 0, -1);
                 SetFocus(textBox);
-                // unfortunately neither of these work when the mouse is not
-                // over the control associated with the tooltip
-                SendMessage(getModel(dialog)->tooltip, TTM_ACTIVATE, TRUE, 0);
-                SendMessage(getModel(dialog)->tooltip, TTM_POPUP, 0, 0);
+                Model *model = getModel(dialog);
+                // https://docs.microsoft.com/en-us/windows/win32/controls/create-a-tooltip-for-a-control
+                // https://docs.microsoft.com/en-us/windows/win32/controls/implement-balloon-tooltips
+                // Recreate the tooltip window every time, otherwise once you
+                // click the close button no future tooltips will display.
+                // Incidentally, creating the tooltip window before
+                // WM_INITDIALOG causes the tooltip to never display.
+                if (model->tooltip != NULL) { DestroyWindow(model->tooltip); }
+                model->tooltip = CreateWindow(
+                    TOOLTIPS_CLASS,
+                    NULL,
+                    WS_POPUP | TTS_NOPREFIX | TTS_BALLOON | TTS_CLOSE,
+                    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    dialog,
+                    NULL,
+                    GetWindowInstance(dialog),
+                    NULL
+                );
+                model->toolInfo.hwnd = dialog;
+                model->toolInfo.lpszText
+                    = L"Type the label text to move the mouse";
+                SendMessage(
+                    model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&model->toolInfo
+                );
+                SendMessage(
+                    model->tooltip, TTM_SETTITLE, TTI_INFO_LARGE,
+                    (LPARAM)L"Move to label"
+                );
+                // https://docs.microsoft.com/en-us/windows/win32/controls/implement-tracking-tooltips
+                SendMessage(
+                    model->tooltip, TTM_TRACKACTIVATE, TRUE,
+                    (LPARAM)&model->toolInfo
+                );
+                RECT frame; GetWindowRect(textBox, &frame);
+                SendMessage(
+                    model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
+                        (frame.left + frame.right) / 2, frame.bottom
+                    )
+                );
+                if (!model->showLabels) {
+                    SendMessage(
+                        dialog, WM_COMMAND,
+                        MAKEWPARAM(IDM_SHOW_LABELS, HIWORD(wParam)), 0
+                    );
+                }
+
+                return TRUE;
             } else if (
                 command >= IDM_LEFT && command <= IDM_DOWN || (
                     command >= IDM_SLIGHTLY_LEFT
@@ -3134,23 +3184,48 @@ LRESULT CALLBACK DlgProc(
             ) {
                 if (LOWORD(wParam) != IDC_TEXTBOX) { return TRUE; }
                 Model *model = getModel(dialog);
-                if (model->showCaption) { return TRUE; }
-                RECT buttonRect;
-                GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
-                if (GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX)) {
-                    buttonRect.right = buttonRect.left;
+                if (model->showCaption && model->toolInfo.lpszText == NULL) {
+                    return TRUE;
                 }
 
-                ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
-                RECT client; GetClientRect(dialog, &client);
-                RECT frame; GetWindowRect(dialog, &frame);
-                SetWindowPos(
-                    dialog, NULL, 0, 0,
-                    frame.right + buttonRect.right - client.right
-                        - frame.left,
-                    frame.bottom - frame.top,
-                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
-                );
+                HWND focus = GetFocus();
+                BOOL focused = focus == GetDlgItem(dialog, IDC_TEXTBOX);
+                if (!model->showCaption) {
+                    RECT buttonRect;
+                    GetWindowRect(
+                        GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect
+                    );
+                    if (focused) {
+                        buttonRect.right = buttonRect.left;
+                    }
+
+                    ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
+                    RECT client; GetClientRect(dialog, &client);
+                    RECT frame; GetWindowRect(dialog, &frame);
+                    SetWindowPos(
+                        dialog, NULL, 0, 0,
+                        frame.right + buttonRect.right - client.right
+                            - frame.left,
+                        frame.bottom - frame.top,
+                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+                    );
+                }
+
+                if (
+                    model->toolInfo.lpszText != NULL
+                        // Tooltip should not disappear when clicked.
+                        && focus != model->tooltip
+                ) {
+                    // keep toolInfo.lpszText from being set to NULL,
+                    // otherwise the tooltip won't reappear when the focus
+                    // changes back
+                    ignorePop = TRUE;
+                    SendMessage(
+                        model->tooltip, TTM_TRACKACTIVATE, focused,
+                        (LPARAM)&model->toolInfo
+                    );
+                    ignorePop = FALSE;
+                }
                 return TRUE;
             } else if (HIWORD(wParam) == EN_UPDATE) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
@@ -3234,6 +3309,11 @@ LRESULT CALLBACK DlgProc(
                     );
                 }
 
+                SendMessage(
+                    model->tooltip, TTM_TRACKACTIVATE, FALSE,
+                    (LPARAM)&model->toolInfo
+                );
+                model->toolInfo.lpszText = NULL;
                 return TRUE;
             }
         }
@@ -3307,6 +3387,17 @@ int CALLBACK WinMain(
     srand(478956);
 
     Model model = {
+        .tooltip = NULL,
+        .toolInfo = {
+            .cbSize = sizeof(TOOLINFO),
+            .uFlags = TTF_IDISHWND | TTF_CENTERTIP | TTF_TRACK | TTF_ABSOLUTE,
+            .hwnd = NULL,
+            .uId = (UINT_PTR)NULL,
+            .hinst = NULL,
+            .lpszText = NULL,
+            .lParam = 0,
+            .lpReserved = NULL,
+        },
         .monitor = MonitorFromWindow(
             GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY
         ),
