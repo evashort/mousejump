@@ -89,6 +89,8 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
                 (LPBYTE)change += change->NextEntryOffset;
             }
 
+            // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw#remarks
+            if (bufferLength == 0) { match = TRUE; }
             BOOL watchResult = ReadDirectoryChangesW(
                 params->folder,
                 params->changeBuffer,
