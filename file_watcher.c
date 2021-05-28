@@ -23,8 +23,7 @@ typedef struct {
     UINT parseMessage;
 } ThreadParam;
 typedef struct {
-    LPCWSTR path;
-    HANDLE *file;
+    HANDLE file;
     LPBYTE *buffer;
     OVERLAPPED *io;
 } ReadRequest;
@@ -52,11 +51,11 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
     handles[CONTENT_INDEX] = params->contentIO->hEvent;
     static const int WATCH_STATE = 0, READ_STATE = 1, PARSE_STATE = 2;
     int state = WATCH_STATE;
+    BOOL fileChanged = FALSE;
     while (TRUE) {
         DWORD waitResult = WaitForMultipleObjects(
             2 + (state != WATCH_STATE), handles, FALSE,
-            state == WATCH_STATE ? waitIntervals[consecutiveChanges]
-                : INFINITE
+            (state == WATCH_STATE && fileChanged) ? 30 : INFINITE
         );
         if (waitResult == WAIT_OBJECT_0 + EXIT_INDEX) {
             return 0;
@@ -68,7 +67,8 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
             if (!overlappedResult) { break; }
             FILE_NOTIFY_INFORMATION *change
                 = (FILE_NOTIFY_INFORMATION*)params->changeBuffer;
-            BOOL match = FALSE;
+            // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw#remarks
+            BOOL match = bufferLength == 0;
             while ((LPBYTE)change < params->changeBuffer + bufferLength) {
                 int length = change->FileNameLength / sizeof(WCHAR);
                 int offset = params->pathLength - length;
@@ -89,8 +89,6 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
                 (LPBYTE)change += change->NextEntryOffset;
             }
 
-            // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw#remarks
-            if (bufferLength == 0) { match = TRUE; }
             BOOL watchResult = ReadDirectoryChangesW(
                 params->folder,
                 params->changeBuffer,
@@ -104,45 +102,63 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
             );
             if (!watchResult) {
                 break;
+            } else if (match && state == WATCH_STATE && !fileChanged) {
+                // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
+                *params->file = CreateFile(
+                    params->path,
+                    GENERIC_READ,
+                    FILE_SHARE_READ,
+                    NULL, // default security settings
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                    NULL // no attribute template
+                );
+                if (*params->file == INVALID_HANDLE_VALUE) {
+                    fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
+                } else {
+                    i++;
+                    static ReadRequest request;
+                    request.file = *params->file;
+                    request.buffer = params->content;
+                    request.io = params->contentIO;
+                    BOOL result = PostMessage(
+                        params->window, params->changeMessage, i,
+                        (LPARAM)&request
+                    );
+                    if (!result) { break; }
+                    state = READ_STATE;
+                }
+            } else if (match) {
+                fileChanged = TRUE;
             }
-
-            consecutiveChanges = min(
-                sizeof(waitIntervals) / sizeof(waitIntervals[0]),
-                consecutiveChanges + match
+        } else if (
+            state == WATCH_STATE && fileChanged && waitResult == WAIT_TIMEOUT
+        ) {
+            // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
+            *params->file = CreateFile(
+                params->path,
+                GENERIC_READ,
+                FILE_SHARE_READ,
+                NULL, // default security settings
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                NULL // no attribute template
             );
-        } else if (
-            (
-                state == WATCH_STATE && consecutiveChanges > 0
-                    && waitResult == WAIT_TIMEOUT
-            ) || (
-                state == PARSE_STATE && shouldRead
-                    && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
-            )
-        ) {
-            if (!ResetEvent(params->contentIO->hEvent)) { break; }
-            shouldRead = FALSE;
-            i++;
-            static ReadRequest request;
-            request.path = params->path;
-            request.file = params->file;
-            request.buffer = params->content;
-            request.io = params->contentIO;
-            BOOL result = PostMessage(
-                params->window, params->changeMessage, i, (LPARAM)&request
-            );
-            if (!result) { break; }
-            consecutiveChanges = 0;
-            state = READ_STATE;
-        } else if (
-            state != WATCH_STATE && consecutiveChanges > 0
-                && waitResult == WAIT_TIMEOUT
-        ) {
-            shouldRead = TRUE;
-        } else if (
-            state == PARSE_STATE
-                && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
-        ) {
-            if (!ResetEvent(params->contentIO->hEvent)) { break; }
+            if (*params->file == INVALID_HANDLE_VALUE) {
+                fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
+            } else {
+                i++;
+                static ReadRequest request;
+                request.file = *params->file;
+                request.buffer = params->content;
+                request.io = params->contentIO;
+                BOOL result = PostMessage(
+                    params->window, params->changeMessage, i,
+                    (LPARAM)&request
+                );
+                if (!result) { break; }
+                state = READ_STATE;
+            }
         } else if (
             state == READ_STATE && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
         ) {
@@ -151,6 +167,8 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
                 *params->file, params->contentIO, &contentSize, FALSE
             );
             if (!overlappedResult) { break; }
+            if (!CloseHandle(*params->file)) { break; }
+            *params->file = INVALID_HANDLE_VALUE;
             if (!ResetEvent(params->contentIO->hEvent)) { break; }
             static ParseRequest request;
             request.buffer = *params->content;
@@ -160,6 +178,44 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
                 params->window, params->parseMessage, 0, (LPARAM)&request
             );
             state = PARSE_STATE;
+        } else if (
+            state == PARSE_STATE && fileChanged
+                && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
+        ) {
+            if (!ResetEvent(params->contentIO->hEvent)) { break; }
+            // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
+            *params->file = CreateFile(
+                params->path,
+                GENERIC_READ,
+                FILE_SHARE_READ,
+                NULL, // default security settings
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
+                NULL // no attribute template
+            );
+            if (*params->file == INVALID_HANDLE_VALUE) {
+                state = WATCH_STATE;
+                fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
+            } else {
+                i++;
+                static ReadRequest request;
+                request.file = *params->file;
+                request.buffer = params->content;
+                request.io = params->contentIO;
+                BOOL result = PostMessage(
+                    params->window, params->changeMessage, i,
+                    (LPARAM)&request
+                );
+                if (!result) { break; }
+                state = READ_STATE;
+                fileChanged = FALSE;
+            }
+        } else if (
+            state == PARSE_STATE && !fileChanged
+                && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
+        ) {
+            if (!ResetEvent(params->contentIO->hEvent)) { break; }
+            state = WATCH_STATE;
         } else {
             break;
         }
@@ -342,22 +398,8 @@ LRESULT CALLBACK WndProc(
         WCHAR caption[25];
         SetWindowText(window, _itow(wParam, caption, 10));
         ReadRequest *request = (ReadRequest*)lParam;
-        // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
-        *request->file = CreateFile(
-            request->path,
-            GENERIC_READ,
-            FILE_SHARE_READ,
-            NULL, // default security settings
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-            NULL // no attribute template
-        );
-        if (*request->file == INVALID_HANDLE_VALUE) {
-            MessageBox(NULL, L"could not open file", L"file watcher", MB_OK);
-        }
-
         LARGE_INTEGER fileSize;
-        if (!GetFileSizeEx(*request->file, &fileSize)) {
+        if (!GetFileSizeEx(request->file, &fileSize)) {
             MessageBox(
                 NULL, L"could not get file size", L"file watcher", MB_OK
             );
@@ -376,7 +418,7 @@ LRESULT CALLBACK WndProc(
 
         request->io->Offset = request->io->OffsetHigh = 0;
         BOOL result = ReadFile(
-            *request->file,
+            request->file,
             *request->buffer,
             fileSize.LowPart,
             NULL,
