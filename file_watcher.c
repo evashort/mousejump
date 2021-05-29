@@ -11,22 +11,22 @@ typedef struct {
     HANDLE exitEvent;
     HWND window;
     HANDLE folder;
-    LPBYTE changeBuffer;
-    size_t bufferSize;
-    LPOVERLAPPED changeIO;
+    LPBYTE changes;
+    size_t changesSize;
+    LPOVERLAPPED watchIO;
     LPCWSTR path;
     int pathLength;
     UINT changeMessage;
     HANDLE *file;
-    LPOVERLAPPED contentIO;
+    LPOVERLAPPED loadIO;
     LPBYTE *content;
-    UINT parseMessage;
+    UINT loadedMessage;
 } ThreadParam;
 typedef struct {
     HANDLE file;
     LPBYTE *buffer;
     OVERLAPPED *io;
-} ReadRequest;
+} LoadRequest;
 typedef struct {
     LPBYTE buffer;
     int size;
@@ -35,42 +35,33 @@ typedef struct {
 // https://docs.microsoft.com/en-us/windows/win32/procthread/creating-threads
 DWORD WINAPI myThreadFunction(LPVOID param) {
     ThreadParam *params = (ThreadParam*)param;
-    int i = 0;
-    // saving a file usually generates two or three separate
-    // FILE_ACTION_MODIFIED notifications. waiting 30 milliseconds for another
-    // notification is enough to deduplicate them at least 99% of the time,
-    // although that percentage is probably much lower before the system warms
-    // up.
-    int consecutiveChanges = 0;
-    DWORD waitIntervals[4] = { INFINITE, 30, 30, 0 };
-    BOOL shouldRead = FALSE;
-    static const int EXIT_INDEX = 0, CHANGE_INDEX = 1, CONTENT_INDEX = 2;
-    HANDLE handles[3];
-    handles[EXIT_INDEX] = params->exitEvent;
-    handles[CHANGE_INDEX] = params->changeIO->hEvent;
-    handles[CONTENT_INDEX] = params->contentIO->hEvent;
-    static const int WATCH_STATE = 0, READ_STATE = 1, PARSE_STATE = 2;
+    static const int EXIT_EVENT = 0, CHANGE_EVENT = 1, LOADED_EVENT = 2;
+    HANDLE events[3];
+    events[EXIT_EVENT] = params->exitEvent;
+    events[CHANGE_EVENT] = params->watchIO->hEvent;
+    events[LOADED_EVENT] = params->loadIO->hEvent;
+    static const int WATCH_STATE = 0, LOAD_STATE = 1, PARSE_STATE = 2;
     int state = WATCH_STATE;
     BOOL fileChanged = FALSE;
     while (TRUE) {
         BOOL shouldRead = FALSE;
         DWORD waitResult = WaitForMultipleObjects(
-            2 + (state != WATCH_STATE), handles, FALSE,
+            2 + (state != WATCH_STATE), events, FALSE,
             (state == WATCH_STATE && fileChanged) ? 30 : INFINITE
         );
-        if (waitResult == WAIT_OBJECT_0 + EXIT_INDEX) {
+        if (waitResult == WAIT_OBJECT_0 + EXIT_EVENT) {
             return 0;
-        } else if (waitResult == WAIT_OBJECT_0 + CHANGE_INDEX) {
+        } else if (waitResult == WAIT_OBJECT_0 + CHANGE_EVENT) {
             DWORD bufferLength;
             BOOL overlappedResult = GetOverlappedResult(
-                params->folder, params->changeIO, &bufferLength, FALSE
+                params->folder, params->watchIO, &bufferLength, FALSE
             );
             if (!overlappedResult) { break; }
             FILE_NOTIFY_INFORMATION *change
-                = (FILE_NOTIFY_INFORMATION*)params->changeBuffer;
+                = (FILE_NOTIFY_INFORMATION*)params->changes;
             // https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw#remarks
             BOOL match = bufferLength == 0;
-            while ((LPBYTE)change < params->changeBuffer + bufferLength) {
+            while ((LPBYTE)change < params->changes + bufferLength) {
                 int length = change->FileNameLength / sizeof(WCHAR);
                 int offset = params->pathLength - length;
                 if (
@@ -92,13 +83,13 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
 
             BOOL watchResult = ReadDirectoryChangesW(
                 params->folder,
-                params->changeBuffer,
-                params->bufferSize,
+                params->changes,
+                params->changesSize,
                 FALSE, // bWatchSubtree
                 FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE
                     | FILE_NOTIFY_CHANGE_SIZE,
                 NULL, // lpBytesReturned (synchronous calls only)
-                params->changeIO,
+                params->watchIO,
                 NULL // lpCompletionRoutine
             );
             if (!watchResult) {
@@ -112,29 +103,29 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
         ) {
             shouldRead = TRUE;
         } else if (
-            state == READ_STATE && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
+            state == LOAD_STATE && waitResult == WAIT_OBJECT_0 + LOADED_EVENT
         ) {
             DWORD contentSize;
             BOOL overlappedResult = GetOverlappedResult(
-                *params->file, params->contentIO, &contentSize, FALSE
+                *params->file, params->loadIO, &contentSize, FALSE
             );
             if (!overlappedResult) { break; }
             if (!CloseHandle(*params->file)) { break; }
             *params->file = INVALID_HANDLE_VALUE;
-            if (!ResetEvent(params->contentIO->hEvent)) { break; }
+            if (!ResetEvent(params->loadIO->hEvent)) { break; }
             static ParseRequest request;
             request.buffer = *params->content;
             request.size = contentSize;
-            request.event = params->contentIO->hEvent;
+            request.event = params->loadIO->hEvent;
             PostMessage(
-                params->window, params->parseMessage, 0, (LPARAM)&request
+                params->window, params->loadedMessage, 0, (LPARAM)&request
             );
             state = PARSE_STATE;
         } else if (
             state == PARSE_STATE
-                && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
+                && waitResult == WAIT_OBJECT_0 + LOADED_EVENT
         ) {
-            if (!ResetEvent(params->contentIO->hEvent)) { break; }
+            if (!ResetEvent(params->loadIO->hEvent)) { break; }
             state = WATCH_STATE;
             shouldRead = fileChanged;
         } else {
@@ -156,17 +147,15 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
                 state = WATCH_STATE;
                 fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
             } else {
-                i++;
-                static ReadRequest request;
+                static LoadRequest request;
                 request.file = *params->file;
                 request.buffer = params->content;
-                request.io = params->contentIO;
+                request.io = params->loadIO;
                 BOOL result = PostMessage(
-                    params->window, params->changeMessage, i,
-                    (LPARAM)&request
+                    params->window, params->changeMessage, 0, (LPARAM)&request
                 );
                 if (!result) { break; }
-                state = READ_STATE;
+                state = LOAD_STATE;
                 fileChanged = FALSE;
             }
         }
@@ -178,11 +167,11 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
 HANDLE thread = INVALID_HANDLE_VALUE;
 HANDLE exitEvent = INVALID_HANDLE_VALUE;
 HANDLE folder;
-OVERLAPPED changeIO = { .hEvent = INVALID_HANDLE_VALUE };
-byte changeBuffer[2048];
-HANDLE file = NULL;
+OVERLAPPED watchIO = { .hEvent = INVALID_HANDLE_VALUE };
+byte changes[2048];
+HANDLE file = INVALID_HANDLE_VALUE;
 LPBYTE content = NULL;
-OVERLAPPED contentIO = { .hEvent = INVALID_HANDLE_VALUE };
+OVERLAPPED loadIO = { .hEvent = INVALID_HANDLE_VALUE };
 int CALLBACK WinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
                      LPSTR lpCmdLine,
@@ -202,21 +191,21 @@ int CALLBACK WinMain(HINSTANCE hInstance,
         return 1;
     }
 
-    changeIO.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    if (changeIO.hEvent == INVALID_HANDLE_VALUE) {
+    watchIO.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (watchIO.hEvent == INVALID_HANDLE_VALUE) {
         MessageBox(NULL, L"could not create event", L"file watcher", MB_OK);
         return 1;
     }
 
     BOOL watchResult = ReadDirectoryChangesW(
         folder,
-        &changeBuffer,
-        sizeof(changeBuffer),
+        &changes,
+        sizeof(changes),
         FALSE, // bWatchSubtree
         FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE
             | FILE_NOTIFY_CHANGE_SIZE,
         NULL, // lpBytesReturned (synchronous calls only)
-        &changeIO,
+        &watchIO,
         NULL // lpCompletionRoutine
     );
     if (!watchResult) {
@@ -224,6 +213,60 @@ int CALLBACK WinMain(HINSTANCE hInstance,
         if (folder != INVALID_HANDLE_VALUE) { CloseHandle(folder); }
         return 1;
     }
+
+    // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
+    file = CreateFile(
+        L"watch_folder/settings.json",
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        NULL, // default security settings
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL // no attribute template
+    );
+    if (file == INVALID_HANDLE_VALUE) {
+        MessageBox(NULL, L"could not open file", L"file watcher", MB_OK);
+        return 1;
+    }
+
+    LARGE_INTEGER fileSize;
+    if (!GetFileSizeEx(file, &fileSize)) {
+        MessageBox(NULL, L"could not get file size", L"file watcher", MB_OK);
+        return 1;
+    } else if (fileSize.HighPart != 0) {
+        MessageBox(NULL, L"file is too big", L"file watcher", MB_OK);
+        return 1;
+    }
+
+    content = (LPBYTE)realloc(content, fileSize.LowPart);
+    if (fileSize.LowPart > 0 && content == NULL) {
+        MessageBox(
+            NULL, L"not enough memory for file", L"file watcher", MB_OK
+        );
+        return 1;
+    }
+
+    DWORD contentSize;
+    BOOL readResult = ReadFile(
+        file, content, fileSize.LowPart, &contentSize, NULL
+    );
+    if (!readResult) {
+        MessageBox(NULL, L"could not read file", L"file watcher", MB_OK);
+        return 1;
+    }
+
+    if (!CloseHandle(file)) {
+        MessageBox(NULL, L"could not close file", L"file watcher", MB_OK);
+        return 1;
+    }
+
+    file = INVALID_HANDLE_VALUE;
+
+    WCHAR caption[100];
+    int captionLength = MultiByteToWideChar(
+        CP_UTF8, MB_PRECOMPOSED, (LPCSTR)content, contentSize, caption, 99
+    );
+    caption[captionLength] = L'\0';
 
     WNDCLASS windowClass;
     ZeroMemory(&windowClass, sizeof(windowClass));
@@ -236,7 +279,7 @@ int CALLBACK WinMain(HINSTANCE hInstance,
     RegisterClass(&windowClass);
     HWND window = CreateWindow(
         L"MyWindowClass",
-        L"file watcher",
+        caption,
         WS_OVERLAPPEDWINDOW,
         // x, y, width, height
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -269,13 +312,13 @@ int CALLBACK WinMain(HINSTANCE hInstance,
     if (folder != INVALID_HANDLE_VALUE) { CloseHandle(folder); }
     free(content);
     if (exitEvent != INVALID_HANDLE_VALUE) { CloseHandle(exitEvent); }
-    if (changeIO.hEvent != INVALID_HANDLE_VALUE) {
-        CloseHandle(changeIO.hEvent);
+    if (watchIO.hEvent != INVALID_HANDLE_VALUE) {
+        CloseHandle(watchIO.hEvent);
     }
 
     if (file != INVALID_HANDLE_VALUE) { CloseHandle(file); }
-    if (contentIO.hEvent != INVALID_HANDLE_VALUE) {
-        CloseHandle(contentIO.hEvent);
+    if (loadIO.hEvent != INVALID_HANDLE_VALUE) {
+        CloseHandle(loadIO.hEvent);
     }
 
     MessageBox(NULL, L"exited cleanly", L"file watcher", MB_OK);
@@ -300,8 +343,8 @@ LRESULT CALLBACK WndProc(
             );
         }
 
-        contentIO.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-        if (contentIO.hEvent == INVALID_HANDLE_VALUE) {
+        loadIO.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+        if (loadIO.hEvent == INVALID_HANDLE_VALUE) {
             MessageBox(
                 NULL, L"could not create read event", L"file watcher", MB_OK
             );
@@ -312,16 +355,16 @@ LRESULT CALLBACK WndProc(
         params.exitEvent = exitEvent;
         params.window = window;
         params.folder = folder;
-        params.changeBuffer = changeBuffer;
-        params.bufferSize = sizeof(changeBuffer);
-        params.changeIO = &changeIO;
+        params.changes = changes;
+        params.changesSize = sizeof(changes);
+        params.watchIO = &watchIO;
         params.path = settingsPath;
         params.pathLength = sizeof(settingsPath) / sizeof(WCHAR) - 1;
         params.changeMessage = WM_APP;
         params.file = &file;
-        params.contentIO = &contentIO;
+        params.loadIO = &loadIO;
         params.content = &content;
-        params.parseMessage = WM_APP + 1;
+        params.loadedMessage = WM_APP + 1;
         DWORD threadID;
         thread = CreateThread(
             NULL, 0, myThreadFunction, &params, 0, &threadID
@@ -346,9 +389,7 @@ LRESULT CALLBACK WndProc(
         EndPaint(window, &paintStruct);
         return 0;
     } else if (message == WM_APP) {
-        WCHAR caption[25];
-        SetWindowText(window, _itow(wParam, caption, 10));
-        ReadRequest *request = (ReadRequest*)lParam;
+        LoadRequest *request = (LoadRequest*)lParam;
         LARGE_INTEGER fileSize;
         if (!GetFileSizeEx(request->file, &fileSize)) {
             MessageBox(
@@ -375,7 +416,7 @@ LRESULT CALLBACK WndProc(
             NULL,
             request->io
         );
-        if (result && GetLastError() != ERROR_IO_PENDING) {
+        if (!result && GetLastError() != ERROR_IO_PENDING) {
             MessageBox(NULL, L"could not read file", L"file watcher", MB_OK);
         }
 
