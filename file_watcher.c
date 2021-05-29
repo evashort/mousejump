@@ -53,6 +53,7 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
     int state = WATCH_STATE;
     BOOL fileChanged = FALSE;
     while (TRUE) {
+        BOOL shouldRead = FALSE;
         DWORD waitResult = WaitForMultipleObjects(
             2 + (state != WATCH_STATE), handles, FALSE,
             (state == WATCH_STATE && fileChanged) ? 30 : INFINITE
@@ -102,63 +103,14 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
             );
             if (!watchResult) {
                 break;
-            } else if (match && state == WATCH_STATE && !fileChanged) {
-                // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
-                *params->file = CreateFile(
-                    params->path,
-                    GENERIC_READ,
-                    FILE_SHARE_READ,
-                    NULL, // default security settings
-                    OPEN_EXISTING,
-                    FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-                    NULL // no attribute template
-                );
-                if (*params->file == INVALID_HANDLE_VALUE) {
-                    fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
-                } else {
-                    i++;
-                    static ReadRequest request;
-                    request.file = *params->file;
-                    request.buffer = params->content;
-                    request.io = params->contentIO;
-                    BOOL result = PostMessage(
-                        params->window, params->changeMessage, i,
-                        (LPARAM)&request
-                    );
-                    if (!result) { break; }
-                    state = READ_STATE;
-                }
-            } else if (match) {
-                fileChanged = TRUE;
             }
+
+            shouldRead = match && state == WATCH_STATE && !fileChanged;
+            fileChanged = fileChanged || match;
         } else if (
             state == WATCH_STATE && fileChanged && waitResult == WAIT_TIMEOUT
         ) {
-            // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
-            *params->file = CreateFile(
-                params->path,
-                GENERIC_READ,
-                FILE_SHARE_READ,
-                NULL, // default security settings
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
-                NULL // no attribute template
-            );
-            if (*params->file == INVALID_HANDLE_VALUE) {
-                fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
-            } else {
-                i++;
-                static ReadRequest request;
-                request.file = *params->file;
-                request.buffer = params->content;
-                request.io = params->contentIO;
-                BOOL result = PostMessage(
-                    params->window, params->changeMessage, i,
-                    (LPARAM)&request
-                );
-                if (!result) { break; }
-                state = READ_STATE;
-            }
+            shouldRead = TRUE;
         } else if (
             state == READ_STATE && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
         ) {
@@ -179,10 +131,17 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
             );
             state = PARSE_STATE;
         } else if (
-            state == PARSE_STATE && fileChanged
+            state == PARSE_STATE
                 && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
         ) {
             if (!ResetEvent(params->contentIO->hEvent)) { break; }
+            state = WATCH_STATE;
+            shouldRead = fileChanged;
+        } else {
+            break;
+        }
+
+        if (shouldRead) {
             // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
             *params->file = CreateFile(
                 params->path,
@@ -210,14 +169,6 @@ DWORD WINAPI myThreadFunction(LPVOID param) {
                 state = READ_STATE;
                 fileChanged = FALSE;
             }
-        } else if (
-            state == PARSE_STATE && !fileChanged
-                && waitResult == WAIT_OBJECT_0 + CONTENT_INDEX
-        ) {
-            if (!ResetEvent(params->contentIO->hEvent)) { break; }
-            state = WATCH_STATE;
-        } else {
-            break;
         }
     }
 
