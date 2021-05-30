@@ -1,4 +1,4 @@
-// rc mousejump2.rc && cl mousejump2.c /link mousejump2.res && mousejump2.exe
+// rc mousejump.rc && cl mousejump.c /link mousejump.res && mousejump.exe
 
 // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-loadbitmapa#remarks
 #define OEMRESOURCE
