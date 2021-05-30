@@ -1,3 +1,6 @@
+#ifndef JSON_PARSER_H
+#define JSON_PARSER_H
+
 #define UNICODE
 #include <windows.h>
 #include <stdio.h>
@@ -38,7 +41,7 @@ BOOL chompToken(LPCBYTE bite, LPCBYTE *json, LPCBYTE stop) {
     return FALSE;
 }
 
-BOOL parseInt(LPCBYTE *json, LPCBYTE stop, int *integer) {
+BOOL parseIntInternal(LPCBYTE *json, LPCBYTE stop, int *integer) {
     BOOL negative = chomp('-', json, stop);
     if (chomp('0', json, stop)) { *integer = 0; return TRUE; }
     if (*json >= stop || **json < '1' || **json > '9') { return FALSE; }
@@ -124,7 +127,7 @@ JSON_TYPE parseType(LPCBYTE *json, LPCBYTE stop) {
         chompToken("true", json, stop) || chompToken("false", json, stop)
     ) {
         result = JSON_BOOL;
-    } else if (parseInt(json, stop, &integer)) {
+    } else if (parseIntInternal(json, stop, &integer)) {
         result = (JSON_TYPE)(JSON_INT | JSON_NUMBER);
         if (integer != 0) {
             while (chompRange('0', '9', json, stop)) { result = JSON_NUMBER; }
@@ -287,9 +290,10 @@ int compareHookWithStack(LPCBYTE hookKey, LPCBYTE stackKey) {
 typedef struct {
     LPCWSTR (*call)(
         LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index,
-        void* param, BOOL errorVisible
+        void* param, void *dest, BOOL errorVisible
     );
     void* param;
+    void* dest;
     LPCBYTE frames[HOOK_FRAME_COUNT];
     int frameCount;
 } Hook;
@@ -475,6 +479,7 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
         // stored in
         LPCWSTR warning = state->hooks[0].call(
             &start, *json, jsonType, index, state->hooks[0].param,
+            state->hooks[0].dest,
             state->stack->warning == NULL // errorVisible
         );
         if (warning != NULL) {
@@ -685,25 +690,13 @@ LPCWSTR getStack(const Stack *stack, LPCBYTE stop, BOOL uppercase) {
     return stackStop + (*stackStop == L'.');
 }
 
-#define SETTINGS_FILENAME L"settings.json"
-#define MAX_LOCATION_LENGTH sizeof(SETTINGS_FILENAME) \
-    + sizeof(STRINGIFY(INT_MAX)) + sizeof(L" line : ") - 2
-WCHAR locationOut[MAX_LOCATION_LENGTH];
-LPCWSTR getLocation(LPCBYTE start, LPCBYTE offset) {
-    int lineNumber = 1;
-    for (; start < offset; start++) { lineNumber += *start == '\n'; }
-    _snwprintf_s(
-        locationOut, MAX_LOCATION_LENGTH, _TRUNCATE,
-        L"%s line %d: ", SETTINGS_FILENAME, lineNumber
-    );
-    return locationOut;
-}
-
 #define MAX_FORMAT_LENGTH 200
-#define FORMATTED_ERROR_LENGTH MAX_LOCATION_LENGTH + MAX_FORMAT_LENGTH \
-    + MAX_STACK_LENGTH + MAX_TOKEN_LENGTH - 3
+#define FORMATTED_ERROR_LENGTH MAX_FORMAT_LENGTH + MAX_STACK_LENGTH \
+    + MAX_TOKEN_LENGTH - 3
 WCHAR parseJSONOut[FORMATTED_ERROR_LENGTH];
-LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
+LPWSTR parseJSON(
+    LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount, int *lineNumber
+) {
     LPCBYTE json = buffer;
     Stack stack;
     stack.count = 0;
@@ -724,18 +717,15 @@ LPCWSTR parseJSON(LPCBYTE buffer, LPCBYTE stop, Hook *hooks, int hookCount) {
         );
     }
 
-    LPCWSTR location = getLocation(buffer, json);
-    wcsncpy_s(parseJSONOut, MAX_LOCATION_LENGTH, location, _TRUNCATE);
-    int locationLength = wcsnlen_s(location, MAX_LOCATION_LENGTH);
     BOOL uppercaseStack = !wcsncmp(errorFormat, L"%1$", 3);
     LPCWSTR stackString = getStack(&stack, stop, uppercaseStack);
     BOOL uppercaseToken = !wcsncmp(errorFormat, L"%2$", 3);
     LPCWSTR token = getToken(json, stop, uppercaseToken);
     _swprintf_p(
-        parseJSONOut + locationLength,
-        FORMATTED_ERROR_LENGTH - locationLength,
-        errorFormat, stackString, token
+        parseJSONOut, FORMATTED_ERROR_LENGTH, errorFormat, stackString, token
     );
+    *lineNumber = 1;
+    for (; buffer < json; buffer++) { *lineNumber += *buffer == '\n'; }
     return parseJSONOut;
 }
 
@@ -758,12 +748,12 @@ LPCWSTR checkType(JSON_TYPE actual, JSON_TYPE expected, BOOL errorVisible) {
 
 LPCWSTR expectObject(
     LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
-    BOOL errorVisible
+    void *dest, BOOL errorVisible
 ) { return checkType(jsonType, JSON_OBJECT, errorVisible); }
 
 LPCWSTR parseColor(
     LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
-    BOOL errorVisible
+    void *dest, BOOL errorVisible
 ) {
     LPCWSTR error = checkType(jsonType, JSON_STRING, errorVisible);
     if (error != NULL) { return error; }
@@ -792,6 +782,57 @@ LPCWSTR parseColor(
         channels[i] = strtol(buffer, NULL, 16);
     }
 
-    *(COLORREF*)param = RGB(channels[0], channels[1], channels[2]);
+    COLORREF value = RGB(channels[0], channels[1], channels[2]);
+    *(COLORREF*)dest = value;
     return NULL;
 }
+
+LPCWSTR parseBool(
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
+    void *dest, BOOL errorVisible
+) {
+    LPCWSTR error = checkType(jsonType, JSON_BOOL, errorVisible);
+    if (error != NULL) { return error; }
+    chomp('"', json, stop);
+    BOOL value = chomp('t', json, stop);
+    *(BOOL*)dest = value;
+    return NULL;
+}
+
+LPCWSTR parseInt(
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
+    void *dest, BOOL errorVisible
+) {
+    LPCWSTR error = checkType(jsonType, JSON_INT, errorVisible);
+    if (error != NULL) { return error; }
+    char *dummy;
+    long value = strtol(*json, &dummy, 10);
+    if (param != NULL) {
+        int *range = (int*)param;
+        if (!(value <= range[1])) { return L"%1$s value %2$s is too high"; }
+        if (!(value >= range[0])) { return L"%1$s value %2$s is too low"; }
+    }
+
+    *(int*)dest = value;
+    return NULL;
+}
+
+LPCWSTR parseDouble(
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
+    void *dest, BOOL errorVisible
+) {
+    LPCWSTR error = checkType(jsonType, JSON_NUMBER, errorVisible);
+    if (error != NULL) { return error; }
+    char *dummy;
+    double value = strtod(*json, &dummy);
+    if (param != NULL) {
+        double *range = (double*)param;
+        if (!(value <= range[1])) { return L"%1$s value %2$s is too high"; }
+        if (!(value >= range[0])) { return L"%1$s value %2$s is too low"; }
+    }
+
+    *(double*)dest = value;
+    return NULL;
+}
+
+#endif
