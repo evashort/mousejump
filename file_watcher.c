@@ -135,7 +135,9 @@ DWORD WINAPI fileWatcherThread(LPVOID param) {
                 }
 
                 if (match || change->NextEntryOffset == 0) { break; }
-                (LPBYTE)change += change->NextEntryOffset;
+                change = (FILE_NOTIFY_INFORMATION*)(
+                    (LPBYTE)change + change->NextEntryOffset
+                );
             }
 
             BOOL watchResult = ReadDirectoryChangesW(
@@ -224,7 +226,10 @@ DWORD WINAPI fileWatcherThread(LPVOID param) {
             if (data->file == INVALID_HANDLE_VALUE) {
                 state = WATCH_STATE;
                 fileChanged = GetLastError() == ERROR_SHARING_VIOLATION;
-                if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+                if (
+                    GetLastError() == ERROR_FILE_NOT_FOUND
+                        || GetLastError() == ERROR_PATH_NOT_FOUND
+                ) {
                     static ParseRequest request;
                     request.buffer = NULL;
                     request.size = 0;
@@ -487,7 +492,9 @@ int CALLBACK WinMain(HINSTANCE hInstance,
     WatcherError initResult = initializeWatcher(
         &watcherData, L"watch_folder/settings.json", WM_APP, WM_APP + 1
     );
-    if (initResult != WATCHER_SUCCESS) {
+    if (
+        initResult != WATCHER_SUCCESS && initResult != WATCHER_OPEN_FOLDER
+    ) {
         _snwprintf_s(
             watcherErrorString, watcherErrorLength, _TRUNCATE,
             watcherErrorFormat, watcherVerbs[initResult]
@@ -502,8 +509,10 @@ int CALLBACK WinMain(HINSTANCE hInstance,
     );
     if (
         loadResult != WATCHER_SUCCESS && (
-            loadResult != WATCHER_OPEN_FILE
-                || GetLastError() != ERROR_FILE_NOT_FOUND
+            loadResult != WATCHER_OPEN_FILE || (
+                GetLastError() != ERROR_FILE_NOT_FOUND
+                    && GetLastError() != ERROR_PATH_NOT_FOUND
+            )
         )
     ) {
         _snwprintf_s(
@@ -565,6 +574,7 @@ int CALLBACK WinMain(HINSTANCE hInstance,
 LRESULT CALLBACK WndProc(
     HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     if (message == WM_CREATE) {
+        if (watcherData.folder == INVALID_HANDLE_VALUE) { return 0; }
         WatcherError result = startWatcher(&watcherData, window);
         if (result != WATCHER_SUCCESS) {
             _snwprintf_s(
