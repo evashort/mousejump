@@ -2661,9 +2661,8 @@ BOOL mouseToDragEnd(Model *model, ActionParam param) {
     LPWSTR newText = textFromPath(model->dragCount, L"");
     SetWindowText(textBox, newText);
     int length = wcslen(newText);
-    SendMessage(
-        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL, length, length
-    );
+    SendMessage(textBox, EM_SETSEL, length, length);
+    SetFocus(textBox);
     return TRUE;
 }
 
@@ -3378,13 +3377,12 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 if (newText) {
-                    int length = wcslen(newText);
                     model->showingPath = TRUE;
-                    SetDlgItemText(dialog, IDC_TEXTBOX, newText);
-                    SendMessage(
-                        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
-                        length, length
-                    );
+                    HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
+                    SetWindowText(textBox, newText);
+                    int length = wcslen(newText);
+                    SendMessage(textBox, EM_SETSEL, length, length);
+                    SetFocus(textBox);
                 }
 
                 if (model->actionCount > oldActionCount) {
