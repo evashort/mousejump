@@ -2561,7 +2561,6 @@ void addAction(
     model->actionCount++;
 }
 
-BOOL sleep(Model *model, ActionParam param);
 void doActions(Model *model) {
     if (!IsIconic(model->window)) {
         model->actions += model->actionCount;
@@ -2569,15 +2568,13 @@ void doActions(Model *model) {
     }
 
     BOOL keepGoing = TRUE;
-    BOOL sleeping = FALSE;
     while (keepGoing && model->actionCount > 0) {
-        sleeping = model->actions->function == sleep;
         keepGoing = model->actions->function(model, model->actions->param);
         model->actions++;
         model->actionCount--;
     }
 
-    if (model->actionCount <= 0 && IsIconic(model->window) && !sleeping) {
+    if (keepGoing && IsIconic(model->window)) {
         ShowWindow(model->window, SW_RESTORE);
     }
 }
