@@ -1,4 +1,7 @@
 *.exe
 *.obj
+*.res
+*.pdb
+*.ilk
 sequenceCosts.csv
 ANC-token-count.zip

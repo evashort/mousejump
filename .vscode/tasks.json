@@ -11,7 +11,8 @@
                 "${fileDirname}\\${fileBasenameNoExtension}.exe",
                 "${file}",
                 "/link",
-                "${fileBasenameNoExtension}.res"
+                "${fileBasenameNoExtension}.res",
+                "/manifest:embed"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
