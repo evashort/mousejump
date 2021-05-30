@@ -2561,6 +2561,7 @@ void addAction(
     model->actionCount++;
 }
 
+BOOL sleep(Model *model, ActionParam param);
 void doActions(Model *model) {
     if (!IsIconic(model->window)) {
         model->actions += model->actionCount;
@@ -2568,13 +2569,15 @@ void doActions(Model *model) {
     }
 
     BOOL keepGoing = TRUE;
+    BOOL sleeping = FALSE;
     while (keepGoing && model->actionCount > 0) {
+        sleeping = model->actions->function == sleep;
         keepGoing = model->actions->function(model, model->actions->param);
         model->actions++;
         model->actionCount--;
     }
 
-    if (model->actionCount <= 0 && IsIconic(model->window)) {
+    if (model->actionCount <= 0 && IsIconic(model->window) && !sleeping) {
         ShowWindow(model->window, SW_RESTORE);
     }
 }
@@ -2635,16 +2638,31 @@ BOOL sleep(Model *model, ActionParam param) {
     return FALSE;
 }
 
+BOOL mouseDown(Model *model, ActionParam param) {
+    INPUT input = {
+        .type = INPUT_MOUSE,
+        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
+    };
+    SendInput(1, &input, sizeof(input));
+    return TRUE;
+}
+
+BOOL mouseUp(Model *model, ActionParam param) {
+    INPUT input = {
+        .type = INPUT_MOUSE,
+        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
+    };
+    SendInput(1, &input, sizeof(input));
+    return TRUE;
+}
+
 BOOL mouseToDragEnd(Model *model, ActionParam param) {
     HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
-    DWORD start, stop;
-    SendMessage(textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop);
-    LPWSTR newText = removeSuffix(model->text);
+    LPWSTR newText = textFromPath(model->dragCount, L"");
     SetWindowText(textBox, newText);
     int length = wcslen(newText);
     SendMessage(
-        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
-        min(start, length), min(stop, length)
+        GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL, length, length
     );
     return TRUE;
 }
@@ -3327,6 +3345,7 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (command == IDM_DRAG) {
                 Model *model = getModel(dialog);
+                int oldActionCount = model->actionCount;
                 BOOL erase = FALSE;
                 if (model->dragCount > 0) {
                     POINT start = model->drag[model->dragCount - 1];
@@ -3346,8 +3365,16 @@ LRESULT CALLBACK DlgProc(
                 } else if (model->dragCount < 3) {
                     newText = textFromPath(model->dragCount + 1, L"");
                     click = model->dragCount == 1;
+                    if (model->dragCount == 1) {
+                        addAction(model, mouseDown, actionParamNone);
+                        addAction(model, mouseUp, actionParamNone);
+                        addAction(model, sleep, actionParamMilliseconds(100));
+                    }
                 } else {
-                    click = TRUE;
+                    addAction(model, mouseDown, actionParamNone);
+                    addAction(model, mouseUp, actionParamNone);
+                    addAction(model, sleep, actionParamMilliseconds(100));
+                    addAction(model, mouseToDragEnd, actionParamNone);
                 }
 
                 if (newText) {
@@ -3360,21 +3387,8 @@ LRESULT CALLBACK DlgProc(
                     );
                 }
 
-                if (click) {
+                if (model->actionCount > oldActionCount) {
                     ShowWindow(model->window, SW_MINIMIZE);
-                    INPUT click[2] = {
-                        {
-                            .type = INPUT_MOUSE,
-                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
-                        },
-                        {
-                            .type = INPUT_MOUSE,
-                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
-                        },
-                    };
-                    SendInput(2, click, sizeof(INPUT));
-                    addAction(model, sleep, actionParamMilliseconds(100));
-                    addAction(model, mouseToDragEnd, actionParamNone);
                     doActions(model);
                 }
 
