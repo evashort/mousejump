@@ -2168,6 +2168,7 @@ LPWSTR parseModel(
     double angleRange[2] = { 0, 360 };
     double skewAngleRange[2] = { 1, 90 };
     double nonnegative[2] = { 0, INFINITY };
+    double sizeRange[2] = { 1, INFINITY };
     Hook hooks[] = {
         { .call = expectObject, .frameCount = 0 },
         {
@@ -2193,7 +2194,7 @@ LPWSTR parseModel(
         },
         {
             .call = parseDouble,
-            .param = nonnegative,
+            .param = sizeRange,
             .dest = &model->minCellArea,
             .frames = { "grid", "cellSize" },
             .frameCount = 2,

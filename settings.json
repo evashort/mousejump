@@ -1,9 +1,6 @@
 {
-    "borderWidth": 1,
-    "labelColor": "#ffffff",
     "borderColor": "#000000",
     "deltaPx": 12,
-    "smallDeltaPx": 12,
     "grid": {
         "aspectRatio": 1.3333333333333333,
         "cellSize": 30,
@@ -11,6 +8,8 @@
         "rotation": 15,
         "skewAngle": 60
     },
+    "labelColor": "#ffffff",
     "labelCount": 1200,
-    "showFrame": true
+    "showFrame": true,
+    "smallDeltaPx": 1
 }
