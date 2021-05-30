@@ -2857,10 +2857,17 @@ LRESULT CALLBACK DlgProc(
     } else if (message == WM_ACTIVATE) {
         // make MouseJump topmost only when the dialog is active
         if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
-            SetWindowPos(
-                GetWindowOwner(dialog), HWND_TOPMOST, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
-            );
+            // if the dialog is re-created while MouseJump is not in the
+            // foreground, the dialog recieves WM_ACTIVATE without actually
+            // being activated. we don't ever want MouseJump to be topmost
+            // when it's not active, hence the GetForegroundWindow check.
+            if (GetForegroundWindow() == dialog) {
+                SetWindowPos(
+                    GetWindowOwner(dialog), HWND_TOPMOST, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+                );
+            }
+
             return 0;
         } else if (LOWORD(wParam) == WA_INACTIVE) {
             HWND window = GetWindowOwner(dialog);
@@ -3083,7 +3090,7 @@ LRESULT CALLBACK DlgProc(
             model->dialog = CreateDialog(
                 GetModuleHandle(NULL), L"TOOL", model->window, DlgProc
             );
-            model->watcherData.window = dialog;
+            model->watcherData.window = model->dialog;
             RECT client; GetClientRect(model->dialog, &client);
             RECT frame; GetWindowRect(model->dialog, &frame);
             ClientToScreen(model->dialog, (LPPOINT)&client.left);
