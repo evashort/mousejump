@@ -1,5 +1,16 @@
 {
     "borderWidth": 1,
     "labelColor": "#ffffff",
-    "borderColor": "#000000"
+    "borderColor": "#000000",
+    "deltaPx": 12,
+    "smallDeltaPx": 12,
+    "grid": {
+        "aspectRatio": 1.3333333333333333,
+        "cellSize": 30,
+        "edgeDensity": 1,
+        "rotation": 15,
+        "skewAngle": 60
+    },
+    "labelCount": 1200,
+    "showFrame": true
 }

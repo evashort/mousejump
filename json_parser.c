@@ -11,20 +11,24 @@ int main() {
         { .call = expectObject, .frameCount = 0 },
         {
             .call = parseColor,
-            .param = &borderColor,
+            .param = NULL,
+            .dest = &borderColor,
             .frames = { "borderColor" },
             .frameCount = 1,
         },
         {
             .call = parseColor,
-            .param = &labelColor,
+            .param = NULL,
+            .dest = &labelColor,
             .frames = { "labelColor" },
             .frameCount = 1,
         },
     };
     LPCBYTE stop;
-    LPBYTE buffer = readFile(SETTINGS_FILENAME, &stop);
-    LPCWSTR error = parseJSON(buffer, stop, hooks, 3);
+    LPBYTE buffer = readFile(L"settings.json", &stop);
+    int lineNumber;
+    LPCWSTR error = parseJSON(buffer, stop, hooks, 3, &lineNumber);
+    free(buffer);
     if (error) { wprintf(L"%s\n", error); }
     wprintf(
         L"labelColor: red = %d, green = %d, blue = %d\n",
@@ -47,7 +51,7 @@ int main() {
         wcsncpy(name, info.cFileName, path + MAX_PATH - name);
         LPCBYTE stop;
         LPBYTE buffer = readFile(path, &stop);
-        LPCWSTR error = parseJSON(buffer, stop, NULL, 0);
+        LPCWSTR error = parseJSON(buffer, stop, NULL, 0, &lineNumber);
         if (error || info.cFileName[0] == L'n') {
             wprintf(
                 L"%-50s %s\n", info.cFileName, error ? error : L"No error!"

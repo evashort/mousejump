@@ -191,7 +191,8 @@ DWORD WINAPI fileWatcherThread(LPVOID param) {
                 data->window, data->loadedMessage, 0, (LPARAM)&request
             );
             if (!result) {
-                return WATCHER_SEND_MESSAGE;
+                state = WATCH_STATE;
+                shouldRead = fileChanged;
             }
         } else if (
             waitResult == WAIT_OBJECT_0 + LOADED_EVENT && (
@@ -231,7 +232,7 @@ DWORD WINAPI fileWatcherThread(LPVOID param) {
                     request.buffer = NULL;
                     request.size = 0;
                     request.event = INVALID_HANDLE_VALUE;
-                    BOOL result = PostMessage(
+                    PostMessage(
                         data->window, data->loadedMessage, 0, (LPARAM)&request
                     );
                 }
@@ -246,7 +247,13 @@ DWORD WINAPI fileWatcherThread(LPVOID param) {
                     data->window, data->changeMessage, 0, (LPARAM)&request
                 );
                 if (!result) {
-                    return WATCHER_SEND_MESSAGE;
+                    state = WATCH_STATE;
+                    if (!CloseHandle(data->file)) {
+                        data->file = INVALID_HANDLE_VALUE;
+                        return WATCHER_CLOSE_FILE;
+                    }
+
+                    data->file = INVALID_HANDLE_VALUE;
                 }
             }
         }
@@ -327,9 +334,11 @@ WatcherError initializeWatcher(
 }
 
 WatcherError watcherReadFile(LPCWSTR path, LPBYTE *buffer, DWORD *size) {
+    *size = 0;
+
     // https://docs.microsoft.com/en-us/windows/win32/fileio/opening-a-file-for-reading-or-writing
     HANDLE file = CreateFile(
-        L"watch_folder/settings.json",
+        path,
         GENERIC_READ,
         FILE_SHARE_READ,
         NULL, // default security settings

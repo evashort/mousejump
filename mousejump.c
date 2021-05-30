@@ -10,6 +10,8 @@
 #include <ShellScalingApi.h>
 #include <commctrl.h>
 #include <windows.h>
+#include "./file_watcher.h"
+#include "./json_parser.h"
 
 // GET_X_LPARAM, GET_Y_LPARAM
 #include <windowsx.h>
@@ -803,6 +805,32 @@ LPWSTR getTextBoxText(HWND textBox) {
     return text;
 }
 
+struct { LPWSTR text; int capacity; } errorTitleOut = {
+    .text = NULL, .capacity = 0,
+};
+LPCWSTR getErrorTitle(LPCWSTR path, int lineNumber) {
+    int pathLength = wcslen(path);
+    int numberStart = pathLength + sizeof(L" line ") / sizeof(WCHAR) - 1;
+    int capacity = numberStart + sizeof(STRINGIFY(INT_MIN)) / sizeof(WCHAR);
+    if (capacity > errorTitleOut.capacity) {
+        errorTitleOut.capacity = capacity;
+        errorTitleOut.text = realloc(
+            errorTitleOut.text, capacity * sizeof(WCHAR)
+        );
+    }
+
+    wcsncpy_s(errorTitleOut.text, capacity, path, pathLength);
+    wcsncpy_s(
+        errorTitleOut.text + pathLength, capacity - pathLength,
+        L" line ", _TRUNCATE
+    );
+    _itow_s(
+        lineNumber, errorTitleOut.text + numberStart, capacity - numberStart,
+        10
+    );
+    return errorTitleOut.text;
+}
+
 #pragma endregion
 
 #pragma region getBubblePositionPt
@@ -1420,6 +1448,7 @@ void destroyCache() {
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
     for (int i = 0; i < TEXT_SLOT_COUNT; i++) { free(textsOut[i]); }
+    free(errorTitleOut.text);
     free(edgeCellsOut.edgeCells);
     free(spineOut.oldSpine.ribStarts);
     free(spineOut.newSpine.ribStarts);
@@ -1430,12 +1459,17 @@ void destroyCache() {
 }
 
 struct Model {
+    WatcherData watcherData;
+    LPWSTR settingsPath;
     HWND window;
     HWND dialog;
     HWND tooltip;
     TOOLINFO toolInfo;
+    BOOL autoHideTooltip;
     HMONITOR monitor;
     BOOL drawnYet;
+    LPWSTR initialParseError;
+    int initialParseErrorLineNumber;
     COLORREF colorKey;
     Point offsetPt;
     double deltaPx;
@@ -2094,6 +2128,137 @@ void redraw(Model *model, Screen screen) {
     DeleteDC(memory);
 }
 
+LPWSTR parseModel(
+    Model *model, LPCBYTE buffer, DWORD bufferSize, BOOL fileExists,
+    int *lineNumber
+) {
+    model->deltaPx = 12;
+    model->smallDeltaPx = 1;
+    model->bubbleCount = 1200;
+    model->minCellArea = 30;
+    model->gridMargin = 0.5;
+    model->aspect = 4 / 3.0;
+    model->angle1 = 15;
+    model->angle2 = 60;
+    model->fontHeightPt = 0;
+    wcsncpy_s(
+        model->fontFamily, sizeof(model->fontFamily) / sizeof(WCHAR),
+        L"", _TRUNCATE
+    );
+    model->paddingLeftPt = 0.75;
+    model->paddingTopPt = 0.75;
+    model->paddingRightPt = 0.75;
+    model->paddingBottomPt = 0.75;
+    // https://docs.microsoft.com/en-us/windows/win32/gdi/system-palette-and-static-colors
+    model->labelBackground = GetSysColor(COLOR_WINDOW);
+    model->selectionBackground = GetSysColor(COLOR_HIGHLIGHT);
+    model->borderPt = .75;
+    model->earHeightPt = 6;
+    model->earElevationPt = 4;
+    model->borderColor = GetSysColor(COLOR_WINDOWTEXT);
+    model->dashPt = 3;
+    model->mirrorWidthPt = 100;
+    model->mirrorHeightPt = 100;
+    model->showCaption = TRUE;
+    if (!fileExists) { return NULL; }
+    double deltaRange[2] = { 1, 1000 };
+    int countRange[2] = { 0, INT_MAX };
+    double gridMarginRange[2] = { 0, 100 };
+    double aspectRange[2] = { 0.1, 10 };
+    double angleRange[2] = { 0, 360 };
+    double skewAngleRange[2] = { 1, 90 };
+    double nonnegative[2] = { 0, INFINITY };
+    Hook hooks[] = {
+        { .call = expectObject, .frameCount = 0 },
+        {
+            .call = parseColor,
+            .param = NULL,
+            .dest = &model->borderColor,
+            .frames = { "borderColor" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseDouble,
+            .param = deltaRange,
+            .dest = &model->deltaPx,
+            .frames = { "deltaPx" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseDouble,
+            .param = aspectRange,
+            .dest = &model->aspect,
+            .frames = { "grid", "aspectRatio" },
+            .frameCount = 2,
+        },
+        {
+            .call = parseDouble,
+            .param = nonnegative,
+            .dest = &model->minCellArea,
+            .frames = { "grid", "cellSize" },
+            .frameCount = 2,
+        },
+        {
+            .call = parseDouble,
+            .param = gridMarginRange,
+            .dest = &model->gridMargin,
+            .frames = { "grid", "edgeDensity" },
+            .frameCount = 2,
+        },
+        {
+            .call = parseDouble,
+            .param = angleRange,
+            .dest = &model->angle1,
+            .frames = { "grid", "rotation" },
+            .frameCount = 2,
+        },
+        {
+            .call = parseDouble,
+            .param = skewAngleRange,
+            .dest = &model->angle2,
+            .frames = { "grid", "skewAngle" },
+            .frameCount = 2,
+        },
+        {
+            .call = parseColor,
+            .param = NULL,
+            .dest = &model->labelBackground,
+            .frames = { "labelColor" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseInt,
+            .param = countRange,
+            .dest = &model->bubbleCount,
+            .frames = { "labelCount" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseBool,
+            .param = NULL,
+            .dest = &model->showCaption,
+            .frames = { "showFrame" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseDouble,
+            .param = deltaRange,
+            .dest = &model->smallDeltaPx,
+            .frames = { "smallDeltaPx" },
+            .frameCount = 1,
+        },
+    };
+    LPWSTR parseError = parseJSON(
+        buffer, buffer + bufferSize, hooks, sizeof(hooks) / sizeof(Hook),
+        lineNumber
+    );
+    model->minCellArea *= model->minCellArea;
+    model->angle2 += model->angle1;
+    model->angle1 *= PI / 180;
+    model->angle2 *= PI / 180;
+    return parseError;
+}
+
 Model *getModel(HWND window) {
     Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
     if (model) { return model; }
@@ -2413,8 +2578,56 @@ void doActions(Model *model) {
     }
 }
 
+void setTooltip(
+    Model *model, LPWSTR text, LPCWSTR title, DWORD icon, BOOL autoHide
+) {
+    if (text == NULL) {
+        SendMessage(
+            model->tooltip, TTM_TRACKACTIVATE, FALSE, (LPARAM)&model->toolInfo
+        );
+        model->toolInfo.lpszText = NULL;
+        return;
+    }
+
+    // https://docs.microsoft.com/en-us/windows/win32/controls/create-a-tooltip-for-a-control
+    // https://docs.microsoft.com/en-us/windows/win32/controls/implement-balloon-tooltips
+    // Recreate the tooltip window every time, otherwise once you
+    // click the close button no future tooltips will display.
+    // Incidentally, creating the tooltip window before
+    // WM_INITDIALOG causes the tooltip to never display.
+    if (model->tooltip != NULL) { DestroyWindow(model->tooltip); }
+    model->tooltip = CreateWindow(
+        TOOLTIPS_CLASS,
+        NULL,
+        WS_POPUP | TTS_NOPREFIX | TTS_BALLOON | TTS_CLOSE,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        model->dialog,
+        NULL,
+        GetWindowInstance(model->dialog),
+        NULL
+    );
+    model->toolInfo.hwnd = model->dialog;
+    model->toolInfo.lpszText = text;
+    SendMessage(model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&model->toolInfo);
+    SendMessage(model->tooltip, TTM_SETTITLE, icon, (LPARAM)title);
+    // https://docs.microsoft.com/en-us/windows/win32/controls/implement-tracking-tooltips
+    SendMessage(
+        model->tooltip, TTM_TRACKACTIVATE, TRUE, (LPARAM)&model->toolInfo
+    );
+    RECT frame; GetWindowRect(GetDlgItem(model->dialog, IDC_TEXTBOX), &frame);
+    SendMessage(
+        model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
+            (frame.left + frame.right) / 2, frame.bottom
+        )
+    );
+    model->autoHideTooltip = autoHide;
+}
+
 const int PRESSED = 0x8000;
-typedef enum { WM_APP_FITTOTEXT = WM_APP } AppMessage;
+typedef enum {
+    WM_APP_FITTOTEXT = WM_APP, WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS,
+} AppMessage;
 typedef enum { DO_ACTIONS_TIMER } TimerID;
 BOOL sleep(Model *model, ActionParam param) {
     SetTimer(model->dialog, DO_ACTIONS_TIMER, param.milliseconds, NULL);
@@ -2449,18 +2662,9 @@ LRESULT CALLBACK DlgProc(
 ) {
     if (message == WM_INITDIALOG) {
         Model *model = getModel(dialog);
-        MENUITEMINFO menuItemInfo = {
-            .cbSize = sizeof(MENUITEMINFO),
-            .fMask = MIIM_STATE,
-            .fState =
-                model->showCaption ? MFS_UNCHECKED : MFS_CHECKED,
-        };
-        SetMenuItemInfo(
-            getDropdownMenu(),
-            IDM_HIDE_INTERFACE,
-            FALSE,
-            &menuItemInfo
-        );
+        model->toolInfo.hwnd = dialog;
+        model->toolInfo.lpszText = NULL;
+        model->tooltip = NULL;
         DWORD style = GetWindowLongPtr(dialog, GWL_STYLE);
         SetWindowLongPtr(
             dialog, GWL_STYLE,
@@ -2490,9 +2694,6 @@ LRESULT CALLBACK DlgProc(
             (WPARAM)getSystemFont(dpi),
             FALSE
         );
-        model->toolInfo.hwnd = dialog;
-        model->toolInfo.lpszText = NULL;
-        model->tooltip = NULL;
         return TRUE;
     } else if (message == WM_SETFONT) {
         // https://stackoverflow.com/a/17075471
@@ -2562,7 +2763,25 @@ LRESULT CALLBACK DlgProc(
         // size noticeably changing after labels are drawn
         if (!model->drawnYet) {
             model->drawnYet = TRUE;
-            RedrawWindow(model->window, NULL, NULL, RDW_INTERNALPAINT);
+            redraw(model, getScreen(&model->monitor));
+            if (model->watcherData.folder != INVALID_HANDLE_VALUE) {
+                WatcherError startError = startWatcher(
+                    &model->watcherData, dialog
+                );
+            }
+
+            if (model->initialParseError != NULL) {
+                setTooltip(
+                    model,
+                    model->initialParseError,
+                    getErrorTitle(
+                        model->settingsPath,
+                        model->initialParseErrorLineNumber
+                    ),
+                    TTI_ERROR_LARGE,
+                    FALSE
+                );
+            }
         }
 
         return TRUE;
@@ -2742,6 +2961,9 @@ LRESULT CALLBACK DlgProc(
             client.right - client.left, client.bottom - client.top,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
         );
+        return 0;
+    } else if (message == WM_ENTERMENULOOP) {
+        Model *model = getModel(dialog);
         if (model->toolInfo.lpszText != NULL) {
             ignorePop = TRUE;
             SendMessage(
@@ -2750,36 +2972,39 @@ LRESULT CALLBACK DlgProc(
             );
             ignorePop = FALSE;
         }
-
-        return 0;
     } else if (message == WM_EXITMENULOOP) {
-        if (GetMenu(dialog) == NULL) { return 0; }
-        RECT client, buttonRect;
-        GetClientRect(dialog, &client);
-        GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
         Model *model = getModel(dialog);
         BOOL focused = GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX);
-        if (!model->showCaption && focused) {
-            ScreenToClient(dialog, (LPPOINT)&buttonRect.left);
-            client.right = buttonRect.left;
-        } else {
-            ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
-            client.right = buttonRect.right;
+        if (GetMenu(dialog) != NULL) {
+            RECT client, buttonRect;
+            GetClientRect(dialog, &client);
+            GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+            if (!model->showCaption && focused) {
+                ScreenToClient(dialog, (LPPOINT)&buttonRect.left);
+                client.right = buttonRect.left;
+            } else {
+                ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
+                client.right = buttonRect.right;
+            }
+
+            SetMenu(dialog, NULL);
+            AdjustWindowRectEx(
+                &client,
+                GetWindowLongPtr(dialog, GWL_STYLE),
+                FALSE,
+                GetWindowLongPtr(dialog, GWL_EXSTYLE)
+            );
+            SetWindowPos(
+                dialog, NULL, 0, 0,
+                client.right - client.left, client.bottom - client.top,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
         }
 
-        SetMenu(dialog, NULL);
-        AdjustWindowRectEx(
-            &client,
-            GetWindowLongPtr(dialog, GWL_STYLE),
-            FALSE,
-            GetWindowLongPtr(dialog, GWL_EXSTYLE)
-        );
-        SetWindowPos(
-            dialog, NULL, 0, 0,
-            client.right - client.left, client.bottom - client.top,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
-        );
-        if (model->toolInfo.lpszText != NULL && focused) {
+        if (
+            model->toolInfo.lpszText != NULL
+                && (focused || !model->autoHideTooltip)
+        ) {
             SendMessage(
                 model->tooltip, TTM_TRACKACTIVATE, TRUE,
                 (LPARAM)&model->toolInfo
@@ -2803,8 +3028,8 @@ LRESULT CALLBACK DlgProc(
             popupParams.rcExclude = buttonRect;
             TrackPopupMenuEx(
                 GetSubMenu(getDropdownMenu(), 0),
-                TPM_VERTICAL | TPM_LEFTBUTTON,
-                buttonRect.left, buttonRect.top,
+                TPM_VERTICAL | TPM_LEFTBUTTON | TPM_RIGHTALIGN,
+                buttonRect.right, buttonRect.top,
                 dialog,
                 &popupParams
             );
@@ -2824,6 +3049,69 @@ LRESULT CALLBACK DlgProc(
         return TRUE;
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
+    } else if (message == WM_APP_SETTINGS_CHANGED) {
+        readWatchedFile((LoadRequest*)lParam);
+        return TRUE;
+    } else if (message == WM_APP_PARSE_SETTINGS) {
+        ParseRequest *request = (ParseRequest*)lParam;
+        Model *model = getModel(dialog);
+        BOOL showCaptionOld = model->showCaption;
+        int lineNumber;
+        LPWSTR parseError = parseModel(
+            model,
+            request->buffer,
+            request->size,
+            request->event != INVALID_HANDLE_VALUE,
+            &lineNumber
+        );
+        if (request->event != INVALID_HANDLE_VALUE) {
+            SetEvent(request->event);
+        }
+
+        if (model->showCaption != showCaptionOld) {
+            RECT oldClient; GetClientRect(dialog, &oldClient);
+            ClientToScreen(dialog, (LPPOINT)&oldClient.left);
+            DWORD selectionStart, selectionStop;
+            SendMessage(
+                GetDlgItem(dialog, IDC_TEXTBOX), EM_GETSEL,
+                (WPARAM)&selectionStart, (LPARAM)&selectionStop
+            );
+            ignoreDestroy = TRUE;
+            DestroyWindow(dialog);
+            ignoreDestroy = FALSE;
+            model->minTextBoxSize.cx = model->minTextBoxSize.cy = 0;
+            model->dialog = CreateDialog(
+                GetModuleHandle(NULL), L"TOOL", model->window, DlgProc
+            );
+            model->watcherData.window = dialog;
+            RECT client; GetClientRect(model->dialog, &client);
+            RECT frame; GetWindowRect(model->dialog, &frame);
+            ClientToScreen(model->dialog, (LPPOINT)&client.left);
+            SetWindowPos(
+                model->dialog,
+                NULL,
+                frame.left - client.left + oldClient.left,
+                frame.top - client.top + oldClient.top,
+                frame.right + oldClient.right - client.right - frame.left,
+                frame.bottom + oldClient.bottom - client.bottom - frame.top,
+                SWP_NOZORDER | SWP_NOACTIVATE
+            );
+            SetDlgItemText(model->dialog, IDC_TEXTBOX, model->text);
+            SendMessage(
+                GetDlgItem(model->dialog, IDC_TEXTBOX), EM_SETSEL,
+                selectionStart, selectionStop
+            );
+        }
+
+        setTooltip(
+            model,
+            parseError,
+            getErrorTitle(model->settingsPath, lineNumber),
+            TTI_ERROR_LARGE,
+            TRUE
+        );
+        redraw(model, getScreen(&model->monitor));
+        return TRUE;
     } else if (message == WM_COMMAND) {
         if (HIWORD(wParam) == 0 || HIWORD(wParam) == 1) {
             WORD command = LOWORD(wParam);
@@ -2847,8 +3135,8 @@ LRESULT CALLBACK DlgProc(
                 popupParams.rcExclude = buttonRect;
                 TrackPopupMenuEx(
                     GetSubMenu(getDropdownMenu(), 0),
-                    TPM_VERTICAL | TPM_LEFTBUTTON,
-                    buttonRect.left,
+                    TPM_VERTICAL | TPM_LEFTBUTTON | TPM_RIGHTALIGN,
+                    buttonRect.right,
                     buttonRect.bottom,
                     dialog,
                     &popupParams
@@ -2860,44 +3148,9 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(textBox, EM_SETSEL, 0, -1);
                 SetFocus(textBox);
                 Model *model = getModel(dialog);
-                // https://docs.microsoft.com/en-us/windows/win32/controls/create-a-tooltip-for-a-control
-                // https://docs.microsoft.com/en-us/windows/win32/controls/implement-balloon-tooltips
-                // Recreate the tooltip window every time, otherwise once you
-                // click the close button no future tooltips will display.
-                // Incidentally, creating the tooltip window before
-                // WM_INITDIALOG causes the tooltip to never display.
-                if (model->tooltip != NULL) { DestroyWindow(model->tooltip); }
-                model->tooltip = CreateWindow(
-                    TOOLTIPS_CLASS,
-                    NULL,
-                    WS_POPUP | TTS_NOPREFIX | TTS_BALLOON | TTS_CLOSE,
-                    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-                    CW_USEDEFAULT,
-                    dialog,
-                    NULL,
-                    GetWindowInstance(dialog),
-                    NULL
-                );
-                model->toolInfo.hwnd = dialog;
-                model->toolInfo.lpszText
-                    = L"Type the label text to move the mouse";
-                SendMessage(
-                    model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&model->toolInfo
-                );
-                SendMessage(
-                    model->tooltip, TTM_SETTITLE, TTI_INFO_LARGE,
-                    (LPARAM)L"Move to label"
-                );
-                // https://docs.microsoft.com/en-us/windows/win32/controls/implement-tracking-tooltips
-                SendMessage(
-                    model->tooltip, TTM_TRACKACTIVATE, TRUE,
-                    (LPARAM)&model->toolInfo
-                );
-                RECT frame; GetWindowRect(textBox, &frame);
-                SendMessage(
-                    model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
-                        (frame.left + frame.right) / 2, frame.bottom
-                    )
+                setTooltip(
+                    model, L"Type the label text to move the mouse",
+                    L"Move to label", TTI_INFO_LARGE, TRUE
                 );
                 if (!model->showLabels) {
                     SendMessage(
@@ -3154,45 +3407,6 @@ LRESULT CALLBACK DlgProc(
 
                 model->monitor = vars.newMonitor;
                 redraw(model, getScreen(&model->monitor));
-            } else if (command == IDM_HIDE_INTERFACE) {
-                Model *model = getModel(dialog);
-                model->showCaption = !model->showCaption;
-                RECT oldClient; GetClientRect(dialog, &oldClient);
-                ClientToScreen(dialog, (LPPOINT)&oldClient.left);
-                DWORD selectionStart, selectionStop;
-                SendMessage(
-                    GetDlgItem(dialog, IDC_TEXTBOX),
-                    EM_GETSEL,
-                    (WPARAM)&selectionStart,
-                    (LPARAM)&selectionStop
-                );
-                ignoreDestroy = TRUE;
-                DestroyWindow(dialog);
-                ignoreDestroy = FALSE;
-                model->minTextBoxSize.cx = model->minTextBoxSize.cy = 0;
-                model->dialog = CreateDialog(
-                    GetModuleHandle(NULL), L"TOOL", model->window, DlgProc
-                );
-                RECT client; GetClientRect(model->dialog, &client);
-                RECT frame; GetWindowRect(model->dialog, &frame);
-                ClientToScreen(model->dialog, (LPPOINT)&client.left);
-                SetWindowPos(
-                    model->dialog,
-                    NULL,
-                    frame.left - client.left + oldClient.left,
-                    frame.top - client.top + oldClient.top,
-                    frame.right + oldClient.right - client.right - frame.left,
-                    frame.bottom + oldClient.bottom - client.bottom
-                        - frame.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE
-                );
-                SetDlgItemText(model->dialog, IDC_TEXTBOX, model->text);
-                SendMessage(
-                    GetDlgItem(model->dialog, IDC_TEXTBOX),
-                    EM_SETSEL,
-                    selectionStart,
-                    selectionStop
-                );
             }
         } else if (LOWORD(wParam) == IDC_TEXTBOX) {
             if (
@@ -3229,7 +3443,7 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 if (
-                    model->toolInfo.lpszText != NULL
+                    model->autoHideTooltip && model->toolInfo.lpszText != NULL
                         // Tooltip should not disappear when clicked.
                         && focus != model->tooltip
                 ) {
@@ -3404,6 +3618,7 @@ int CALLBACK WinMain(
     srand(478956);
 
     Model model = {
+        .settingsPath = L"settings.json",
         .toolInfo = {
             .cbSize = sizeof(TOOLINFO),
             .uFlags = TTF_IDISHWND | TTF_CENTERTIP | TTF_TRACK | TTF_ABSOLUTE,
@@ -3420,37 +3635,12 @@ int CALLBACK WinMain(
         .drawnYet = FALSE,
         .colorKey = RGB(255, 0, 255),
         .offsetPt = { 0, 0 },
-        .deltaPx = 12,
-        .smallDeltaPx = 1,
-        .bubbleCount = 1200,
-        .minCellArea = 30 * 30,
-        .gridMargin = 0.5,
-        .aspect = 4 / 3.0,
-        .angle1 = 15 * PI / 180,
-        .angle2 = 75 * PI / 180,
-        .fontHeightPt = 0,
-        .fontFamily = L"",
         .systemFontChanges = 0,
-        .paddingLeftPt = 0.75,
-        .paddingTopPt = 0.75,
-        .paddingRightPt = 0.75,
-        .paddingBottomPt = 0.75,
-        // https://docs.microsoft.com/en-us/windows/win32/gdi/system-palette-and-static-colors
-        .labelBackground = GetSysColor(COLOR_WINDOW),
-        .selectionBackground = GetSysColor(COLOR_HIGHLIGHT),
-        .borderPt = .75,
-        .earHeightPt = 6,
-        .earElevationPt = 4,
-        .borderColor = GetSysColor(COLOR_WINDOWTEXT),
-        .dashPt = 3,
-        .mirrorWidthPt = 100,
-        .mirrorHeightPt = 100,
         .textBoxWidthPt = 23.25,
         .textBoxHeightPt = 17.25,
         .dropdownWidthPt = 14.25,
         .dropdownHeightPt = 17.25,
         .showLabels = TRUE,
-        .showCaption = TRUE,
         .minTextBoxSize = { 0, 0 },
         .text = L"",
         .hasMatch = FALSE,
@@ -3459,6 +3649,24 @@ int CALLBACK WinMain(
         .actions = NULL,
         .actionCount = 0,
     };
+    WatcherError initError = initializeWatcher(
+        &model.watcherData, model.settingsPath,
+        WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS
+    );
+    DWORD contentSize;
+    WatcherError loadError = watcherReadFile(
+        model.watcherData.path, &model.watcherData.content, &contentSize
+    );
+    BOOL fileExists = loadError == WATCHER_SUCCESS || (
+        loadError == WATCHER_OPEN_FILE && (
+            GetLastError() == ERROR_FILE_NOT_FOUND
+                || GetLastError() == ERROR_PATH_NOT_FOUND
+        )
+    );
+    model.initialParseError = parseModel(
+        &model, model.watcherData.content, contentSize, fileExists,
+        &model.initialParseErrorLineNumber
+    );
 
     WNDCLASS windowClass = {
         .lpfnWndProc   = WndProc,
@@ -3509,6 +3717,7 @@ int CALLBACK WinMain(
         }
     }
 
+    WatcherError stopError = stopWatcher(&model.watcherData);
     destroyCache();
     return 0;
 }
