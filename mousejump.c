@@ -3565,7 +3565,7 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             }
         }
-    } else if (message == WM_DESTROY) {
+    } else if (message == WM_CLOSE) {
         if (!ignoreDestroy) { PostQuitMessage(0); }
         return TRUE;
     } else if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == 70 || message == WM_SYSKEYDOWN || message == 71 || message == 28 || message == 134 || message == 799 || message == 1024 || message == 307 || message == 309 || message == 32 || message == 131 || message == 133 || message == 20 || message == 310 || message == 15) {
