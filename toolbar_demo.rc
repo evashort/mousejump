@@ -1,0 +1,23 @@
+#include <windows.h>
+
+// http://www.imustardsoft.com/blog/2010/10/19/differences-between-dialogex-resource-template-and-dialog-template-in-c-/
+// https://docs.microsoft.com/en-us/windows/win32/uxguide/vis-layout?redirectedfrom=MSDN#recommended-sizing-and-spacing
+TOOL DIALOGEX 300, 200, 200, 200
+STYLE WS_OVERLAPPEDWINDOW | WS_VISIBLE
+EXSTYLE WS_EX_TOOLWINDOW
+CAPTION "tool window"
+BEGIN
+    EDITTEXT 123456, 0, 0, 15.5, 11.5, ES_AUTOHSCROLL
+END
+
+// http://www.winprog.org/tutorial/menus.html
+// https://docs.microsoft.com/en-us/windows/win32/menurc/popup-resource
+// https://docs.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/keys-keyboard-shortcuts
+// https://docs.microsoft.com/en-us/style-guide/a-z-word-list-term-collections/term-collections/mouse-mouse-interaction-terms
+INITIAL_MENU MENU
+BEGIN
+    POPUP "&Menu"
+    BEGIN
+        MENUITEM "&Item", 0
+    END
+END
