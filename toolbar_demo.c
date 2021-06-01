@@ -185,6 +185,7 @@ LRESULT CALLBACK DlgProc(
             toolbarMessage->hdr.hwndFrom, HWND_DESKTOP,
             (LPPOINT)&buttonRect, 2
         );
+        buttonRect.bottom--; // unexplained off-by-one
         TPMPARAMS popupParams;
         popupParams.cbSize = sizeof(popupParams);
         popupParams.rcExclude = buttonRect;
