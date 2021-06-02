@@ -2,12 +2,13 @@
 
 // http://www.imustardsoft.com/blog/2010/10/19/differences-between-dialogex-resource-template-and-dialog-template-in-c-/
 // https://docs.microsoft.com/en-us/windows/win32/uxguide/vis-layout?redirectedfrom=MSDN#recommended-sizing-and-spacing
-TOOL DIALOGEX 300, 200, 200, 200
+TOOL DIALOGEX 300, 200, 15.5 + 7.5, 11.5
 STYLE WS_OVERLAPPEDWINDOW | WS_VISIBLE
 EXSTYLE WS_EX_TOOLWINDOW
 CAPTION "tool window"
 BEGIN
     EDITTEXT 123456, 0, 0, 15.5, 11.5, ES_AUTOHSCROLL
+    //CONTROL "", 12345, "ToolbarWindow32", WS_CHILD | WS_TABSTOP | TBSTYLE_LIST, 15.5, 0, 7.5, 11.5
 END
 
 // http://www.winprog.org/tutorial/menus.html

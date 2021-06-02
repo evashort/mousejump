@@ -2,6 +2,7 @@
 #define _WIN32_IE 0x0600
 
 #define UNICODE
+#include <math.h>
 #include <ShellScalingApi.h>
 #include <commctrl.h>
 #include <windows.h>
@@ -20,9 +21,17 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 typedef struct {
     HWND window;
     HWND dialog;
-    HWND toolbar;
+    double textBoxWidthPt;
+    double textBoxHeightPt;
 } Model;
-Model model;
+Model model = {
+    .textBoxWidthPt = 23.25,
+    .textBoxHeightPt = 17.25,
+};
+
+int ptToIntPx(double pt, UINT dpi) {
+    return (int)round(pt * (double)dpi / 72);
+}
 
 LRESULT CALLBACK WndProc(
     HWND window, UINT message, WPARAM wParam, LPARAM lParam
@@ -79,59 +88,7 @@ LRESULT CALLBACK DlgProc(
     HWND dialog, UINT message, WPARAM wParam, LPARAM lParam
 ) {
     if (message == WM_INITDIALOG) {
-        // https://docs.microsoft.com/en-us/windows/win32/controls/create-toolbars
-        model.toolbar = CreateWindowEx(
-            0,
-            TOOLBARCLASSNAME,
-            NULL,
-            WS_CHILD | WS_TABSTOP | TBSTYLE_LIST,
-            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-            dialog,
-            NULL,
-            GetWindowInstance(dialog),
-            NULL
-        );
-        SendMessage(
-            model.toolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_DRAWDDARROWS
-        );
-        TBBUTTON button = {
-            .iBitmap = 0,
-            .idCommand = 1234,
-            .fsState = TBSTATE_ENABLED,
-            .fsStyle = BTNS_WHOLEDROPDOWN,
-            .bReserved = { 0 },
-            .dwData = 0,
-            .iString = -1,
-        };
-        SendMessage(model.toolbar, TB_SETBITMAPSIZE, 0, MAKELPARAM(0, 0));
-        SendMessage(model.toolbar, TB_BUTTONSTRUCTSIZE, sizeof(button), 0);
-        SendMessage(model.toolbar, TB_ADDBUTTONS, 1, (LPARAM)&button);
-        SendMessage(model.toolbar, TB_SETPADDING, 0, MAKELPARAM(0, 23));
-        // this can be any arbitrary number
-        SendMessage(model.toolbar, TB_SETBUTTONWIDTH, 0, MAKELPARAM(10, 10));
-        RECT buttonRect;
-        SendMessage(model.toolbar, TB_GETRECT, 1234, (LPARAM)&buttonRect);
-        RECT client;
-        GetClientRect(dialog, &client);
-        RECT toolbarFrame;
-        GetWindowRect(model.toolbar, &toolbarFrame);
-        ScreenToClient(dialog, (LPPOINT)&toolbarFrame.left);
-        ScreenToClient(dialog, (LPPOINT)&toolbarFrame.right);
-        POINT offset = { buttonRect.right, buttonRect.top };
-        MapWindowPoints(model.toolbar, dialog, &offset, 1);
-        // this can be any arbitrary number
-        SendMessage(model.toolbar, TB_SETBUTTONWIDTH, 0, MAKELPARAM(10, 10));
-        SetWindowPos(
-            model.toolbar,
-            NULL,
-            client.right - offset.x - toolbarFrame.left,
-            30 - offset.y - toolbarFrame.top,
-            0, 0,
-            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
-        );
-        ShowWindow(model.toolbar,  TRUE);
-        UINT dpi = GetDpiForWindow(dialog);
-        // EnumChildWindows(dialog, SetFontRedraw, (WPARAM)getSystemFont(dpi));
+        SendMessage(dialog, WM_DPICHANGED, 0, 0);
         return TRUE;
     } else if (message == WM_ACTIVATE) {
         // make MouseJump topmost only when the dialog is active
@@ -169,7 +126,114 @@ LRESULT CALLBACK DlgProc(
         }
 
         return TRUE;
-    }  else if (
+    } else if (message == WM_SIZE) {
+        RECT client;
+        GetClientRect(dialog, &client);
+        HWND toolbar = GetDlgItem(dialog, 12345);
+        RECT buttonRect;
+        SendMessage(toolbar, TB_GETRECT, 1234, (LPARAM)&buttonRect);
+        HWND textBox = GetDlgItem(dialog, 123456);
+        RECT textBoxRect;
+        GetWindowRect(textBox, &textBoxRect);
+        int textBoxHeight = textBoxRect.bottom - textBoxRect.top;
+        int controlTop = (client.bottom - textBoxHeight) / 2;
+        SetWindowPos(
+            textBox,
+            NULL,
+            0, controlTop,
+            client.right - buttonRect.right + buttonRect.left, textBoxHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE
+        );
+        RECT toolbarFrame;
+        GetWindowRect(toolbar, &toolbarFrame);
+        ScreenToClient(dialog, (LPPOINT)&toolbarFrame.left);
+        ScreenToClient(dialog, (LPPOINT)&toolbarFrame.right);
+        POINT offset = { buttonRect.right, buttonRect.top };
+        MapWindowPoints(toolbar, dialog, &offset, 1);
+        SetWindowPos(
+            toolbar,
+            NULL,
+            toolbarFrame.left + client.right - offset.x,
+            toolbarFrame.top + controlTop - offset.y,
+            0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        );
+        return 0;
+    } else if (message == WM_GETMINMAXINFO) {
+        HWND toolbar = GetDlgItem(dialog, 12345);
+        UINT dpi = GetDpiForWindow(dialog);
+        int textBoxWidthPx = ptToIntPx(model.textBoxWidthPt, dpi);
+        RECT buttonRect;
+        SendMessage(toolbar, TB_GETRECT, 1234, (LPARAM)&buttonRect);
+        RECT textBoxRect;
+        GetWindowRect(GetDlgItem(dialog, 123456), &textBoxRect);
+        SIZE minSize = {
+            .cx = textBoxWidthPx + buttonRect.right - buttonRect.left,
+            .cy = textBoxRect.bottom - textBoxRect.top,
+        };
+        LPMINMAXINFO minMaxInfo = (LPMINMAXINFO)lParam;
+        RECT client, frame;
+        GetClientRect(dialog, &client); GetWindowRect(dialog, &frame);
+        minMaxInfo->ptMinTrackSize.x
+            = frame.right + minSize.cx - client.right - frame.left;
+        minMaxInfo->ptMinTrackSize.y = minSize.cy
+            = frame.bottom + minSize.cy - client.bottom - frame.top;
+        return 0;
+    } else if (message == WM_DPICHANGED) {
+        HWND toolbar = GetDlgItem(dialog, 12345);
+        if (toolbar != NULL) { DestroyWindow(toolbar); }
+        // https://docs.microsoft.com/en-us/windows/win32/controls/create-toolbars
+        toolbar = CreateWindow(
+            TOOLBARCLASSNAME,
+            NULL,
+            WS_VISIBLE | WS_CHILD | WS_TABSTOP | TBSTYLE_LIST,
+            CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+            dialog,
+            (HMENU)12345,
+            GetWindowInstance(dialog),
+            0
+        );
+        SendMessage(toolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_DRAWDDARROWS);
+        SendMessage(toolbar, TB_SETBITMAPSIZE, 0, MAKELPARAM(0, 0));
+        TBBUTTON button = {
+            .iBitmap = 0,
+            .idCommand = 1234,
+            .fsState = TBSTATE_ENABLED,
+            .fsStyle = BTNS_WHOLEDROPDOWN | BTNS_AUTOSIZE,
+            .bReserved = { 0 },
+            .dwData = 0,
+            .iString = -1,
+        };
+        SendMessage(toolbar, TB_BUTTONSTRUCTSIZE, sizeof(button), 0);
+        SendMessage(toolbar, TB_ADDBUTTONS, 1, (LPARAM)&button);
+        UINT dpi = GetDpiForWindow(dialog);
+        int textBoxHeightPx = ptToIntPx(model.textBoxHeightPt, dpi);
+        SendMessage(
+            toolbar, TB_SETPADDING, 0, MAKELPARAM(1, textBoxHeightPx)
+        );
+        // this can be any arbitrary number
+        SendMessage(toolbar, TB_SETBUTTONWIDTH, 0, MAKELPARAM(10, 10));
+        SendMessage(toolbar, TB_AUTOSIZE, 0, 0);
+        HWND textBox = GetDlgItem(dialog, 123456);
+        RECT textBoxRect;
+        GetWindowRect(textBox, &textBoxRect);
+        SetWindowPos(
+            textBox,
+            NULL,
+            0, 0,
+            textBoxRect.right - textBoxRect.left, textBoxHeightPx,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        );
+        //EnumChildWindows(dialog, SetFontRedraw, (WPARAM)getSystemFont(dpi));
+        RECT frame;
+        GetWindowRect(dialog, &frame);
+        SetWindowPos(
+            dialog, NULL, 0, 0,
+            frame.right - frame.left, frame.bottom - frame.top,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        );
+        return 0;
+    } else if (
         message == WM_NOTIFY && ((LPNMHDR)lParam)->code == TBN_DROPDOWN
     ) {
         // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
