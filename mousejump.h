@@ -1,5 +1,6 @@
-#define IDC_TEXTBOX 3
-#define IDC_DROPDOWN 4
+#define IDC_TEXTBOX 2
+#define IDC_TOOLBAR 3
+#define IDC_BUTTON 4
 #define IDM_TO_LABEL 5
 #define IDM_LEFT 6
 #define IDM_RIGHT 7

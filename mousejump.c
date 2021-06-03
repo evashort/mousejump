@@ -1464,12 +1464,11 @@ struct Model {
     HWND window;
     HWND dialog;
     HWND tooltip;
-    TOOLINFO toolInfo;
+    int lineNumber;
+    LPWSTR toolText;
     BOOL autoHideTooltip;
     HMONITOR monitor;
     BOOL drawnYet;
-    LPWSTR initialParseError;
-    int initialParseErrorLineNumber;
     COLORREF colorKey;
     Point offsetPt;
     double deltaPx;
@@ -2327,6 +2326,23 @@ LRESULT CALLBACK WndProc(
     return DefWindowProc(window, message, wParam, lParam);
 }
 
+TOOLINFO toolInfoOut = {
+    .cbSize = sizeof(TOOLINFO),
+    .uFlags = 0,
+    .hwnd = NULL,
+    .uId = (UINT_PTR)NULL,
+    .hinst = NULL,
+    .lpszText = NULL,
+    .lParam = 0,
+    .lpReserved = NULL,
+};
+LPARAM getToolInfo(HWND dialog) {
+    toolInfoOut.cbSize = sizeof(TOOLINFO);
+    toolInfoOut.hwnd = dialog;
+    toolInfoOut.uId = (UINT_PTR)NULL;
+    return (LPARAM)&toolInfoOut;
+}
+
 BOOL CALLBACK SetFontRedraw(HWND child, LPARAM font){
     SendMessage(child, WM_SETFONT, font, TRUE);
     return TRUE;
@@ -2583,10 +2599,14 @@ void setTooltip(
     Model *model, LPWSTR text, LPCWSTR title, DWORD icon, BOOL autoHide
 ) {
     if (text == NULL) {
-        SendMessage(
-            model->tooltip, TTM_TRACKACTIVATE, FALSE, (LPARAM)&model->toolInfo
-        );
-        model->toolInfo.lpszText = NULL;
+        if (model->toolText != NULL && model->tooltip != NULL) {
+            SendMessage(
+                model->tooltip, TTM_TRACKACTIVATE, FALSE,
+                getToolInfo(model->dialog)
+            );
+        }
+
+        model->toolText = NULL;
         return;
     }
 
@@ -2608,14 +2628,22 @@ void setTooltip(
         GetWindowInstance(model->dialog),
         NULL
     );
-    model->toolInfo.hwnd = model->dialog;
-    model->toolInfo.lpszText = text;
-    SendMessage(model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&model->toolInfo);
+    HWND test = GetDlgItem(model->dialog, 0);
+    TOOLINFO info = {
+        .cbSize = sizeof(TOOLINFO),
+        .uFlags = TTF_IDISHWND | TTF_CENTERTIP | TTF_TRACK | TTF_ABSOLUTE,
+        .hwnd = model->dialog,
+        .uId = (UINT_PTR)NULL,
+        .hinst = NULL,
+        .lpszText = text,
+        .lParam = 0,
+        .lpReserved = NULL,
+    };
+    model->toolText = text;
+    SendMessage(model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&info);
     SendMessage(model->tooltip, TTM_SETTITLE, icon, (LPARAM)title);
     // https://docs.microsoft.com/en-us/windows/win32/controls/implement-tracking-tooltips
-    SendMessage(
-        model->tooltip, TTM_TRACKACTIVATE, TRUE, (LPARAM)&model->toolInfo
-    );
+    SendMessage(model->tooltip, TTM_TRACKACTIVATE, TRUE, (LPARAM)&info);
     RECT frame; GetWindowRect(GetDlgItem(model->dialog, IDC_TEXTBOX), &frame);
     SendMessage(
         model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
@@ -2677,9 +2705,6 @@ LRESULT CALLBACK DlgProc(
 ) {
     if (message == WM_INITDIALOG) {
         Model *model = getModel(dialog);
-        model->toolInfo.hwnd = dialog;
-        model->toolInfo.lpszText = NULL;
-        model->tooltip = NULL;
         DWORD style = GetWindowLongPtr(dialog, GWL_STYLE);
         SetWindowLongPtr(
             dialog, GWL_STYLE,
@@ -2702,7 +2727,7 @@ LRESULT CALLBACK DlgProc(
             .size = { dropdownWidth, dropdownWidth },
             .uSplitStyle = BCSS_ALIGNLEFT,
         };
-        Button_SetSplitInfo(GetDlgItem(dialog, IDC_DROPDOWN), &splitInfo);
+        Button_SetSplitInfo(GetDlgItem(dialog, IDC_BUTTON), &splitInfo);
         SendMessage(
             dialog,
             WM_SETFONT,
@@ -2785,14 +2810,11 @@ LRESULT CALLBACK DlgProc(
                 );
             }
 
-            if (model->initialParseError != NULL) {
+            if (model->toolText != NULL) {
                 setTooltip(
                     model,
-                    model->initialParseError,
-                    getErrorTitle(
-                        model->settingsPath,
-                        model->initialParseErrorLineNumber
-                    ),
+                    model->toolText,
+                    getErrorTitle(model->settingsPath, model->lineNumber),
                     TTI_ERROR_LARGE,
                     FALSE
                 );
@@ -2825,13 +2847,13 @@ LRESULT CALLBACK DlgProc(
             0
         );
         SetWindowPos(
-            GetDlgItem(dialog, IDC_DROPDOWN),
+            GetDlgItem(dialog, IDC_BUTTON),
             NULL,
             client.right, (client.bottom - dropdownHeight) / 2,
             dropdownWidth, dropdownHeight,
             0
         );
-        if (model->toolInfo.lpszText != NULL) {
+        if (model->toolText != NULL) {
             RECT frame; GetWindowRect(textBox, &frame);
             SendMessage(
                 model->tooltip, TTM_TRACKPOSITION, 0, MAKELPARAM(
@@ -2843,7 +2865,7 @@ LRESULT CALLBACK DlgProc(
         return 0;
     } else if (message == WM_MOVE) {
         Model *model = getModel(dialog);
-        if (model->toolInfo.lpszText != NULL) {
+        if (model->toolText != NULL) {
             HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
             RECT frame; GetWindowRect(textBox, &frame);
             SendMessage(
@@ -2914,7 +2936,7 @@ LRESULT CALLBACK DlgProc(
         BUTTON_SPLITINFO splitInfo = {
             .mask = BCSIF_SIZE, .size = { dropdownWidth, dropdownWidth },
         };
-        Button_SetSplitInfo(GetDlgItem(dialog, IDC_DROPDOWN), &splitInfo);
+        Button_SetSplitInfo(GetDlgItem(dialog, IDC_BUTTON), &splitInfo);
         SendMessage(
             dialog,
             WM_SETFONT,
@@ -2965,7 +2987,7 @@ LRESULT CALLBACK DlgProc(
         if (GetMenu(dialog) != NULL) { return 0; }
         RECT client, buttonRect;
         GetClientRect(dialog, &client);
-        GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+        GetWindowRect(GetDlgItem(dialog, IDC_BUTTON), &buttonRect);
         Model *model = getModel(dialog);
         ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
         client.right = buttonRect.right;
@@ -2986,11 +3008,10 @@ LRESULT CALLBACK DlgProc(
         return 0;
     } else if (message == WM_ENTERMENULOOP) {
         Model *model = getModel(dialog);
-        if (model->toolInfo.lpszText != NULL) {
+        if (model->toolText != NULL) {
             ignorePop = TRUE;
             SendMessage(
-                model->tooltip, TTM_TRACKACTIVATE, FALSE,
-                (LPARAM)&model->toolInfo
+                model->tooltip, TTM_TRACKACTIVATE, FALSE, getToolInfo(dialog)
             );
             ignorePop = FALSE;
         }
@@ -3000,7 +3021,7 @@ LRESULT CALLBACK DlgProc(
         if (GetMenu(dialog) != NULL) {
             RECT client, buttonRect;
             GetClientRect(dialog, &client);
-            GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+            GetWindowRect(GetDlgItem(dialog, IDC_BUTTON), &buttonRect);
             if (!model->showCaption && focused) {
                 ScreenToClient(dialog, (LPPOINT)&buttonRect.left);
                 client.right = buttonRect.left;
@@ -3023,13 +3044,9 @@ LRESULT CALLBACK DlgProc(
             );
         }
 
-        if (
-            model->toolInfo.lpszText != NULL
-                && (focused || !model->autoHideTooltip)
-        ) {
+        if (model->toolText != NULL && (focused || !model->autoHideTooltip)) {
             SendMessage(
-                model->tooltip, TTM_TRACKACTIVATE, TRUE,
-                (LPARAM)&model->toolInfo
+                model->tooltip, TTM_TRACKACTIVATE, TRUE, getToolInfo(dialog)
             );
         }
 
@@ -3038,7 +3055,7 @@ LRESULT CALLBACK DlgProc(
         message == WM_NOTIFY && ((LPNMHDR)lParam)->code == BCN_DROPDOWN
     ) {
         NMBCDROPDOWN *dropDown = (NMBCDROPDOWN*)lParam;
-        if (dropDown->hdr.idFrom == IDC_DROPDOWN) {
+        if (dropDown->hdr.idFrom == IDC_BUTTON) {
             // https://docs.microsoft.com/en-us/windows/win32/controls/handle-the-bcn-dropdown-notification-from-a-split-button
             RECT buttonRect = dropDown->rcButton;
             ClientToScreen(dropDown->hdr.hwndFrom, (LPPOINT)&buttonRect.left);
@@ -3062,7 +3079,7 @@ LRESULT CALLBACK DlgProc(
         if (((LPNMHDR)lParam)->hwndFrom == model->tooltip && !ignorePop) {
             // This program uses lpszText to indicate whether the tooltip has
             // been closed or just hidden because the focused changed.
-            model->toolInfo.lpszText = NULL;
+            model->toolText = NULL;
             return TRUE;
         }
     } else if (message == WM_TIMER && wParam == DO_ACTIONS_TIMER) {
@@ -3130,7 +3147,7 @@ LRESULT CALLBACK DlgProc(
             parseError,
             getErrorTitle(model->settingsPath, lineNumber),
             TTI_ERROR_LARGE,
-            TRUE
+            FALSE
         );
         redraw(model, getScreen(&model->monitor));
         return TRUE;
@@ -3148,10 +3165,10 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(textBox, EM_SETSEL, 0, -1);
                 SetFocus(textBox);
                 return TRUE;
-            } else if (command == IDC_DROPDOWN) {
+            } else if (command == IDC_BUTTON) {
                 // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
                 RECT buttonRect;
-                GetWindowRect(GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect);
+                GetWindowRect(GetDlgItem(dialog, IDC_BUTTON), &buttonRect);
                 TPMPARAMS popupParams;
                 popupParams.cbSize = sizeof(popupParams);
                 popupParams.rcExclude = buttonRect;
@@ -3432,7 +3449,7 @@ LRESULT CALLBACK DlgProc(
             ) {
                 if (LOWORD(wParam) != IDC_TEXTBOX) { return TRUE; }
                 Model *model = getModel(dialog);
-                if (model->showCaption && model->toolInfo.lpszText == NULL) {
+                if (model->showCaption && model->toolText == NULL) {
                     return TRUE;
                 }
 
@@ -3441,7 +3458,7 @@ LRESULT CALLBACK DlgProc(
                 if (!model->showCaption) {
                     RECT buttonRect;
                     GetWindowRect(
-                        GetDlgItem(dialog, IDC_DROPDOWN), &buttonRect
+                        GetDlgItem(dialog, IDC_BUTTON), &buttonRect
                     );
                     if (focused) {
                         buttonRect.right = buttonRect.left;
@@ -3460,7 +3477,7 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 if (
-                    model->autoHideTooltip && model->toolInfo.lpszText != NULL
+                    model->autoHideTooltip && model->toolText != NULL
                         // Tooltip should not disappear when clicked.
                         && focus != model->tooltip
                 ) {
@@ -3470,7 +3487,7 @@ LRESULT CALLBACK DlgProc(
                     ignorePop = TRUE;
                     SendMessage(
                         model->tooltip, TTM_TRACKACTIVATE, focused,
-                        (LPARAM)&model->toolInfo
+                        (LPARAM)getToolInfo(dialog)
                     );
                     ignorePop = FALSE;
                 }
@@ -3559,9 +3576,9 @@ LRESULT CALLBACK DlgProc(
 
                 SendMessage(
                     model->tooltip, TTM_TRACKACTIVATE, FALSE,
-                    (LPARAM)&model->toolInfo
+                    (LPARAM)getToolInfo(dialog)
                 );
-                model->toolInfo.lpszText = NULL;
+                model->toolText = NULL;
                 return TRUE;
             }
         }
@@ -3636,16 +3653,9 @@ int CALLBACK WinMain(
 
     Model model = {
         .settingsPath = L"settings.json",
-        .toolInfo = {
-            .cbSize = sizeof(TOOLINFO),
-            .uFlags = TTF_IDISHWND | TTF_CENTERTIP | TTF_TRACK | TTF_ABSOLUTE,
-            .hwnd = NULL,
-            .uId = (UINT_PTR)NULL,
-            .hinst = NULL,
-            .lpszText = NULL,
-            .lParam = 0,
-            .lpReserved = NULL,
-        },
+        .tooltip = NULL,
+        .toolText = NULL,
+        .autoHideTooltip = FALSE,
         .monitor = MonitorFromWindow(
             GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY
         ),
@@ -3680,9 +3690,9 @@ int CALLBACK WinMain(
                 || GetLastError() == ERROR_PATH_NOT_FOUND
         )
     );
-    model.initialParseError = parseModel(
+    model.toolText = parseModel(
         &model, model.watcherData.content, contentSize, fileExists,
-        &model.initialParseErrorLineNumber
+        &model.lineNumber
     );
 
     WNDCLASS windowClass = {
