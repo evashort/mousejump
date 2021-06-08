@@ -176,6 +176,29 @@ void selectKeyBitmap(
 
 #pragma region labels
 
+int nextPowerOf2(int n, int start) {
+    int result = start;
+    while (result < n) { result <<= 1; }
+    return result;
+}
+
+typedef enum {
+    MODEL_TEXT_SLOT = 0, TEMP_TEXT_SLOT, PATH_TEXT_SLOT, TITLE_TEXT_SLOT,
+    RANGE_TEXT_SLOT, TEXT_SLOT_COUNT
+} TextSlot;
+int textsIn[TEXT_SLOT_COUNT] = { 0, 0, 0, 0, 0 };
+LPWSTR textsOut[TEXT_SLOT_COUNT] = { NULL, NULL, NULL, NULL, NULL };
+LPWSTR getText(int capacity, TextSlot slot) {
+    if (textsIn[slot] < capacity) {
+        textsIn[slot] = nextPowerOf2(capacity, 64);
+        textsOut[slot] = realloc(
+            textsOut[slot], textsIn[slot] * sizeof(WCHAR)
+        );
+    }
+
+    return textsOut[slot];
+}
+
 LPWSTR labelTextOut = NULL;
 LPWSTR getLabelText() {
     if (labelTextOut) { return labelTextOut; }
@@ -286,15 +309,9 @@ LabelRange getLabelRange(LPCWSTR text, int count) {
             && !wcsncmp(text, labelRangeIn.text, labelRangeIn.capacity)
     ) { return labelRangeOut; }
 
-    int textLength = wcslen(text);
-    if (labelRangeIn.text == NULL || textLength + 1 > labelRangeIn.capacity) {
-        labelRangeIn.capacity = nextPowerOf2(textLength + 1, 64);
-        labelRangeIn.text = realloc(
-            labelRangeIn.text, labelRangeIn.capacity * sizeof(WCHAR)
-        );
-    }
-
-    wcsncpy_s(labelRangeIn.text, labelRangeIn.capacity, text, textLength + 1);
+    labelRangeIn.capacity = wcslen(text) + 1;
+    labelRangeIn.text = getText(labelRangeIn.capacity, RANGE_TEXT_SLOT);
+    wcsncpy_s(labelRangeIn.text, labelRangeIn.capacity, text, _TRUNCATE);
     labelRangeIn.count = count;
 
     LPWSTR node = L","; int nodeLength = wcslen(node);
@@ -311,7 +328,7 @@ LabelRange getLabelRange(LPCWSTR text, int count) {
     }
 
     LPWSTR *labels = getSortedLabels(count);
-    textLength = wcslen(text);
+    int textLength = wcslen(text);
     int start = 0;
     int stop = count;
     int matchLength = 0;
@@ -775,29 +792,6 @@ HFONT getSystemFont(UINT dpi) {
     return systemFontOut = CreateFontIndirect(&metrics.lfMessageFont);
 }
 
-int nextPowerOf2(int n, int start) {
-    int result = start;
-    while (result < n) { result <<= 1; }
-    return result;
-}
-
-typedef enum {
-    MODEL_TEXT_SLOT = 0, TEMP_TEXT_SLOT, TEXT_SLOT_COUNT
-} TextSlot;
-int textsIn[TEXT_SLOT_COUNT] = { 0, 0 };
-LPWSTR textsOut[TEXT_SLOT_COUNT] = { NULL, NULL };
-LPWSTR getText(int capacity, TextSlot slot) {
-    if (textsIn[slot] < capacity) {
-        textsIn[slot] = nextPowerOf2(capacity, 64);
-        textsOut[slot] = realloc(
-            textsOut[slot], textsIn[slot] * sizeof(WCHAR)
-        );
-    }
-
-    return textsOut[slot];
-}
-
-
 LPWSTR getTextBoxText(HWND textBox) {
     int capacity = GetWindowTextLength(textBox) + 1;
     LPWSTR text = getText(capacity, MODEL_TEXT_SLOT);
@@ -805,30 +799,46 @@ LPWSTR getTextBoxText(HWND textBox) {
     return text;
 }
 
-struct { LPWSTR text; int capacity; } errorTitleOut = {
-    .text = NULL, .capacity = 0,
-};
-LPCWSTR getErrorTitle(LPCWSTR path, int lineNumber) {
-    int pathLength = wcslen(path);
-    int numberStart = pathLength + sizeof(L" line ") / sizeof(WCHAR) - 1;
-    int capacity = numberStart + sizeof(STRINGIFY(INT_MIN)) / sizeof(WCHAR);
-    if (capacity > errorTitleOut.capacity) {
-        errorTitleOut.capacity = capacity;
-        errorTitleOut.text = realloc(
-            errorTitleOut.text, capacity * sizeof(WCHAR)
-        );
+LPWSTR getSettingsPath(LPCWSTR filename) {
+    int nameLength = wcslen(filename);
+    int capacity = MAX_PATH + nameLength;
+    LPWSTR path = getText(capacity, MODEL_TEXT_SLOT);
+    int pathLength = GetModuleFileName(NULL, path, capacity - nameLength);
+    while (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+        capacity *= 2;
+        path = getText(capacity, MODEL_TEXT_SLOT);
+        pathLength = GetModuleFileName(NULL, path, capacity - nameLength);
     }
 
-    wcsncpy_s(errorTitleOut.text, capacity, path, pathLength);
+    int folderStop = pathLength;
+    while (
+        folderStop > 0 && path[folderStop - 1] != L'/'
+            && path[folderStop - 1] != L'\\'
+    ) { folderStop--; }
     wcsncpy_s(
-        errorTitleOut.text + pathLength, capacity - pathLength,
-        L" line ", _TRUNCATE
+        path + folderStop, pathLength + 1 - folderStop, filename, nameLength
     );
-    _itow_s(
-        lineNumber, errorTitleOut.text + numberStart, capacity - numberStart,
-        10
+    return path;
+}
+
+LPCWSTR getErrorTitle(LPCWSTR path, int lineNumber) {
+    int pathLength = wcslen(path);
+    int folderStop = pathLength;
+    while (
+        folderStop > 0 && path[folderStop - 1] != L'/'
+            && path[folderStop - 1] != L'\\'
+    ) { folderStop--; }
+    path += folderStop;
+    pathLength -= folderStop;
+    int numberStart = pathLength + sizeof(L" line ") / sizeof(WCHAR) - 1;
+    int capacity = numberStart + sizeof(STRINGIFY(INT_MIN)) / sizeof(WCHAR);
+    LPWSTR errorTitle = getText(capacity, TITLE_TEXT_SLOT);
+    wcsncpy_s(errorTitle, capacity, path, pathLength);
+    wcsncpy_s(
+        errorTitle + pathLength, capacity - pathLength, L" line ", _TRUNCATE
     );
-    return errorTitleOut.text;
+    _itow_s(lineNumber, errorTitle + numberStart, capacity - numberStart, 10);
+    return errorTitle;
 }
 
 #pragma endregion
@@ -1436,7 +1446,6 @@ void destroyCache() {
     free(labelTextOut);
     free(labelsOut.value);
     free(sortedLabelsOut);
-    free(labelRangeIn.text);
     DeleteObject(labelFontOut);
     free(labelWidthsOut);
     DeleteObject(labelBitmapOut.bitmap);
@@ -1448,7 +1457,6 @@ void destroyCache() {
     if (acceleratorTableOut) { DestroyAcceleratorTable(acceleratorTableOut); }
     if (dropdownMenuOut) { DestroyMenu(dropdownMenuOut); }
     for (int i = 0; i < TEXT_SLOT_COUNT; i++) { free(textsOut[i]); }
-    free(errorTitleOut.text);
     free(edgeCellsOut.edgeCells);
     free(spineOut.oldSpine.ribStarts);
     free(spineOut.newSpine.ribStarts);
@@ -3781,7 +3789,7 @@ int CALLBACK WinMain(
     srand(478956);
 
     Model model = {
-        .settingsPath = L"settings.json",
+        .settingsPath = getSettingsPath(L"settings.json"),
         .tooltip = NULL,
         .toolText = NULL,
         .autoHideTooltip = FALSE,
