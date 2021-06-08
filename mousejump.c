@@ -1497,8 +1497,6 @@ struct Model {
     double mirrorHeightPt;
     double textBoxWidthPt;
     double textBoxHeightPt;
-    double dropdownWidthPt;
-    double dropdownHeightPt;
     BOOL showLabels;
     BOOL showCaption;
     SIZE minTextBoxSize;
@@ -2360,18 +2358,22 @@ BOOL shouldShowDropdown(Model *model) {
 
 SIZE getMinDialogClientSize(Model *model, UINT dpi) {
     if (model->minTextBoxSize.cy == 0) { return model->minTextBoxSize; }
+    int buttonWidth = 0;
+    if (shouldShowDropdown(model)) {
+        HWND toolbar = GetDlgItem(model->dialog, IDC_TOOLBAR);
+        if (toolbar != NULL) {
+            RECT buttonRect;
+            SendMessage(toolbar, TB_GETRECT, IDC_BUTTON, (LPARAM)&buttonRect);
+            buttonWidth = buttonRect.right - buttonRect.left;
+        }
+    }
+
     SIZE client = {
         .cx = max(
             model->minTextBoxSize.cx, ptToIntPx(model->textBoxWidthPt, dpi)
-        ) + (
-            shouldShowDropdown(model)
-                ? ptToIntPx(model->dropdownWidthPt, dpi) : 0
-        ),
+        ) + buttonWidth,
         .cy = max(
-            model->minTextBoxSize.cy,
-            ptToIntPx(
-                max(model->textBoxHeightPt, model->dropdownHeightPt), dpi
-            )
+            model->minTextBoxSize.cy, ptToIntPx(model->textBoxHeightPt, dpi)
         ),
     };
     return client;
@@ -2720,14 +2722,6 @@ LRESULT CALLBACK DlgProc(
             MAKELPARAM(3, 3)
         );
         UINT dpi = GetDpiForWindow(dialog);
-        int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
-        // https://stackoverflow.com/questions/13616491/how-to-use-bs-splitbutton-in-c
-        BUTTON_SPLITINFO splitInfo = {
-            .mask = BCSIF_SIZE | BCSIF_STYLE,
-            .size = { dropdownWidth, dropdownWidth },
-            .uSplitStyle = BCSS_ALIGNLEFT,
-        };
-        Button_SetSplitInfo(GetDlgItem(dialog, IDC_BUTTON), &splitInfo);
         SendMessage(
             dialog,
             WM_SETFONT,
@@ -2772,6 +2766,45 @@ LRESULT CALLBACK DlgProc(
             dpi
         );
         SIZE oldMinSize = getMinDialogClientSize(model, model->dpi);
+        HWND toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
+        BOOL toolbarChanged = toolbar == NULL || dpi != model->dpi
+            || rect.bottom - rect.top != model->minTextBoxSize.cy;
+        if (toolbarChanged) {
+            if (toolbar != NULL) { DestroyWindow(toolbar); }
+            toolbar = CreateWindow(
+                TOOLBARCLASSNAME,
+                NULL,
+                WS_VISIBLE | WS_CHILD | WS_TABSTOP | TBSTYLE_LIST,
+                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                dialog,
+                (HMENU)IDC_TOOLBAR,
+                GetWindowInstance(dialog),
+                0
+            );
+            SendMessage(toolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_DRAWDDARROWS);
+            SendMessage(toolbar, TB_SETBITMAPSIZE, 0, MAKELPARAM(0, 0));
+            TBBUTTON button = {
+                .iBitmap = 0,
+                .idCommand = IDC_BUTTON,
+                .fsState = TBSTATE_ENABLED,
+                .fsStyle = BTNS_WHOLEDROPDOWN | BTNS_AUTOSIZE,
+                .bReserved = { 0 },
+                .dwData = 0,
+                .iString = -1,
+            };
+            SendMessage(toolbar, TB_BUTTONSTRUCTSIZE, sizeof(button), 0);
+            SendMessage(toolbar, TB_ADDBUTTONS, 1, (LPARAM)&button);
+            int textBoxHeightPx = max(
+                rect.bottom - rect.top, ptToIntPx(model->textBoxHeightPt, dpi)
+            );
+            SendMessage(
+                toolbar, TB_SETPADDING, 0, MAKELPARAM(1, textBoxHeightPx)
+            );
+            // this can be any arbitrary number
+            SendMessage(toolbar, TB_SETBUTTONWIDTH, 0, MAKELPARAM(10, 10));
+            SendMessage(toolbar, TB_AUTOSIZE, 0, 0);
+        }
+
         model->minTextBoxSize.cx = rect.right - rect.left;
         model->minTextBoxSize.cy = rect.bottom - rect.top;
         model->dpi = dpi;
@@ -2796,6 +2829,11 @@ LRESULT CALLBACK DlgProc(
                 frame.right + extraSize.cx - frame.left,
                 frame.bottom + extraSize.cy - frame.top,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        } else if (toolbarChanged) {
+            SendMessage(
+                dialog, WM_SIZE, SIZE_RESTORED,
+                MAKELPARAM(client.right, client.bottom)
             );
         }
 
@@ -2830,29 +2868,44 @@ LRESULT CALLBACK DlgProc(
         int textBoxHeight = max(
             model->minTextBoxSize.cy, ptToIntPx(model->textBoxHeightPt, dpi)
         );
-        int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
-        int dropdownHeight = max(
-            model->minTextBoxSize.cy, ptToIntPx(model->dropdownHeightPt, dpi)
-        );
+        int buttonWidth = 0;
+        HWND toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
+        RECT buttonRect;
+        if (toolbar != NULL) {
+            SendMessage(toolbar, TB_GETRECT, IDC_BUTTON, (LPARAM)&buttonRect);
+            buttonWidth = buttonRect.right - buttonRect.left;
+        }
+
         if (shouldShowDropdown(model)) {
-            client.right -= dropdownWidth;
+            client.right -= buttonWidth;
         }
 
         HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+        int controlTop = (client.bottom - textBoxHeight) / 2;
         SetWindowPos(
             textBox,
             NULL,
-            0, (client.bottom - textBoxHeight) / 2,
+            0, controlTop,
             client.right, textBoxHeight,
-            0
+            SWP_NOZORDER | SWP_NOACTIVATE
         );
-        SetWindowPos(
-            GetDlgItem(dialog, IDC_BUTTON),
-            NULL,
-            client.right, (client.bottom - dropdownHeight) / 2,
-            dropdownWidth, dropdownHeight,
-            0
-        );
+        if (toolbar != NULL) {
+            RECT toolbarFrame;
+            GetWindowRect(toolbar, &toolbarFrame);
+            ScreenToClient(dialog, (LPPOINT)&toolbarFrame.left);
+            ScreenToClient(dialog, (LPPOINT)&toolbarFrame.right);
+            POINT offset = { buttonRect.left, buttonRect.top };
+            MapWindowPoints(toolbar, dialog, &offset, 1);
+            SetWindowPos(
+                toolbar,
+                NULL,
+                toolbarFrame.left + client.right - offset.x,
+                toolbarFrame.top + controlTop - offset.y,
+                0, 0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        }
+
         if (model->toolText != NULL) {
             RECT frame; GetWindowRect(textBox, &frame);
             SendMessage(
@@ -2932,11 +2985,6 @@ LRESULT CALLBACK DlgProc(
     } else if (message == WM_DPICHANGED) {
         Model *model = getModel(dialog);
         UINT dpi = HIWORD(wParam);
-        int dropdownWidth = ptToIntPx(model->dropdownWidthPt, dpi);
-        BUTTON_SPLITINFO splitInfo = {
-            .mask = BCSIF_SIZE, .size = { dropdownWidth, dropdownWidth },
-        };
-        Button_SetSplitInfo(GetDlgItem(dialog, IDC_BUTTON), &splitInfo);
         SendMessage(
             dialog,
             WM_SETFONT,
@@ -2985,12 +3033,15 @@ LRESULT CALLBACK DlgProc(
         return TRUE;
     } else if (message == WM_SYSCOMMAND && (wParam & 0xFFF0) == SC_KEYMENU) {
         if (GetMenu(dialog) != NULL) { return 0; }
-        RECT client, buttonRect;
-        GetClientRect(dialog, &client);
-        GetWindowRect(GetDlgItem(dialog, IDC_BUTTON), &buttonRect);
-        Model *model = getModel(dialog);
-        ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
-        client.right = buttonRect.right;
+        RECT client; GetClientRect(dialog, &client);
+        HWND toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
+        if (toolbar != NULL) {
+            RECT buttonRect;
+            SendMessage(toolbar, TB_GETRECT, IDC_BUTTON, (LPARAM)&buttonRect);
+            MapWindowPoints(toolbar, dialog, (LPPOINT)&buttonRect.right, 1);
+            client.right = buttonRect.right;
+        }
+
         SetMenu(dialog, getDropdownMenu());
         // using AdjustWindowRectExForDpi causes problems because Windows
         // never actually redraws the title bar to reflect DPI changes
@@ -3019,15 +3070,24 @@ LRESULT CALLBACK DlgProc(
         Model *model = getModel(dialog);
         BOOL focused = GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX);
         if (GetMenu(dialog) != NULL) {
-            RECT client, buttonRect;
-            GetClientRect(dialog, &client);
-            GetWindowRect(GetDlgItem(dialog, IDC_BUTTON), &buttonRect);
-            if (!model->showCaption && focused) {
-                ScreenToClient(dialog, (LPPOINT)&buttonRect.left);
-                client.right = buttonRect.left;
-            } else {
-                ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
-                client.right = buttonRect.right;
+            RECT client; GetClientRect(dialog, &client);
+            HWND toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
+            if (toolbar != NULL) {
+                RECT buttonRect;
+                SendMessage(
+                    toolbar, TB_GETRECT, IDC_BUTTON, (LPARAM)&buttonRect
+                );
+                if (!model->showCaption && focused) {
+                    MapWindowPoints(
+                        toolbar, dialog, (LPPOINT)&buttonRect.left, 1
+                    );
+                    client.right = buttonRect.left;
+                } else {
+                    MapWindowPoints(
+                        toolbar, dialog, (LPPOINT)&buttonRect.right, 1
+                    );
+                    client.right = buttonRect.right;
+                }
             }
 
             SetMenu(dialog, NULL);
@@ -3052,28 +3112,33 @@ LRESULT CALLBACK DlgProc(
 
         return 0;
     } else if (
-        message == WM_NOTIFY && ((LPNMHDR)lParam)->code == BCN_DROPDOWN
+        message == WM_NOTIFY && ((LPNMHDR)lParam)->code == TBN_DROPDOWN
     ) {
-        NMBCDROPDOWN *dropDown = (NMBCDROPDOWN*)lParam;
-        if (dropDown->hdr.idFrom == IDC_BUTTON) {
-            // https://docs.microsoft.com/en-us/windows/win32/controls/handle-the-bcn-dropdown-notification-from-a-split-button
-            RECT buttonRect = dropDown->rcButton;
-            ClientToScreen(dropDown->hdr.hwndFrom, (LPPOINT)&buttonRect.left);
-            ClientToScreen(
-                dropDown->hdr.hwndFrom, (LPPOINT)&buttonRect.right
-            );
-            TPMPARAMS popupParams;
-            popupParams.cbSize = sizeof(popupParams);
-            popupParams.rcExclude = buttonRect;
-            TrackPopupMenuEx(
-                GetSubMenu(getDropdownMenu(), 0),
-                TPM_VERTICAL | TPM_LEFTBUTTON | TPM_RIGHTALIGN,
-                buttonRect.right, buttonRect.top,
-                dialog,
-                &popupParams
-            );
-            return TRUE;
-        }
+        // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
+        LPNMTOOLBAR toolbarMessage = (LPNMTOOLBAR)lParam;
+        RECT buttonRect;
+        SendMessage(
+            toolbarMessage->hdr.hwndFrom,
+            TB_GETRECT,
+            (WPARAM)toolbarMessage->iItem,
+            (LPARAM)&buttonRect
+        );
+        MapWindowPoints(
+            toolbarMessage->hdr.hwndFrom, HWND_DESKTOP,
+            (LPPOINT)&buttonRect, 2
+        );
+        buttonRect.bottom--; // unexplained off-by-one
+        TPMPARAMS popupParams;
+        popupParams.cbSize = sizeof(popupParams);
+        popupParams.rcExclude = buttonRect;
+        TrackPopupMenuEx(
+            GetSubMenu(getDropdownMenu(), 0),
+            TPM_VERTICAL | TPM_LEFTBUTTON | TPM_RIGHTALIGN,
+            buttonRect.right, buttonRect.top,
+            dialog,
+            &popupParams
+        );
+        return TRUE;
     } else if (message == WM_NOTIFY && ((LPNMHDR)lParam)->code == TTN_POP) {
         Model *model = getModel(dialog);
         if (((LPNMHDR)lParam)->hwndFrom == model->tooltip && !ignorePop) {
@@ -3123,6 +3188,11 @@ LRESULT CALLBACK DlgProc(
                 GetModuleHandle(NULL), L"TOOL", model->window, DlgProc
             );
             model->watcherData.window = model->dialog;
+            // force window style to take effect before measuring
+            SetWindowPos(
+                model->dialog, NULL, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
             RECT client; GetClientRect(model->dialog, &client);
             RECT frame; GetWindowRect(model->dialog, &frame);
             ClientToScreen(model->dialog, (LPPOINT)&client.left);
@@ -3167,8 +3237,16 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (command == IDC_BUTTON) {
                 // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
-                RECT buttonRect;
-                GetWindowRect(GetDlgItem(dialog, IDC_BUTTON), &buttonRect);
+                LPNMTOOLBAR toolbarMessage = (LPNMTOOLBAR)lParam;
+                RECT buttonRect = { 0, 0, 0, 1 };
+                HWND toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
+                SendMessage(
+                    toolbar, TB_GETRECT, command, (LPARAM)&buttonRect
+                );
+                MapWindowPoints(
+                    toolbar, HWND_DESKTOP, (LPPOINT)&buttonRect, 2
+                );
+                buttonRect.bottom--; // unexplained off-by-one
                 TPMPARAMS popupParams;
                 popupParams.cbSize = sizeof(popupParams);
                 popupParams.rcExclude = buttonRect;
@@ -3455,16 +3533,21 @@ LRESULT CALLBACK DlgProc(
 
                 HWND focus = GetFocus();
                 BOOL focused = focus == GetDlgItem(dialog, IDC_TEXTBOX);
+                HWND toolbar = NULL;
                 if (!model->showCaption) {
+                    toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
+                }
+
+                if (toolbar != NULL) {
                     RECT buttonRect;
-                    GetWindowRect(
-                        GetDlgItem(dialog, IDC_BUTTON), &buttonRect
+                    SendMessage(
+                        toolbar, TB_GETRECT, IDC_BUTTON, (LPARAM)&buttonRect
                     );
+                    MapWindowPoints(toolbar, dialog, (LPPOINT)&buttonRect, 2);
                     if (focused) {
                         buttonRect.right = buttonRect.left;
                     }
 
-                    ScreenToClient(dialog, (LPPOINT)&buttonRect.right);
                     RECT client; GetClientRect(dialog, &client);
                     RECT frame; GetWindowRect(dialog, &frame);
                     SetWindowPos(
@@ -3665,8 +3748,6 @@ int CALLBACK WinMain(
         .systemFontChanges = 0,
         .textBoxWidthPt = 23.25,
         .textBoxHeightPt = 17.25,
-        .dropdownWidthPt = 14.25,
-        .dropdownHeightPt = 17.25,
         .showLabels = TRUE,
         .minTextBoxSize = { 0, 0 },
         .text = L"",
