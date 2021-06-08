@@ -5,3 +5,8 @@
 *.ilk
 sequenceCosts.csv
 ANC-token-count.zip
+.vs
+bin
+obj
+*.cache
+*.user
