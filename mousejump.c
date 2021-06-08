@@ -2653,6 +2653,26 @@ void setTooltip(
         )
     );
     model->autoHideTooltip = autoHide;
+    if (!autoHide) {
+        MENUITEMINFO items[] = {
+            {
+                .cbSize = sizeof(MENUITEMINFO),
+                .fMask = MIIM_TYPE | MIIM_ID,
+                .fType = MFT_SEPARATOR,
+                .wID = IDM_DISMISS_SEPARATOR,
+            },
+            {
+                .cbSize = sizeof(MENUITEMINFO),
+                .fMask = MIIM_TYPE | MIIM_ID,
+                .fType = MFT_STRING,
+                .dwTypeData = L"Dismiss &error\tBackspace",
+                .wID = IDM_DISMISS,
+            },
+        };
+        HMENU menu = GetSubMenu(getDropdownMenu(), 0);
+        InsertMenuItem(menu, 0, TRUE, &items[0]);
+        InsertMenuItem(menu, 0, TRUE, &items[1]);
+    }
 }
 
 const int PRESSED = 0x8000;
@@ -3142,9 +3162,12 @@ LRESULT CALLBACK DlgProc(
     } else if (message == WM_NOTIFY && ((LPNMHDR)lParam)->code == TTN_POP) {
         Model *model = getModel(dialog);
         if (((LPNMHDR)lParam)->hwndFrom == model->tooltip && !ignorePop) {
-            // This program uses lpszText to indicate whether the tooltip has
+            // This program uses toolText to indicate whether the tooltip has
             // been closed or just hidden because the focused changed.
             model->toolText = NULL;
+            HMENU menu = GetSubMenu(getDropdownMenu(), 0);
+            RemoveMenu(menu, IDM_DISMISS, MF_BYCOMMAND);
+            RemoveMenu(menu, IDM_DISMISS_SEPARATOR, MF_BYCOMMAND);
             return TRUE;
         }
     } else if (message == WM_TIMER && wParam == DO_ACTIONS_TIMER) {
@@ -3235,6 +3258,11 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(textBox, EM_SETSEL, 0, -1);
                 SetFocus(textBox);
                 return TRUE;
+            } else if (command == IDM_DISMISS) {
+                SendMessage(
+                    getModel(dialog)->tooltip,
+                    TTM_TRACKACTIVATE, FALSE, getToolInfo(dialog)
+                );
             } else if (command == IDC_BUTTON) {
                 // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
                 LPNMTOOLBAR toolbarMessage = (LPNMTOOLBAR)lParam;
@@ -3564,7 +3592,7 @@ LRESULT CALLBACK DlgProc(
                         // Tooltip should not disappear when clicked.
                         && focus != model->tooltip
                 ) {
-                    // keep toolInfo.lpszText from being set to NULL,
+                    // keep model->toolText from being set to NULL,
                     // otherwise the tooltip won't reappear when the focus
                     // changes back
                     ignorePop = TRUE;
@@ -3706,18 +3734,36 @@ int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
                 if (GetFocus() == textBox) {
                     DWORD selectionStart, selectionStop;
                     SendMessage(
-                        GetDlgItem(dialog, IDC_TEXTBOX),
-                        EM_GETSEL,
-                        (WPARAM)&selectionStart,
-                        (LPARAM)&selectionStop
+                        textBox, EM_GETSEL,
+                        (WPARAM)&selectionStart, (LPARAM)&selectionStop
                     );
                     if (
                         selectionStart < GetWindowTextLength(textBox) && (
                             message->wParam == VK_RIGHT || selectionStop > 0
                         )
-                    ) {
-                        return 0;
-                    }
+                    ) { return 0; }
+                }
+            }
+        } else if (message->wParam == VK_BACK && getModifiers() == 0) {
+            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+            if (GetFocus() == textBox) {
+                DWORD selectionStart, selectionStop;
+                SendMessage(
+                    textBox, EM_GETSEL,
+                    (WPARAM)&selectionStart, (LPARAM)&selectionStop
+                );
+                if (selectionStop > 0) { return 0; }
+            }
+        } else if (message->wParam == VK_DELETE && getModifiers() == 0) {
+            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
+            if (GetFocus() == textBox) {
+                DWORD selectionStart, selectionStop;
+                SendMessage(
+                    textBox, EM_GETSEL,
+                    (WPARAM)&selectionStart, (LPARAM)&selectionStop
+                );
+                if (selectionStart < GetWindowTextLength(textBox)) {
+                    return 0;
                 }
             }
         }
