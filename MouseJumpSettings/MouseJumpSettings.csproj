@@ -9,9 +9,12 @@
     <RuntimeIdentifiers>win10-x86;win10-x64;win10-arm64</RuntimeIdentifiers>
   </PropertyGroup>
   <ItemGroup>
-    <None Remove="Views\BlankPage1.xaml" />
-    <None Remove="Views\BlankPage2.xaml" />
-    <None Remove="Views\BlankPage3.xaml" />
+    <None Remove="Views\About.xaml" />
+    <None Remove="Views\Appearance.xaml" />
+    <None Remove="Views\Labels.xaml" />
+    <None Remove="Views\Review.xaml" />
+    <None Remove="Views\Shortcuts.xaml" />
+    <None Remove="Views\Startup.xaml" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,19 +25,37 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Page Update="Views\BlankPage3.xaml">
+    <Page Update="Views\Review.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>
 
   <ItemGroup>
-    <Page Update="Views\BlankPage2.xaml">
+    <Page Update="Views\Startup.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>
 
   <ItemGroup>
-    <Page Update="Views\BlankPage1.xaml">
+    <Page Update="Views\Labels.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Views\Shortcuts.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Views\Appearance.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Views\About.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>

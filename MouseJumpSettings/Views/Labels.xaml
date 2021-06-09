@@ -1,5 +1,5 @@
 ﻿<Page
-    x:Class="MouseJumpSettings.Views.BlankPage1"
+    x:Class="MouseJumpSettings.Views.Labels"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:MouseJumpSettings.Views"
@@ -9,8 +9,6 @@
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <Button x:Name="myButton" Click="myButton_Click">Click Me</Button>
-        </StackPanel>
+        <TextBlock>Labels</TextBlock>
     </Grid>
 </Page>

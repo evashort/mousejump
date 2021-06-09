@@ -7,16 +7,33 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <NavigationView IsSettingsVisible="False" Loaded="nvTopLevelNav_Loaded" ItemInvoked="nvTopLevelNav_ItemInvoked">
+    <NavigationView
+        PaneDisplayMode="Left"
+        IsBackButtonVisible="Collapsed"
+        IsPaneToggleButtonVisible="False"
+        IsSettingsVisible="False"
+        Loaded="nvTopLevelNav_Loaded"
+        ItemInvoked="nvTopLevelNav_ItemInvoked"
+        OpenPaneLength="160"
+        >
         <NavigationView.MenuItems>
             <NavigationViewItem>
-                <TextBlock Tag="Nav_A">A</TextBlock>
+                <TextBlock Tag="Nav_About">About MouseJump</TextBlock>
             </NavigationViewItem>
             <NavigationViewItem>
-                <TextBlock Tag="Nav_B">B</TextBlock>
+                <TextBlock Tag="Nav_Appearance">Appearance</TextBlock>
             </NavigationViewItem>
             <NavigationViewItem>
-                <TextBlock Tag="Nav_C">C</TextBlock>
+                <TextBlock Tag="Nav_Shortcuts">Keyboard Shortcuts</TextBlock>
+            </NavigationViewItem>
+            <NavigationViewItem>
+                <TextBlock Tag="Nav_Labels">Labels</TextBlock>
+            </NavigationViewItem>
+            <NavigationViewItem>
+                <TextBlock Tag="Nav_Startup">Startup</TextBlock>
+            </NavigationViewItem>
+            <NavigationViewItem>
+                <TextBlock Tag="Nav_Review">Review Changes</TextBlock>
             </NavigationViewItem>
         </NavigationView.MenuItems>
         <Frame x:Name="contentFrame"></Frame>

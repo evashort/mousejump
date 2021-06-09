@@ -35,14 +35,14 @@ namespace MouseJumpSettings
             // set the initial SelectedItem
             foreach (NavigationViewItemBase item in navigationView.MenuItems)
             {
-                if (item is NavigationViewItem && (item.Content as TextBlock).Tag.ToString() == "Nav_A")
+                if (item is NavigationViewItem && (item.Content as TextBlock).Tag.ToString() == "Nav_About")
                 {
                     navigationView.SelectedItem = item;
                     break;
                 }
             }
 
-            contentFrame.Navigate(typeof(Views.BlankPage1));
+            contentFrame.Navigate(typeof(Views.About));
         }
 
         private void nvTopLevelNav_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
@@ -52,16 +52,28 @@ namespace MouseJumpSettings
             {
                 switch (ItemContent.Tag)
                 {
-                    case "Nav_A":
-                        contentFrame.Navigate(typeof(Views.BlankPage1));
+                    case "Nav_About":
+                        contentFrame.Navigate(typeof(Views.About));
                         break;
 
-                    case "Nav_B":
-                        contentFrame.Navigate(typeof(Views.BlankPage2));
+                    case "Nav_Appearance":
+                        contentFrame.Navigate(typeof(Views.Appearance));
                         break;
 
-                    case "Nav_C":
-                        contentFrame.Navigate(typeof(Views.BlankPage3));
+                    case "Nav_Shortcuts":
+                        contentFrame.Navigate(typeof(Views.Shortcuts));
+                        break;
+
+                    case "Nav_Labels":
+                        contentFrame.Navigate(typeof(Views.Labels));
+                        break;
+
+                    case "Nav_Startup":
+                        contentFrame.Navigate(typeof(Views.Startup));
+                        break;
+
+                    case "Nav_Review":
+                        contentFrame.Navigate(typeof(Views.Review));
                         break;
                 }
             }
