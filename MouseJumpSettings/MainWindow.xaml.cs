@@ -28,9 +28,43 @@ namespace MouseJumpSettings
             this.InitializeComponent();
         }
 
-        private void myButton_Click(object sender, RoutedEventArgs e)
+        // https://techcommunity.microsoft.com/t5/windows-dev-appconsult/using-the-navigationview-in-your-uwp-applications/ba-p/317200
+        private void nvTopLevelNav_Loaded(object sender, RoutedEventArgs e)
         {
-            myButton.Content = "Clicked";
+            NavigationView navigationView = sender as NavigationView;
+            // set the initial SelectedItem
+            foreach (NavigationViewItemBase item in navigationView.MenuItems)
+            {
+                if (item is NavigationViewItem && (item.Content as TextBlock).Tag.ToString() == "Nav_A")
+                {
+                    navigationView.SelectedItem = item;
+                    break;
+                }
+            }
+
+            contentFrame.Navigate(typeof(Views.BlankPage1));
+        }
+
+        private void nvTopLevelNav_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+        {
+            TextBlock ItemContent = args.InvokedItem as TextBlock;
+            if (ItemContent != null)
+            {
+                switch (ItemContent.Tag)
+                {
+                    case "Nav_A":
+                        contentFrame.Navigate(typeof(Views.BlankPage1));
+                        break;
+
+                    case "Nav_B":
+                        contentFrame.Navigate(typeof(Views.BlankPage2));
+                        break;
+
+                    case "Nav_C":
+                        contentFrame.Navigate(typeof(Views.BlankPage3));
+                        break;
+                }
+            }
         }
     }
 }
