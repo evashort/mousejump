@@ -9,6 +9,6 @@
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-        <ColorPicker Loaded="pickerLoaded"/>
+        <ColorPicker Loaded="ColorPicker_Loaded" ColorChanged="ColorPicker_ColorChanged"/>
     </Grid>
 </Page>

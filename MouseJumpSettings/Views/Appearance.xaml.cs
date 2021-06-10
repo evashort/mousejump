@@ -21,22 +21,14 @@ namespace MouseJumpSettings.Views
             this.InitializeComponent();
         }
 
-        private void pickerLoaded(object sender, RoutedEventArgs e)
+        private void ColorPicker_Loaded(object sender, RoutedEventArgs e)
         {
-            string hexString = (Application.Current as App).Json.GetNamedString("labelColor");
-            int sliceLength = (hexString.Length - 1) / 3;
-            int[] channels = (
-                from i in Enumerable.Range(0, 3)
-                select (sliceLength == 1 ? 0x11 : 1) * int.Parse(
-                    hexString.Substring(1 + i * sliceLength, sliceLength),
-                    System.Globalization.NumberStyles.HexNumber,
-                    System.Globalization.NumberFormatInfo.InvariantInfo
-                )
-            ).ToArray();
-            
-            (sender as ColorPicker).Color = Color.FromArgb(
-                0xff, (byte)channels[0], (byte)channels[1], (byte)channels[2]
-            );
+            (sender as ColorPicker).Color = (Application.Current as App).Settings.LabelColor;
+        }
+
+        private void ColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
+        {
+            (Application.Current as App).Settings.LabelColor = args.NewColor;
         }
     }
 }

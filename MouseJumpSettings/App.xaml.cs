@@ -11,7 +11,7 @@ namespace MouseJumpSettings
     /// </summary>
     public partial class App : Application
     {
-        public JsonObject Json;
+        public Settings Settings { get; private set; }
 
         /// <summary>
         /// Initializes the singleton application object.  This is the first line of authored code
@@ -19,9 +19,12 @@ namespace MouseJumpSettings
         /// </summary>
         public App()
         {
-            string filename = System.IO.Path.Join(System.AppDomain.CurrentDomain.BaseDirectory, "../../../../../../settings.json");
-            string text = System.IO.File.ReadAllText(filename, System.Text.Encoding.UTF8);
-            Json = JsonObject.Parse(text);
+            string path = System.IO.Path.Join(
+                System.AppDomain.CurrentDomain.BaseDirectory,
+                "../../../../../../settings.json"
+            );
+            Settings = new Settings(path);
+            Settings.Load();
             this.InitializeComponent();
         }
 
@@ -30,7 +33,7 @@ namespace MouseJumpSettings
         /// will be used such as when the application is launched to open a specific file.
         /// </summary>
         /// <param name="args">Details about the launch request and process.</param>
-        protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
+        protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             m_window = new MainWindow();
             m_window.Activate();
