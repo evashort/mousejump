@@ -15,7 +15,7 @@ namespace MouseJumpSettings
         private JsonObject json;
         private readonly string path;
         private Task saveTask;
-        private readonly AutoResetEvent saveEvent;
+        private bool savePending;
         public Color LabelColor
         {
             get
@@ -26,12 +26,11 @@ namespace MouseJumpSettings
             {
                 if (value != LabelColor)
                 {
-                    lock (json)
+                    lock (this)
                     {
                         json.SetNamedValue("labelColor", JsonValue.CreateStringValue(FormatColor(value)));
+                        Save();
                     }
-
-                    Save();
                 }
             }
         }
@@ -40,7 +39,7 @@ namespace MouseJumpSettings
         {
             this.path = path;
             saveTask = Task.CompletedTask;
-            saveEvent = new AutoResetEvent(true);
+            savePending = false;
         }
 
         public void Load()
@@ -78,29 +77,27 @@ namespace MouseJumpSettings
 
         private void Save()
         {
-            if (saveEvent.WaitOne(0))
-            {
-                saveTask = saveTask.ContinueWith(
-                   t => {
-                       saveEvent.Set();
-                       string text;
-                       lock (json)
-                       {
-                           text = json.ToString();
-                       }
+            if (savePending) { return; }
+            savePending = true;
+            saveTask = saveTask.ContinueWith(
+                t => {
+                    string text;
+                    lock (this)
+                    {
+                        text = json.ToString();
+                        savePending = false;
+                    }
 
-                       File.WriteAllText(path, text);
-                       Thread.Sleep(100);
-                   }
-               );
-            }
+                    File.WriteAllText(path, text);
+                    Thread.Sleep(100);
+                }
+            );
         }
 
         public void Dispose()
         {
             GC.SuppressFinalize(this);
             saveTask.Dispose();
-            saveEvent.Dispose();
         }
     }
 }
