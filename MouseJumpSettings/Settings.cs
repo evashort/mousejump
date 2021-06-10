@@ -79,19 +79,20 @@ namespace MouseJumpSettings
         {
             if (savePending) { return; }
             savePending = true;
-            saveTask = saveTask.ContinueWith(
-                t => {
-                    string text;
-                    lock (this)
-                    {
-                        text = json.ToString();
-                        savePending = false;
-                    }
+            saveTask = saveTask.ContinueWith(new Action<Task>(SaveHelp));
+        }
 
-                    File.WriteAllText(path, text);
-                    Thread.Sleep(100);
-                }
-            );
+        private void SaveHelp(Task task)
+        {
+            string text;
+            lock (this)
+            {
+                text = json.ToString();
+                savePending = false;
+            }
+
+            File.WriteAllText(path, text);
+            Thread.Sleep(100);
         }
 
         public void Dispose()
