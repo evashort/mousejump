@@ -9,6 +9,7 @@
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
+        <ComboBox Header="Font" ItemsSource="{x:Bind fonts}" IsEditable="True" Width="200"/>
         <ColorPicker Loaded="ColorPicker_Loaded" ColorChanged="ColorPicker_ColorChanged"/>
     </Grid>
 </Page>
