@@ -802,11 +802,11 @@ LPWSTR getTextBoxText(HWND textBox) {
 LPWSTR getSettingsPath(LPCWSTR filename) {
     int nameLength = wcslen(filename);
     int capacity = MAX_PATH + nameLength;
-    LPWSTR path = getText(capacity, MODEL_TEXT_SLOT);
+    LPWSTR path = getText(capacity, PATH_TEXT_SLOT);
     int pathLength = GetModuleFileName(NULL, path, capacity - nameLength);
     while (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
         capacity *= 2;
-        path = getText(capacity, MODEL_TEXT_SLOT);
+        path = getText(capacity, PATH_TEXT_SLOT);
         pathLength = GetModuleFileName(NULL, path, capacity - nameLength);
     }
 
