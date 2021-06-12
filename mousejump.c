@@ -1110,7 +1110,7 @@ Spine getSpine(
             dialog,
             L"Not enough edge cells. "
             L"A developer should increase borderRadius.",
-            L"MouseJump error",
+            L"MouseJump Error",
             MB_ICONERROR
         );
         exit(1);
@@ -2265,6 +2265,13 @@ LPWSTR parseModel(
     return parseError;
 }
 
+// TODO: Decide whether we want to keep this
+const WCHAR watcherErrorFormat[] = L"File watcher error: Could not %s";
+WCHAR watcherErrorString[
+    sizeof(watcherErrorFormat) / sizeof(WCHAR) - 2 + WATCHER_VERB_LENGTH - 1
+];
+const int watcherErrorLength = sizeof(watcherErrorString) / sizeof(WCHAR);
+
 Model *getModel(HWND window) {
     Model *model = (Model*)GetWindowLongPtr(window, GWLP_USERDATA);
     if (model) { return model; }
@@ -2874,6 +2881,16 @@ LRESULT CALLBACK DlgProc(
                 WatcherError startError = startWatcher(
                     &model->watcherData, dialog
                 );
+                if (startError != WATCHER_SUCCESS) {
+                    _snwprintf_s(
+                        watcherErrorString, watcherErrorLength, _TRUNCATE,
+                        watcherErrorFormat, watcherVerbs[startError]
+                    );
+                    MessageBox(
+                        NULL, watcherErrorString, L"MouseJump Error",
+                        MB_ICONERROR
+                    );
+                }
             }
 
             if (model->toolText != NULL) {
@@ -3815,19 +3832,42 @@ int CALLBACK WinMain(
         &model.watcherData, model.settingsPath,
         WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS
     );
+    if (
+        initError != WATCHER_SUCCESS && initError != WATCHER_OPEN_FOLDER
+    ) {
+        _snwprintf_s(
+            watcherErrorString, watcherErrorLength, _TRUNCATE,
+            watcherErrorFormat, watcherVerbs[initError]
+        );
+        MessageBox(
+            NULL, watcherErrorString, L"MouseJump Error", MB_ICONERROR
+        );
+    }
+
     DWORD contentSize;
     WatcherError loadError = watcherReadFile(
         model.watcherData.path, &model.watcherData.content, &contentSize
     );
-    BOOL fileExists = loadError == WATCHER_SUCCESS || (
-        loadError == WATCHER_OPEN_FILE && (
-            GetLastError() == ERROR_FILE_NOT_FOUND
-                || GetLastError() == ERROR_PATH_NOT_FOUND
+    if (
+        loadError != WATCHER_SUCCESS && (
+            loadError != WATCHER_OPEN_FILE || (
+                GetLastError() != ERROR_FILE_NOT_FOUND
+                    && GetLastError() != ERROR_PATH_NOT_FOUND
+            )
         )
-    );
+    ) {
+        _snwprintf_s(
+            watcherErrorString, watcherErrorLength, _TRUNCATE,
+            watcherErrorFormat, watcherVerbs[loadError]
+        );
+        MessageBox(
+            NULL, watcherErrorString, L"MouseJump Error", MB_ICONERROR
+        );
+    }
+
     model.toolText = parseModel(
-        &model, model.watcherData.content, contentSize, fileExists,
-        &model.lineNumber
+        &model, model.watcherData.content, contentSize,
+        loadError == WATCHER_SUCCESS, &model.lineNumber
     );
 
     WNDCLASS windowClass = {
@@ -3880,6 +3920,16 @@ int CALLBACK WinMain(
     }
 
     WatcherError stopError = stopWatcher(&model.watcherData);
+    if (stopError != WATCHER_SUCCESS) {
+        _snwprintf_s(
+            watcherErrorString, watcherErrorLength, _TRUNCATE,
+            watcherErrorFormat, watcherVerbs[stopError]
+        );
+        MessageBox(
+            NULL, watcherErrorString, L"MouseJump Error", MB_ICONERROR
+        );
+    }
+
     destroyCache();
     return 0;
 }

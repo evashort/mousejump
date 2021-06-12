@@ -27,7 +27,7 @@ int CALLBACK WinMain(HINSTANCE hInstance,
             watcherErrorString, watcherErrorLength, _TRUNCATE,
             watcherErrorFormat, watcherVerbs[initResult]
         );
-        MessageBox(NULL, watcherErrorString, L"file watcher", MB_OK);
+        MessageBox(NULL, watcherErrorString, L"file watcher", MB_ICONERROR);
         return 1;
     }
 
@@ -47,7 +47,7 @@ int CALLBACK WinMain(HINSTANCE hInstance,
             watcherErrorString, watcherErrorLength, _TRUNCATE,
             watcherErrorFormat, watcherVerbs[loadResult]
         );
-        MessageBox(NULL, watcherErrorString, L"file watcher", MB_OK);
+        MessageBox(NULL, watcherErrorString, L"file watcher", MB_ICONERROR);
         return 1;
     }
 
@@ -92,7 +92,7 @@ int CALLBACK WinMain(HINSTANCE hInstance,
             watcherErrorString, watcherErrorLength, _TRUNCATE,
             watcherErrorFormat, watcherVerbs[stopResult]
         );
-        MessageBox(NULL, watcherErrorString, L"file watcher", MB_OK);
+        MessageBox(NULL, watcherErrorString, L"file watcher", MB_ICONERROR);
         return 1;
     }
 
@@ -109,7 +109,7 @@ LRESULT CALLBACK WndProc(
                 watcherErrorString, watcherErrorLength, _TRUNCATE,
                 watcherErrorFormat, watcherVerbs[result]
             );
-            MessageBox(NULL, watcherErrorString, L"file watcher", MB_OK);
+            MessageBox(NULL, watcherErrorString, L"file watcher", MB_ICONERROR);
         }
 
         return 0;
