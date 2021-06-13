@@ -9,7 +9,16 @@
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-        <ComboBox Header="Font" ItemsSource="{x:Bind fonts}" IsEditable="True" Width="200"/>
-        <ColorPicker Loaded="ColorPicker_Loaded" ColorChanged="ColorPicker_ColorChanged"/>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <ComboBox Grid.Row="0" Grid.Column="0" Header="Font" ItemsSource="{x:Bind fonts}" IsEditable="True" Width="200" Text="{x:Bind font}"/>
+        <ComboBox Grid.Row="0" Grid.Column="1" Header="Size" ItemsSource="{x:Bind fontSizes}" IsEditable="True" Width="100" Text="{x:Bind fontSize}"/>
+        <ColorPicker Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Loaded="ColorPicker_Loaded" ColorChanged="ColorPicker_ColorChanged"/>
     </Grid>
 </Page>

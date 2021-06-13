@@ -19,10 +19,27 @@ namespace MouseJumpSettings.Views
     {
         // https://docs.microsoft.com/en-us/windows/winui/api/microsoft.ui.xaml.controls.combobox?view=winui-3.0
         ObservableCollection<ComboBoxItem> fonts = new ObservableCollection<ComboBoxItem>();
+        ObservableCollection<int> fontSizes = new ObservableCollection<int>
+        {
+            8, 9, 10, 11, 12, 14, 18, 24, 30, 36, 48, 60, 72, 96
+        };
+        string font = "";
+        string fontSize = "";
 
         public Appearance()
         {
             this.InitializeComponent();
+            NONCLIENTMETRICSW metrics = new NONCLIENTMETRICSW();
+            metrics.cbSize = (uint)Marshal.SizeOf(metrics);
+            Win32.SystemParametersInfoW(
+                0x29, // SPI_GETNONCLIENTMETRICS
+                (uint)Marshal.SizeOf(metrics),
+                ref metrics,
+                0
+            );
+            font = metrics.lfMessageFont.lfFaceName;
+            fontSize = (-metrics.lfMessageFont.lfHeight).ToString();
+
             LOGFONTW lf = new LOGFONTW();
             lf.lfCharSet = 1;
             lf.lfPitchAndFamily = 0;
