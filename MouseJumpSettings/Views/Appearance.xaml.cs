@@ -38,7 +38,7 @@ namespace MouseJumpSettings.Views
                 0
             );
             font = metrics.lfMessageFont.lfFaceName;
-            fontSize = (-metrics.lfMessageFont.lfHeight).ToString();
+            fontSize = (-0.75 * metrics.lfMessageFont.lfHeight).ToString();
 
             LOGFONTW lf = new LOGFONTW();
             lf.lfCharSet = 1;
