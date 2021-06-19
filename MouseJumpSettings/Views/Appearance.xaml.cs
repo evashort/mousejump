@@ -1,11 +1,9 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 using System;
-using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Runtime.InteropServices;
+using System.Linq;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -17,81 +15,72 @@ namespace MouseJumpSettings.Views
     /// </summary>
     public sealed partial class Appearance : Page
     {
-        // https://docs.microsoft.com/en-us/windows/winui/api/microsoft.ui.xaml.controls.combobox?view=winui-3.0
-        ObservableCollection<ComboBoxItem> fonts = new ObservableCollection<ComboBoxItem>();
-        ObservableCollection<int> fontSizes = new ObservableCollection<int>
+        Settings settings;
+        ObservableCollection<FontInfo> fonts = new ObservableCollection<FontInfo>();
+        ObservableCollection<double> fontSizes = new ObservableCollection<double>
         {
             8, 9, 10, 11, 12, 14, 18, 24, 30, 36, 48, 60, 72, 96
         };
-        string font = "";
-        string fontSize = "";
 
         public Appearance()
         {
+            settings = (Application.Current as App).Settings;
             this.InitializeComponent();
-            NONCLIENTMETRICSW metrics = new NONCLIENTMETRICSW();
-            metrics.cbSize = (uint)Marshal.SizeOf(metrics);
-            Win32.SystemParametersInfoW(
-                0x29, // SPI_GETNONCLIENTMETRICS
-                (uint)Marshal.SizeOf(metrics),
-                ref metrics,
-                0
-            );
-            font = metrics.lfMessageFont.lfFaceName;
-            fontSize = (-0.75 * metrics.lfMessageFont.lfHeight).ToString();
-
-            LOGFONTW lf = new LOGFONTW();
-            lf.lfCharSet = 1;
-            lf.lfPitchAndFamily = 0;
-            lf.lfFaceName = "";
-            Dictionary<string, HashSet<int>> fontWeights = new Dictionary<string, HashSet<int>>();
-            EnumFontFamiliesExDelegate d = (ref LOGFONTW lplf, IntPtr lpntme, uint FontType, IntPtr lParam) =>
-            {
-            if (
-                // https://devblogs.microsoft.com/oldnewthing/20120719-00/?p=7093
-                !lplf.lfFaceName.StartsWith("@")
-                    && !lplf.lfFaceName.EndsWith(" Light")
-                    && !lplf.lfFaceName.EndsWith(" Light Condensed")
-                    && !lplf.lfFaceName.EndsWith(" Light SemiCondensed")
-                    && !lplf.lfFaceName.EndsWith(" Semilight")
-                    && !lplf.lfFaceName.EndsWith(" SemiLight")
-                    && !lplf.lfFaceName.EndsWith(" SemiLight Condensed")
-                    && !lplf.lfFaceName.EndsWith(" SemiLight SemiConde")
-                    && !lplf.lfFaceName.EndsWith(" Semibold")
-                    && !lplf.lfFaceName.EndsWith(" SemiBold")
-                    && !lplf.lfFaceName.EndsWith(" SemiBold Condensed")
-                    && !lplf.lfFaceName.EndsWith(" SemiBold SemiConden")
-                    && !lplf.lfFaceName.EndsWith(" Medium")
-                    && !lplf.lfFaceName.EndsWith(" Black")
-                    && !lplf.lfFaceName.EndsWith(" MDL2 Assets")
-                    && lplf.lfFaceName != "OpenSymbol"
-                )
+            List<FontInfo> fontList = new List<FontInfo>();
+            EnumFontFamiliesExDelegate callback =
+                (ref LOGFONTW logfont, IntPtr metric, uint fontType, IntPtr lParam) => {
+                if (
+                    // https://devblogs.microsoft.com/oldnewthing/20120719-00/?p=7093
+                    !logfont.lfFaceName.StartsWith("@")
+                        && !logfont.lfFaceName.EndsWith(" Light")
+                        && !logfont.lfFaceName.EndsWith(" Light Condensed")
+                        && !logfont.lfFaceName.EndsWith(" Light SemiCondensed")
+                        && !logfont.lfFaceName.EndsWith(" Semilight")
+                        && !logfont.lfFaceName.EndsWith(" SemiLight")
+                        && !logfont.lfFaceName.EndsWith(" SemiLight Condensed")
+                        && !logfont.lfFaceName.EndsWith(" SemiLight SemiConde")
+                        && !logfont.lfFaceName.EndsWith(" Semibold")
+                        && !logfont.lfFaceName.EndsWith(" SemiBold")
+                        && !logfont.lfFaceName.EndsWith(" SemiBold Condensed")
+                        && !logfont.lfFaceName.EndsWith(" SemiBold SemiConden")
+                        && !logfont.lfFaceName.EndsWith(" Medium")
+                        && !logfont.lfFaceName.EndsWith(" Black")
+                        && !logfont.lfFaceName.EndsWith(" MDL2 Assets")
+                        && logfont.lfFaceName != "OpenSymbol"
+                    )
                 {
-                    HashSet<int> weights;
-                    if (!fontWeights.TryGetValue(lplf.lfFaceName, out weights))
-                    {
-                        weights = new HashSet<int>();
-                        fontWeights[lplf.lfFaceName] = weights;
-                    }
-
-                    weights.Add(lplf.lfWeight);
+                    fontList.Add(
+                        new FontInfo
+                        {
+                            Name = logfont.lfFaceName,
+                            Weight = new Windows.UI.Text.FontWeight((ushort)logfont.lfWeight)
+                        }
+                    );
                 }
 
                 return 1;
             };
 
-            IntPtr hdc = Win32.GetDC(IntPtr.Zero);
-            var r = Win32.EnumFontFamiliesExW(hdc, ref lf, d, IntPtr.Zero, 0);
-            Win32.ReleaseDC(IntPtr.Zero, hdc);
-            foreach (KeyValuePair<string, HashSet<int>> pair in fontWeights.OrderBy(pair => pair.Key))
+            IntPtr device = Win32.GetDC(IntPtr.Zero);
+            LOGFONTW logfont = new LOGFONTW()
             {
-                fonts.Add(
-                    new ComboBoxItem {
-                        Content = pair.Key,
-                        FontFamily = new FontFamily(pair.Key),
-                        FontWeight = new Windows.UI.Text.FontWeight((ushort)pair.Value.Min())
-                    }
-                );
+                lfCharSet = 1,
+                lfPitchAndFamily = 0,
+                lfFaceName = "",
+            };
+            Win32.EnumFontFamiliesExW(device, ref logfont, callback, IntPtr.Zero, 0);
+            Win32.ReleaseDC(IntPtr.Zero, device);
+            // https://docs.microsoft.com/en-us/dotnet/csharp/linq/group-query-results
+            foreach (
+                FontInfo font in (
+                    from font in fontList
+                    orderby font.Name, font.Weight.Weight
+                    group font by font.Name into nameGroup
+                    select nameGroup.First() // minimum weight
+                )
+            )
+            {
+                fonts.Add(font);
             }
         }
 
@@ -103,6 +92,28 @@ namespace MouseJumpSettings.Views
         private void ColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
         {
             (Application.Current as App).Settings.LabelColor = args.NewColor;
+        }
+
+        private void Font_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            object obj = e.AddedItems.First();
+            if (obj is FontInfo val)
+            {
+                settings.Font = val.Name;
+            }
+            else if (obj is string str)
+            {
+                settings.Font = str;
+            }
+        }
+
+        private void FontSize_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            object obj = e.AddedItems.First();
+            if (obj is double val || (obj is string str && double.TryParse(str, out val)))
+            {
+                settings.FontSize = val;
+            }
         }
     }
 }

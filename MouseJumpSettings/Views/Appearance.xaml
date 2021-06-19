@@ -8,6 +8,11 @@
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
+    <Page.Resources>
+        <DataTemplate x:Key="fontTemplate">
+            <TextBlock Text="{Binding Path=Name}" FontFamily="{Binding Path=Name}" FontWeight="{Binding Path=Weight}" />
+        </DataTemplate>
+    </Page.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -17,8 +22,8 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <ComboBox Grid.Row="0" Grid.Column="0" Header="Font" ItemsSource="{x:Bind fonts}" IsEditable="True" Width="200" Text="{x:Bind font}"/>
-        <ComboBox Grid.Row="0" Grid.Column="1" Header="Size" ItemsSource="{x:Bind fontSizes}" IsEditable="True" Width="100" Text="{x:Bind fontSize}"/>
+        <ComboBox Grid.Row="0" Grid.Column="0" Header="Font" ItemsSource="{x:Bind fonts}" ItemTemplate="{StaticResource fontTemplate}" SelectedValue="{x:Bind settings.Font}" SelectedValuePath="Name" Width="200" SelectionChanged="Font_SelectionChanged"/>
+        <ComboBox Grid.Row="0" Grid.Column="1" Header="Size" ItemsSource="{x:Bind fontSizes}" SelectedItem="{x:Bind settings.FontSize}" IsEditable="True" Width="100" SelectionChanged="FontSize_SelectionChanged"/>
         <ColorPicker Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Loaded="ColorPicker_Loaded" ColorChanged="ColorPicker_ColorChanged"/>
     </Grid>
 </Page>

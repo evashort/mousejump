@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,11 +34,75 @@ namespace MouseJumpSettings
             }
         }
 
+        private double defaultFontSize = 0;
+        public double FontSize
+        {
+            get
+            {
+                try
+                {
+                    return json.GetNamedNumber("fontSize");
+                }
+                catch (COMException)
+                {
+                    return defaultFontSize;
+                }
+            }
+            set
+            {
+                if (value != FontSize)
+                {
+                    lock (this)
+                    {
+                        json.SetNamedValue("fontSize", JsonValue.CreateNumberValue(value));
+                        Save();
+                    }
+                }
+            }
+        }
+
+        private string defaultFont = "";
+        public string Font
+        {
+            get
+            {
+                try
+                {
+                    return json.GetNamedString("font");
+                }
+                catch (COMException)
+                {
+                    return defaultFont;
+                }
+            }
+            set
+            {
+                if (value != Font)
+                {
+                    lock (this)
+                    {
+                        json.SetNamedValue("font", JsonValue.CreateStringValue(value));
+                        Save();
+                    }
+                }
+            }
+        }
+
         public Settings(string path)
         {
             this.path = path;
             saveTask = Task.CompletedTask;
             savePending = false;
+            NONCLIENTMETRICSW metrics = new NONCLIENTMETRICSW();
+            metrics.cbSize = (uint)Marshal.SizeOf(metrics);
+            Win32.SystemParametersInfoW(
+                0x29, // SPI_GETNONCLIENTMETRICS
+                (uint)Marshal.SizeOf(metrics),
+                ref metrics,
+                0
+            );
+            defaultFontSize = -0.75 * metrics.lfMessageFont.lfHeight;
+            defaultFont = metrics.lfMessageFont.lfFaceName;
         }
 
         public void Load()
