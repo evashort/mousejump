@@ -5,6 +5,173 @@
 #include <windows.h>
 #include <stdio.h>
 
+#define CODEPOINT_EOF -1
+#define CODEPOINT_MISSING_BYTE_2 -2
+#define CODEPOINT_MISSING_BYTE_3 -3
+#define CODEPOINT_MISSING_BYTE_4 -4
+#define CODEPOINT_NON_UTF_8_BYTE -5
+#define CODEPOINT_CONTINUATION -6
+int getCodepoint(LPCBYTE start, LPCBYTE stop) {
+    // https://en.wikipedia.org/wiki/UTF-8#Encoding
+    if (start >= stop) { return CODEPOINT_EOF; }
+    int codepoint = *start;
+    if (codepoint < 0x80) { return codepoint; }
+    if (codepoint < 0xc0) { return CODEPOINT_CONTINUATION; }
+    if (codepoint >= 0xf8) { return CODEPOINT_NON_UTF_8_BYTE; }
+    // count is number of continuation bytes
+    // countStops[i] is one plus the highest initial byte that indicates there
+    // are i continuation bytes
+    static const int countStops[4] = { 0xc0, 0xe0, 0xf0, 0xf8 };
+    start++;
+    int count = 1;
+    while (countStops[count] <= codepoint) { count++; }
+    codepoint -= countStops[count - 1];
+    if (stop < start + count) {
+        return CODEPOINT_MISSING_BYTE_2 - (stop - start);
+    }
+
+    for (stop = start + count; start < stop; start++) {
+        if (*start < 0x80 || *start >= 0xc0) {
+            return CODEPOINT_MISSING_BYTE_2 - (start + count - stop);
+        }
+
+        codepoint <<= 6;
+        codepoint += *start - 0x80;
+    }
+
+    if (
+        (codepoint >= 0xd800 && codepoint < 0xe000) || codepoint >= 0x110000
+    ) { return -codepoint; }
+    return codepoint;
+}
+
+int getCodepointUTF8Length(int codepoint) {
+    return (codepoint >= 0) + (codepoint >= 0x80) + (codepoint >= 0x800)
+        + (codepoint >= 0x10000);
+}
+
+#define CODEPOINT_BAD_ESCAPE -7
+#define CODEPOINT_BAD_U_ESCAPE -8
+#define CODEPOINT_SURROGATE_U_ESCAPE -9
+int getCodepointEscaped(LPCBYTE *json, LPCBYTE stop) {
+    if (*json + 2 > stop || **json != '\\') {
+        int codepoint = getCodepoint(*json, stop);
+        *json += getCodepointUTF8Length(codepoint);
+        return codepoint;
+    }
+
+    (*json)++;
+    if (**json != 'u') {
+        LPCBYTE escapePair = "\"\"\\\\//b\bf\fn\nr\rt\t";
+        for (; *escapePair != '\0'; escapePair += 2) {
+            if (**json == *escapePair) {
+                (*json)++;
+                return (int)escapePair[1];
+            }
+        }
+
+        return CODEPOINT_BAD_ESCAPE;
+    }
+
+    (*json)++;
+    if (stop < *json + 4) { return CODEPOINT_BAD_U_ESCAPE; }
+    int codepoint = 0;
+    for (LPCBYTE i = *json; i < *json + 4; i++) {
+        codepoint <<= 4;
+        if (*i >= '0' && *i <= '9') { codepoint += *i - '0'; }
+        else if (*i >= 'a' && *i <= 'f') { codepoint += 10 + *i - 'a'; }
+        else if (*i >= 'A' && *i <= 'F') { codepoint += 10 + *i - 'A'; }
+        else { return CODEPOINT_BAD_U_ESCAPE; }
+    }
+
+    if (codepoint >= 0xd800 && codepoint < 0xe000) {
+        return CODEPOINT_SURROGATE_U_ESCAPE;
+    }
+
+    *json += 4;
+    return codepoint;
+}
+
+int getCodepointUTF16Length(int codepoint) {
+    // number of wide chars
+    return (codepoint >= 0) + (codepoint >= 0x10000);
+}
+
+LPWSTR writeUTF16Codepoint(LPWSTR start, LPCWSTR stop, int codepoint) {
+    // https://en.wikipedia.org/wiki/UTF-16
+    if (
+        codepoint < 0 || codepoint >= 0x110000 || (
+            codepoint >= 0xd800 && codepoint < 0xe000
+        )
+    ) { return start; }
+    if (start >= stop) { return NULL; }
+    if (codepoint < 0x10000) { *start = codepoint; return start + 1; }
+    if (start + 2 > stop) { return NULL; }
+    *start = 0xD800 + (codepoint >> 10);
+    start[1] = 0xDC00 + (codepoint & 0x3ff);
+    return start + 2;
+}
+
+typedef enum {
+    VALUE_CONTEXT = 0, FIRST_KEY_CONTEXT, KEY_CONTEXT, CONTEXT_COUNT,
+} StringContext;
+LPWSTR getCodepointError(int codepoint, StringContext context) {
+    if (codepoint == CODEPOINT_EOF) {
+        LPWSTR eofErrors[CONTEXT_COUNT] = {
+            L"Unexpected %2$s in %1$s",
+            L"Unexpected %2$s in first key of %1$s object",
+            L"Unexpected %2$s in key after %1$s",
+        };
+        return eofErrors[context];
+    } else if (
+        codepoint == CODEPOINT_MISSING_BYTE_2
+            || codepoint == CODEPOINT_MISSING_BYTE_3
+            || codepoint == CODEPOINT_MISSING_BYTE_4
+            || codepoint == CODEPOINT_NON_UTF_8_BYTE
+            || codepoint == CODEPOINT_CONTINUATION
+            || -codepoint >= 0x110000
+            || (-codepoint >= 0xd800 && -codepoint < 0xe000)
+    ) {
+        LPWSTR invalidErrors[CONTEXT_COUNT] = {
+            L"%2$s in %1$s",
+            L"%2$s in first key of %1$s object",
+            L"%2$s in key after %1$s",
+        };
+        return invalidErrors[context];
+    } else if (codepoint >= 0 && codepoint < 0x20) {
+        LPWSTR unescapedErrors[CONTEXT_COUNT] = {
+            L"Unescaped %2$s in %1$s",
+            L"Unescaped %2$s in first key of %1$s object",
+            L"Unescaped %2$s in key after %1$s",
+        };
+        return unescapedErrors[context];
+    } else if (codepoint == CODEPOINT_BAD_ESCAPE) {
+        LPWSTR escapeErrors[CONTEXT_COUNT] = {
+            L"Invalid escape sequence \\%2$.1s in %1$s",
+            L"Invalid escape sequence \\%2$.1s in first key of %1$s"
+                L" object",
+            L"Invalid escape sequence \\%2$.1s in key after %1$s",
+        };
+        return escapeErrors[context];
+    } else if (codepoint == CODEPOINT_BAD_U_ESCAPE) {
+        LPWSTR escapeErrors[CONTEXT_COUNT] = {
+            L"Invalid escape sequence \\u%2$.4s in %1$s",
+            L"Invalid escape sequence \\u%2$.4s in first key"
+                L" of %1$s object",
+            L"Invalid escape sequence \\u%2$.4s in key after"
+                L" %1$s",
+        };
+        return escapeErrors[context];
+    } else if (codepoint == CODEPOINT_SURROGATE_U_ESCAPE) {
+        LPWSTR invalidErrors[CONTEXT_COUNT] = {
+            L"Invalid code point U+%2$.4s in %1$s",
+            L"Invalid code point U+%2$.4s in first key of %1$s object",
+            L"Invalid code point U+%2$.4s in key after %1$s",
+        };
+        return invalidErrors[context];
+    } else { return NULL; }
+}
+
 BOOL chomp(BYTE bite, LPCBYTE *json, LPCBYTE stop) {
     if (*json < stop && **json == bite) { *json += 1; return TRUE; }
     return FALSE;
@@ -155,57 +322,6 @@ JSON_TYPE parseType(LPCBYTE *json, LPCBYTE stop) {
     return result;
 }
 
-typedef enum {
-    VALUE_CONTEXT = 0, FIRST_KEY_CONTEXT, KEY_CONTEXT, CONTEXT_COUNT,
-} StringContext;
-int getCharSize(LPCBYTE json, LPCBYTE stop, LPCWSTR **errors) {
-    if (json >= stop) {
-        LPCWSTR eofErrors[CONTEXT_COUNT] = {
-            L"Unexpected %2$s in %1$s",
-            L"Unexpected %2$s in first key of %1$s object",
-            L"Unexpected %2$s in key after %1$s",
-        };
-        *errors = eofErrors; // Unexpected end of file
-    } else if (*json < 0x20) {
-        LPCWSTR unescapedErrors[CONTEXT_COUNT] = {
-            L"Unescaped %2$s in %1$s",
-            L"Unescaped %2$s in first key of %1$s object",
-            L"Unescaped %2$s in key after %1$s",
-        };
-        *errors = unescapedErrors; // Unescaped U+1F
-    } else if (*json < 0x80) {
-        return 1;
-    } else {
-        // https://en.wikipedia.org/wiki/UTF-8#Encoding
-        LPWSTR invalidErrors[CONTEXT_COUNT] = {
-            L"%2$s in %1$s",
-            L"%2$s in first key of %1$s object",
-            L"%2$s in key after %1$s",
-        };
-        if (*json < 0xc0) {
-            // Invalid UTF-8 byte 0x95
-        } else if (json + 1 >= stop || (json[1] & 0xc0) != 0x80) {
-            // Incomplete UTF-8 character 0xd3
-        } else if (*json < 0xe0) {
-            return 2;
-        } else if (json + 2 >= stop || (json[2] & 0xc0) != 0x80) {
-            // Incomplete UTF-8 character 0xe481
-        } else if (*json < 0xf0) {
-            return 3;
-        } else if (json + 3 >= stop || (json[3] & 0xc0) != 0x80) {
-            // Incomplete UTF-8 character 0xf48182
-        } else if (*json < 0xf8) {
-            return 4;
-        } else {
-            // Invalid UTF-8 byte 0xfb
-        }
-
-        *errors = invalidErrors;
-    }
-
-    return 0;
-}
-
 LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
     if (!chomp('"', json, stop)) {
         if (*json >= stop) {
@@ -225,51 +341,13 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
         }
     }
 
-    while (TRUE) {
+    int codepoint = 0;
+    while (codepoint >= 0) {
         if (chomp('"', json, stop)) { return NULL; }
-        if (chomp('\\', json, stop)) {
-            if (chomp('u', json, stop)) {
-                LPCBYTE temp = *json;
-                for (int i = 0; i < 4; i++) {
-                    if (
-                        !chompRange('0', '9', &temp, stop)
-                            && !chompRange('a', 'f', &temp, stop)
-                            && !chompRange('A', 'F', &temp, stop)
-                    ) {
-                        LPCWSTR escapeErrors[CONTEXT_COUNT] = {
-                            L"Invalid escape sequence \\u%2$.4s in %1$s",
-                            L"Invalid escape sequence \\u%2$.4s in first key"
-                                L" of %1$s object",
-                            L"Invalid escape sequence \\u%2$.4s in key after"
-                                L" %1$s",
-                        };
-                        LPCWSTR *errors = escapeErrors;
-                        if (getCharSize(temp, stop, &errors) <= 0) {
-                            *json = temp;
-                        }
-
-                        return errors[context];
-                    }
-                }
-
-                *json = temp;
-            } else if (!chompAny("\"\\/bfnrt", json, stop)) {
-                LPCWSTR escapeErrors[CONTEXT_COUNT] = {
-                    L"Invalid escape sequence \\%2$.1s in %1$s",
-                    L"Invalid escape sequence \\%2$.1s in first key of %1$s"
-                        L" object",
-                    L"Invalid escape sequence \\%2$.1s in key after %1$s",
-                };
-                LPCWSTR *errors = escapeErrors;
-                getCharSize(*json, stop, &errors);
-                return errors[context];
-            }
-        } else {
-            LPCWSTR *errors = NULL;
-            *json += getCharSize(*json, stop, &errors);
-            if (errors != NULL) { return errors[context]; }
-        }
+        codepoint = getCodepointEscaped(json, stop);
     }
+
+    return getCodepointError(codepoint, context);
 }
 
 int compareHookWithStack(LPCBYTE hookKey, LPCBYTE stackKey) {
@@ -529,14 +607,20 @@ LPCWSTR parseJSONHelp(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     return NULL;
 }
 
+BOOL isTokenPart(int codepoint) {
+    return (codepoint >= (int)'0' && codepoint <= (int)'9')
+        || (codepoint >= (int)'a' && codepoint <= (int)'z')
+        || (codepoint >= (int)'A' && codepoint <= (int)'Z')
+        || codepoint == (int)'_' || codepoint == (int)'.'
+        || codepoint == (int)'+' || codepoint == (int)'-';
+}
+
 #define MAX_TOKEN_LENGTH 80
 WCHAR tokenOut[MAX_TOKEN_LENGTH];
 LPCWSTR getToken(LPCBYTE json, LPCBYTE stop, BOOL uppercase) {
-    if (json >= stop) {
-        wcsncpy_s(tokenOut, MAX_TOKEN_LENGTH, L"end of file", _TRUNCATE);
-        if (uppercase) { *tokenOut = L'E'; }
-        return tokenOut;
-    } else if (*json < 0x20) {
+    int codepoint = getCodepoint(json, stop);
+    LPCWSTR iChar = uppercase ? L"I" : L"i";
+    if (codepoint >= 0 && codepoint < 0x20) {
         LPCWSTR names[0x20] = {
             L"null character", L"U+0001", L"U+0002", L"U+0003", L"U+0004",
             L"U+0005", L"U+0006", L"U+0007", L"U+0008", L"tab character",
@@ -545,74 +629,88 @@ LPCWSTR getToken(LPCBYTE json, LPCBYTE stop, BOOL uppercase) {
             L"U+0015", L"U+0016", L"U+0017", L"U+0018", L"U+0019", L"U+001A",
             L"U+001B", L"U+001C", L"U+001D", L"U+001E", L"U+001F",
         };
-        wcsncpy_s(tokenOut, MAX_TOKEN_LENGTH, names[*json], _TRUNCATE);
+        wcsncpy_s(tokenOut, MAX_TOKEN_LENGTH, names[codepoint], _TRUNCATE);
         if (uppercase) {
-            *tokenOut = L"NUUUUUUUUTNUUCUUUUUUUUUUUUUUUUUU"[*json];
+            *tokenOut = L"NUUUUUUUUTNUUCUUUUUUUUUUUUUUUUUU"[codepoint];
         }
 
         return tokenOut;
-    } else if (*json >= 0x80) {
-        // https://en.wikipedia.org/wiki/UTF-8#Encoding
-        int byteCount = 0;
-        if (*json < 0xc0) {
-            _snwprintf_s(
-                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
-                L"invalid UTF-8 byte 0x%02x", *json, json[1]
-            );
-        } else if (json + 1 >= stop || (json[1] & 0xc0) != 0x80) {
-            _snwprintf_s(
-                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
-                L"incomplete UTF-8 character 0x%02x", *json
-            );
-        } else if (*json < 0xe0) {
-            byteCount = 2;
-        } else if (json + 2 >= stop || (json[2] & 0xc0) != 0x80) {
-            _snwprintf_s(
-                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
-                L"incomplete UTF-8 character 0x%02x%02x", *json, json[1]
-            );
-        } else if (*json < 0xf0) {
-            byteCount = 3;
-        } else if (json + 3 >= stop || (json[3] & 0xc0) != 0x80) {
-            _snwprintf_s(
-                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
-                L"incomplete UTF-8 character 0x%02x%02x%02x", *json, json[1],
-                json[2]
-            );
-        } else if (*json < 0xf8) {
-            byteCount = 4;
-        } else {
-            _snwprintf_s(
-                tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
-                L"invalid UTF-8 byte 0x%02x", *json, json[1]
-            );
-        }
-
-        if (byteCount <= 0) {
-            if (uppercase) { *tokenOut = L'I'; }
-            return tokenOut;
-        }
+    } else if (codepoint == CODEPOINT_EOF) {
+        wcsncpy_s(tokenOut, MAX_TOKEN_LENGTH, L"end of file", _TRUNCATE);
+        if (uppercase) { *tokenOut = L'E'; }
+        return tokenOut;
+    } else if (codepoint == CODEPOINT_MISSING_BYTE_2) {
+        _snwprintf_s(
+            tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+            L"%sncomplete UTF-8 character 0x%02x", iChar, *json
+        );
+        return tokenOut;
+    } else if (codepoint == CODEPOINT_MISSING_BYTE_3) {
+        _snwprintf_s(
+            tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+            L"%sncomplete UTF-8 character 0x%02x%02x", iChar, *json, json[1]
+        );
+        return tokenOut;
+    } else if (codepoint == CODEPOINT_MISSING_BYTE_4) {
+        _snwprintf_s(
+            tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+            L"%sncomplete UTF-8 character 0x%02x%02x%02x",
+            iChar, *json, json[1], json[2]
+        );
+        return tokenOut;
+    } else if (codepoint == CODEPOINT_NON_UTF_8_BYTE) {
+        _snwprintf_s(
+            tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+            L"%snvalid UTF-8 byte 0x%02x", iChar, *json, json[1]
+        );
+        return tokenOut;
+    } else if (codepoint == CODEPOINT_CONTINUATION) {
+        _snwprintf_s(
+            tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+            L"unexpected continuation byte 0x%02x", *json, json[1]
+        );
+        if (uppercase) { *tokenOut = L'U'; }
+        return tokenOut;
+    } else if (
+        -codepoint >= 0x110000
+            || (-codepoint >= 0xd800 && -codepoint < 0xe000)
+    ) {
+        _snwprintf_s(
+            tokenOut, MAX_TOKEN_LENGTH, _TRUNCATE,
+            L"%snvalid code point U+%X", iChar, -codepoint
+        );
+        return tokenOut;
     }
 
+    LPWSTR writer = tokenOut;
+    LPCWSTR writerStop = tokenOut + MAX_TOKEN_LENGTH - 1;
+    LPWSTR oldWriter = writer;
     LPCBYTE temp = json;
-    while (
-        chompRange('0', '9', &temp, stop)
-            || chompRange('a', 'z', &temp, stop)
-            || chompRange('A', 'Z', &temp, stop)
-            || chompAny("_.+-", &temp, stop)
-    );
-    int tokenLength = min(max(temp - json, 1), MAX_TOKEN_LENGTH);
-    MultiByteToWideChar(
-        CP_UTF8, MB_PRECOMPOSED, (LPCSTR)json, stop - json,
-        tokenOut, tokenLength
-    );
-    if (tokenLength >= MAX_TOKEN_LENGTH) {
-        tokenLength--;
-        tokenOut[tokenLength - 1] = L'\u2026'; // horizontal ellipsis
-    }
+    int ellipsisLength = getCodepointUTF16Length(0x2026);
+    do {
+        LPWSTR newWriter = writeUTF16Codepoint(writer, writerStop, codepoint);
+        if (newWriter == NULL) {
+            // write horizontal ellipsis
+            writer = writeUTF16Codepoint(oldWriter, writerStop, 0x2026);
+            break;
+        }
 
-    tokenOut[tokenLength] = L'\0';
+        if (writerStop - writer >= ellipsisLength) { oldWriter = writer; }
+        writer = newWriter;
+        if (isTokenPart(codepoint)) {
+            temp += getCodepointUTF8Length(codepoint);
+            codepoint = getCodepoint(temp, stop);
+        }
+    } while (isTokenPart(codepoint));
+    *writer = L'\0';
     return tokenOut;
+}
+
+BOOL isKeyPart(int codepoint) {
+    return (codepoint >= (int)'0' && codepoint <= (int)'9')
+        || (codepoint >= (int)'a' && codepoint <= (int)'z')
+        || (codepoint >= (int)'A' && codepoint <= (int)'Z')
+        || codepoint == (int)'_';
 }
 
 #define MAX_STACK_LENGTH 150
@@ -621,49 +719,97 @@ LPCWSTR getStack(const Stack *stack, LPCBYTE stop, BOOL uppercase) {
     if (stack->count <= 0) { return uppercase ? L"Top-level" : L"top-level"; }
     LPWSTR stackStop = stackOut + MAX_STACK_LENGTH - 1;
     *stackStop = L'\0';
+    int ellipsisLength = getCodepointUTF16Length(0x2026);
+    int quoteLength = getCodepointUTF16Length((int)'"');
+    int quoteLengthUTF8 = getCodepointUTF8Length((int)'"');
+    int dotLength = getCodepointUTF16Length((int)'.');
     for (int i = stack->count - 1; i >= 0; i--) {
         LPCBYTE key = stack->frames[i].key;
         int index = stack->frames[i].index;
+        LPWSTR stackStart = i > 0 ? stackOut + ellipsisLength : stackOut;
+        int stackCapacity = stackStop - stackStart;
         if (key) {
-            LPCBYTE keyStop = key + 1;
-            for (; keyStop < stop; keyStop++) {
-                if (*keyStop == '"' && keyStop[-1] != '\\') {
-                    keyStop++; break;
+            LPCBYTE keyStop = key + quoteLengthUTF8;
+            LPCBYTE truncatedKeyStop = keyStop;
+            int codepoint = getCodepoint(keyStop, stop);
+            int truncatedStackLength = ellipsisLength;
+            int stackLength = i > 0 ? dotLength : 0;
+            int truncatedSkipQuotes = TRUE;
+            BOOL skipQuotes = codepoint < (int)'0' || codepoint > (int)'9';
+            if (!skipQuotes) { stackLength += 2 * quoteLength; }
+            BOOL truncated = FALSE;
+            if (codepoint == (int)'"') {
+                skipQuotes = FALSE;
+                stackLength += 2 * quoteLength;
+                if (stackLength > stackCapacity) {
+                    keyStop = truncatedKeyStop;
+                    stackLength = truncatedStackLength;
+                    skipQuotes = truncatedSkipQuotes;
+                    truncated = TRUE;
                 }
             }
 
-            LPCBYTE temp = key + 1;
-            if (!chompRange('0', '9', &temp, keyStop - 1)) {
-                while (
-                    chompRange('0', '9', &temp, keyStop - 1)
-                        || chompRange('a', 'z', &temp, keyStop - 1)
-                        || chompRange('A', 'Z', &temp, keyStop - 1)
-                        || chomp('_', &temp, keyStop - 1)
+            BOOL escaped = FALSE;
+            while (codepoint != (int)'"' || escaped) {
+                keyStop += getCodepointUTF8Length(codepoint);
+                stackLength += getCodepointUTF16Length(codepoint);
+                if (stackLength > stackCapacity || codepoint < 0) {
+                    keyStop = truncatedKeyStop;
+                    stackLength = truncatedStackLength;
+                    skipQuotes = truncatedSkipQuotes;
+                    truncated = TRUE;
+                    break;
+                }
+
+                escaped = codepoint == (int)'\\';
+                if (skipQuotes && !isKeyPart(codepoint)) {
+                    skipQuotes = FALSE;
+                    stackLength += 2 * quoteLength;
+                }
+
+                if (stackLength + ellipsisLength <= stackCapacity) {
+                    truncatedKeyStop = keyStop;
+                    truncatedStackLength = stackLength + ellipsisLength;
+                    truncatedSkipQuotes = skipQuotes;
+                }
+
+                codepoint = getCodepoint(keyStop, stop);
+            }
+
+            if (skipQuotes) {
+                key += quoteLengthUTF8;
+            }
+
+            if (!skipQuotes) {
+                writeUTF16Codepoint(
+                    stackStop - quoteLength, stackStop, (int)'"'
                 );
-                if (temp > key + 1 && temp >= keyStop - 1) {
-                    key++; keyStop--;
-                }
+                stackStop -= quoteLength;
+                stackLength -= quoteLength;
             }
 
-            int keyLength = MultiByteToWideChar(
-                CP_UTF8, MB_PRECOMPOSED, (LPCSTR)key, keyStop - key, NULL, 0
-            );
-            LPWSTR keyStart = stackStop - keyLength;
-            LPWSTR stackStart = keyStart - 2 * (i > 0);
-            if (stackStart < stackOut) {
-                stackStop--;
-                *stackStop = L'\u2026'; // horizontal ellipsis
-                if (i < stack->count - 1) { return stackStop; }
-                keyStart += stackOut - stackStart;
-                stackStart = stackOut;
+            if (truncated) {
+                writeUTF16Codepoint(
+                    stackStop - ellipsisLength, stackStop, 0x2026
+                );
+                stackStop -= ellipsisLength;
+                stackLength -= ellipsisLength;
             }
 
-            if (i > 0) { stackStart[1] = L'.'; }
-            MultiByteToWideChar(
-                CP_UTF8, MB_PRECOMPOSED, (LPCSTR)key, keyStop - key,
-                keyStart, stackStop - keyStart
-            );
-            stackStop = stackStart + (i > 0);
+            stackStart = stackStop - stackLength;
+            LPWSTR writer = stackStart;
+            if (i > 0 && stackLength > 0) {
+                writer = writeUTF16Codepoint(writer, stackStop, (int)'.');
+            }
+
+            while (key < keyStop) {
+                codepoint = getCodepoint(key, keyStop);
+                writer = writeUTF16Codepoint(writer, stackStop, codepoint);
+                key += getCodepointUTF8Length(codepoint);
+            }
+
+            stackStop = stackStart;
+            if (stackLength == 0) { break; }
         } else {
             int digitCount = index <= 0;
             for (int test = abs(index); test > 0; test /= 10) {
@@ -687,7 +833,7 @@ LPCWSTR getStack(const Stack *stack, LPCBYTE stop, BOOL uppercase) {
         }
     }
 
-    return stackStop + (*stackStop == L'.');
+    return stackStop;
 }
 
 #define MAX_FORMAT_LENGTH 200
