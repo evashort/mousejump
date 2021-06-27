@@ -334,15 +334,15 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
         } else {
             LPCWSTR errors[CONTEXT_COUNT] = {
                 L"%1$s string must start with \", not %2$s",
-                L"%1$s object missing \" before first key %2$s",
-                L"After %1$s, missing \" before next key %2$s",
+                L"First key of %1$s object must start with \", not %2$s",
+                L"Key after %1$s must start with \", not %2$s",
             };
             return errors[context];
         }
     }
 
-    int codepoint = 0;
-    while (codepoint >= 0) {
+    int codepoint = 0x20;
+    while (codepoint >= 0x20) {
         if (chomp('"', json, stop)) { return NULL; }
         codepoint = getCodepointEscaped(json, stop);
     }
@@ -444,7 +444,7 @@ LPCWSTR parseValue(LPCBYTE *json, LPCBYTE stop, const ParserState *state);
 LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     if (!chomp('[', json, stop)) {
         if (*json >= stop) { return L"Missing %1$s array before %2$s"; }
-        return L"%1$s array must start with [, not %2$s";
+        return L"%1$s array must start with opening brace, not %2$s";
     }
 
     while (chompAny(WHITESPACE, json, stop));
@@ -464,7 +464,7 @@ LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
         if (*json >= stop) {
             return L"Unexpected %2$s after %1$s";
         } else if (!chomp(',', json, stop)) {
-            return L"Missing comma or ] between %1$s and %2$s";
+            return L"Expected comma or closing bracket after %1$s, not %2$s";
         }
 
         while (chompAny(WHITESPACE, json, stop));
@@ -480,7 +480,7 @@ LPCWSTR parseArray(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
 LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     if (!chomp('{', json, stop)) {
         if (*json >= stop) { return L"Missing %1$s object before %2$s"; }
-        return L"%1$s object must start with {, not %2$s";
+        return L"%1$s object must start with opening brace, not %2$s";
     }
 
     while (chompAny(WHITESPACE, json, stop));
@@ -500,7 +500,7 @@ LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
 
         while (chompAny(WHITESPACE, json, stop));
         if (!chomp(':', json, stop)) {
-            return L"Missing colon between %1$s key and %2$s";
+            return L"Expected colon after %1$s key, not %2$s";
         }
 
         error = parseValue(json, stop, &newState);
@@ -511,7 +511,8 @@ LPCWSTR parseObject(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
         if (*json >= stop) {
             return L"Unexpected %2$s after %1$s";
         } else if (!chomp(',', json, stop)) {
-            return L"Missing comma or } between %1$s value and %2$s";
+            return L"Expected comma or closing brace after %1$s value, "
+                L"not %2$s";
         }
 
         while (chompAny(WHITESPACE, json, stop));
@@ -601,7 +602,7 @@ LPCWSTR parseJSONHelp(LPCBYTE *json, LPCBYTE stop, const ParserState *state) {
     if (error) { return error; }
     while (chompAny(WHITESPACE, json, stop));
     if (*json < stop) {
-        return L"Expected end of file after %1$s object, not %2$s";
+        return L"Expected end of file after %1$s value, not %2$s";
     }
 
     return NULL;
