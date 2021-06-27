@@ -394,7 +394,7 @@ HFONT getLabelFont(
         dpi
     );
     if (heightPt > 0) {
-        metrics.lfMessageFont.lfHeight = max(1, ptToIntPx(heightPt, dpi));
+        metrics.lfMessageFont.lfHeight = -max(1, ptToIntPx(heightPt, dpi));
     }
 
     if (wcsncmp(family, L"", LF_FACESIZE)) {
