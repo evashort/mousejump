@@ -982,4 +982,26 @@ LPCWSTR parseDouble(
     return NULL;
 }
 
+LPCWSTR parseWideString(
+    LPCBYTE *json, LPCBYTE stop, JSON_TYPE jsonType, int index, void *param,
+    void *dest, BOOL errorVisible
+) {
+    LPCWSTR error = checkType(jsonType, JSON_STRING, errorVisible);
+    if (error != NULL) { return error; }
+    LPCWSTR writeStop = (LPCWSTR)param;
+    LPWSTR writer = (LPWSTR)dest;
+    chomp('"', json, stop);
+    while (!chomp('"', json, stop)) {
+        int codepoint = getCodepointEscaped(json, stop);
+        LPWSTR newWriter = writeUTF16Codepoint(
+            writer, writeStop - 1, codepoint
+        );
+        if (newWriter == NULL) { break; }
+        writer = newWriter;
+    }
+
+    *writer = L'\0';
+    return NULL;
+}
+
 #endif

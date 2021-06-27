@@ -2174,6 +2174,7 @@ LPWSTR parseModel(
     double skewAngleRange[2] = { 1, 90 };
     double nonnegative[2] = { 0, INFINITY };
     double sizeRange[2] = { 1, INFINITY };
+    double fontSizeRange[2] = { 1, 96 };
     Hook hooks[] = {
         { .call = expectObject, .frameCount = 0 },
         {
@@ -2188,6 +2189,20 @@ LPWSTR parseModel(
             .param = deltaRange,
             .dest = &model->deltaPx,
             .frames = { "deltaPx" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseWideString,
+            .param = model->fontFamily + LF_FACESIZE,
+            .dest = model->fontFamily,
+            .frames = { "font" },
+            .frameCount = 1,
+        },
+        {
+            .call = parseDouble,
+            .param = fontSizeRange,
+            .dest = &model->fontHeightPt,
+            .frames = { "fontSize" },
             .frameCount = 1,
         },
         {
