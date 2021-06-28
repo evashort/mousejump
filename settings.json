@@ -1,6 +1,8 @@
 {
     "borderColor": "#000000",
     "deltaPx": 12,
+    "font": "Segoe UI",
+    "fontSize": 9,
     "grid": {
         "aspectRatio": 1.3333333333333333,
         "cellSize": 30,

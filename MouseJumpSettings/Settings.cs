@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -150,12 +152,64 @@ namespace MouseJumpSettings
             string text;
             lock (this)
             {
-                text = json.ToString();
+                text = PrettyPrint(json, 0);
                 savePending = false;
             }
 
-            File.WriteAllText(path, text);
+            File.WriteAllText(path, text + "\n");
             Thread.Sleep(100);
+        }
+
+        public static string PrettyPrint(IJsonValue val, int indentation)
+        {
+            int oldIndentation = indentation;
+            if (val.ValueType == JsonValueType.Object)
+            {
+                StringBuilder result = new StringBuilder("{");
+                indentation += 4;
+                string separator = "\n";
+                foreach (
+                    KeyValuePair<string, IJsonValue> item
+                        in val.GetObject().OrderBy(item=>item.Key)
+                )
+                {
+                    result.Append(separator);
+                    separator = ",\n";
+                    result.Append("".PadLeft(indentation));
+                    result.Append(JsonValue.CreateStringValue(item.Key).ToString());
+                    result.Append(": ");
+                    result.Append(PrettyPrint(item.Value, indentation));
+                }
+
+                result.Append("\n");
+                indentation = oldIndentation;
+                result.Append("".PadLeft(indentation));
+                result.Append("}");
+                return result.ToString();
+            }
+
+            if (val.ValueType == JsonValueType.Array)
+            {
+                StringBuilder result = new StringBuilder("[");
+
+                indentation = val.GetArray().Count < 10 ? indentation + 4 : 0;
+                string separator = "\n";
+                foreach (IJsonValue item in val.GetArray())
+                {
+                    result.Append(separator);
+                    separator = ",\n";
+                    result.Append("".PadLeft(indentation));
+                    result.Append(PrettyPrint(item, indentation));
+                }
+
+                result.Append("\n");
+                indentation = oldIndentation;
+                result.Append("".PadLeft(indentation));
+                result.Append("]");
+                return result.ToString();
+            }
+
+            return val.Stringify();
         }
 
         public void Dispose()
