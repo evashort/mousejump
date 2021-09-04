@@ -2733,6 +2733,27 @@ BOOL mouseUp(Model *model, ActionParam param) {
     return TRUE;
 }
 
+BOOL mouseToPoint(Model *model, ActionParam param) {
+    SetCursorPos(param.point.x, param.point.y);
+    return TRUE;
+}
+
+BOOL nudgeMouse(Model *model, ActionParam param) {
+    INPUT input = {
+        .type = INPUT_MOUSE,
+        .mi = {
+            .dx = 10,
+            .dy = 10,
+            .mouseData = 0,
+            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE,
+            .time = 0,
+            .dwExtraInfo = 0,
+        },
+    };
+    SendInput(1, &input, sizeof(input));
+    return TRUE;
+}
+
 BOOL mouseToDragEnd(Model *model, ActionParam param) {
     HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
     LPWSTR newText = textFromPath(model->dragCount, L"");
@@ -3446,60 +3467,58 @@ LRESULT CALLBACK DlgProc(
                 POINT cursor;
                 GetCursorPos(&cursor);
                 Model *model = getModel(dialog);
-                ShowWindow(model->window, SW_MINIMIZE);
                 if (model->dragCount > 0) {
                     POINT dragStart = model->drag[0];
-                    SetCursorPos(dragStart.x, dragStart.y);
-                    INPUT mouseDown = {
-                        .type = INPUT_MOUSE,
-                        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
-                    };
-                    SendInput(1, &mouseDown, sizeof(INPUT));
-                    Point vector = {
-                        cursor.x - dragStart.x,
-                        cursor.y - dragStart.y,
-                    };
-                    if (vector.x == 0 && vector.y == 0) { vector.x = 1; }
-                    vector = scale(vector, 8 / sqrt(dot(vector, vector)));
-                    SetCursorPos(
-                        dragStart.x + (int)round(vector.x),
-                        dragStart.y + (int)round(vector.y)
+                    addAction(
+                        model, mouseToPoint, actionParamPoint(dragStart)
                     );
-                    Sleep(1000);
+                    addAction(model, mouseDown, actionParamNone);
+                    addAction(model, sleep, actionParamMilliseconds(1));
+                    addAction(model, nudgeMouse, actionParamNone);
+                    addAction(model, sleep, actionParamMilliseconds(1));
+                    addAction(model, nudgeMouse, actionParamNone);
+                    addAction(model, sleep, actionParamMilliseconds(1));
+                    addAction(model, nudgeMouse, actionParamNone);
+                    addAction(model, sleep, actionParamMilliseconds(1));
+                    addAction(model, nudgeMouse, actionParamNone);
+                    // Point vector = {
+                    //     cursor.x - dragStart.x,
+                    //     cursor.y - dragStart.y,
+                    // };
+                    // if (vector.x == 0 && vector.y == 0) { vector.x = 1; }
+                    // vector = scale(vector, 8 / sqrt(dot(vector, vector)));
+                    // POINT nudgePosition = {
+                    //     .x = dragStart.x + (int)round(vector.x),
+                    //     .y = dragStart.y + (int)round(vector.y),
+                    // };
+                    // addAction(
+                    //     model, mouseToPoint, actionParamPoint(nudgePosition)
+                    // );
                     if (model->dragCount > 1) {
-                        SetCursorPos(model->drag[1].x, model->drag[1].y);
+                        addAction(
+                            model, mouseToPoint,
+                            actionParamPoint(model->drag[1])
+                        );
                         if (model->dragCount >= 3) {
                             cursor = model->drag[2];
                         }
 
-                        Sleep(1000);
+                        addAction(
+                            model, sleep, actionParamMilliseconds(1000)
+                        );
                     }
-                    SetCursorPos(cursor.x, cursor.y);
-                    Sleep(1000);
-                    INPUT mouseUp = {
-                        .type = INPUT_MOUSE,
-                        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
-                    };
-                    SendInput(1, &mouseUp, sizeof(INPUT));
-                    addAction(model, sleep, actionParamMilliseconds(1000));
-                    addAction(model, clearTextbox, actionParamNone);
-                    doActions(model);
+                    addAction(model, mouseToPoint, actionParamPoint(cursor));
+                    addAction(
+                        model, sleep, actionParamMilliseconds(100)
+                    );
                 } else {
-                    INPUT click[2] = {
-                        {
-                            .type = INPUT_MOUSE,
-                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
-                        },
-                        {
-                            .type = INPUT_MOUSE,
-                            .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
-                        },
-                    };
-                    SendInput(2, click, sizeof(INPUT));
+                    addAction(model, mouseDown, actionParamNone);
                 }
 
+                addAction(model, mouseUp, actionParamNone);
                 addAction(model, sleep, actionParamMilliseconds(100));
                 addAction(model, clearTextbox, actionParamNone);
+                ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
                 return TRUE;
             } else if (command == IDM_DRAG) {
