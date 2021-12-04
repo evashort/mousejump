@@ -3514,7 +3514,23 @@ LRESULT CALLBACK DlgProc(
                 POINT cursor;
                 GetCursorPos(&cursor);
                 Model *model = getModel(dialog);
+                addAction(model, sleep, actionParamMilliseconds(100));
                 if (model->dragCount > 0) {
+                    if (
+                        model->dragCount > 2 && (
+                            cursor.x != model->drag[2].x
+                                || cursor.y != model->drag[2].y
+                        )
+                    ) {
+                        // if user has moved the cursor since setting the end
+                        // of the 2-segment drag, assume they are trying to
+                        // re-activate the starting window or tab before
+                        // dragging
+                        addAction(model, mouseDown, actionParamNone);
+                        addAction(model, mouseUp, actionParamNone);
+                        addAction(model, sleep, actionParamMilliseconds(100));
+                    }
+
                     Screen screen = getScreen(&model->monitor);
                     POINT dragStart = model->drag[0];
                     addAction(
