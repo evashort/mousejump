@@ -1862,7 +1862,9 @@ DrawLabelsOut drawLabels(
     return result;
 }
 
-#define KEYFRAME_COUNT 10
+#define KEYFRAME_COUNT 11
+// index of keyframe that corresponds to t=1
+#define KEYFRAME_END 9
 Point keyframes[2][KEYFRAME_COUNT] = {
     {
         { -250.75351 / 450, 199.317716 / 450 },
@@ -1875,6 +1877,9 @@ Point keyframes[2][KEYFRAME_COUNT] = {
         { 12.100406 / 450, 138.984536 / 450 },
         { 48.0081441 / 450, 107.990486 / 450 },
         { 70.134467 / 450, 0 / 450 },
+        // cubic bezier with 3 equally spaced segments will be traversed at a
+        // constant speed
+        { 1.0 / 3, 0 },
     },
     {
         { 217.87244 / 450 - 0/9.0, 223.221796 / 450 },
@@ -1887,13 +1892,13 @@ Point keyframes[2][KEYFRAME_COUNT] = {
         { 106.791312 / 450 - 7/9.0, 165.794376 / 450 },
         { 182.90179 / 450 - 8/9.0, 116.840896 / 450 },
         { 143.688378 / 450 - 9/9.0, 0 / 450 },
+        { -1.0 / 3, 0 },
     }
 };
 
-Point interpolateKeyframes(Point *frames, int count, double t) {
-    t = max(0, min(1, t));
-    int i = (int)floor(t * (count - 1));
-    double x = t * (count - 1) - i;
+Point interpolateKeyframes(Point *frames, int count, int end, double t) {
+    int i = (int)floor(t * end);
+    double x = t * end - i;
     Point a = frames[min(max(i - 1, 0), count - 1)];
     Point b = frames[min(max(i, 0), count - 1)];
     Point c = frames[min(max(i + 1, 0), count - 1)];
@@ -1923,9 +1928,12 @@ PointPair getControlPoints(Point vector, Point idealNormal, UINT dpi) {
     for (int i = 0; i < 2; i++) {
         control.p[i] = scale(
             interpolateKeyframes(
-                keyframes[i], KEYFRAME_COUNT, length / ropeLengthPx
+                keyframes[i], KEYFRAME_COUNT, KEYFRAME_END,
+                length / ropeLengthPx
             ),
-            ropeLengthPx
+            // control points don't start scaling with rope until it starts
+            // stretching
+            max(length, ropeLengthPx)
         );
         control.p[i] = add(
             scale(tangent, control.p[i].x),
@@ -2779,7 +2787,7 @@ BOOL clearTextbox(Model *model, ActionParam param) {
 
 Point addDrag(
     Model *model, UINT dpi, POINT start, POINT stop, Point idealNormal,
-    double durationMs, int segmentCount, int maxInitialPx
+    double durationMs, int segmentCount, int maxInitialPx, int maxSegmentPx
 ) {
     // segmentCount does not include the initial segment (which may have
     // length zero if maxInitialPx is zero)
@@ -2796,6 +2804,23 @@ Point addDrag(
             initialT = 1.0 / (segmentCount + 1);
         }
     }
+
+    // adjust segmentCount so that the average length of a non-initial segment
+    // is at most maxSegmentPx (yes I'm aware that we already used the old
+    // segmentCount to calculate initialT, but this would only change that
+    // calculation if maxSegmentPx < maxInitialPx, which is not a case we care
+    // about)
+    double oldSegmentCount = segmentCount;
+    segmentCount = max(
+        segmentCount,
+        (int)ceil(
+            segmentCount * length * (1 - initialT) / (
+                segmentCount * maxSegmentPx
+            )
+        )
+    );
+    // keep the average duration of each segment the same
+    durationMs *= segmentCount / oldSegmentCount;
 
     PointPair control = getControlPoints(vector, idealNormal, dpi);
     Point b = add(a, control.p[0]);
@@ -3549,9 +3574,10 @@ LRESULT CALLBACK DlgProc(
 
                     lastTangent = addDrag(
                         model, screen.dpi, dragStart, dragMid, idealNormal,
-                        1000, // durationMs
-                        100, // segmentCount
-                        8 // maxInitialPx
+                        2000, // durationMs
+                        3, // segmentCount
+                        8, // maxInitialPx
+                        100 // maxSegmentPx
                     );
                     if (model->dragCount > 1) {
                         addAction(
@@ -3567,9 +3593,10 @@ LRESULT CALLBACK DlgProc(
 
                         lastTangent = addDrag(
                             model, screen.dpi, dragMid, dragStop, idealNormal,
-                            1000, // durationMs
-                            100, // segmentCount
-                            8 // maxInitialPx
+                            2000, // durationMs
+                            3, // segmentCount
+                            8, // maxInitialPx
+                            100 // maxSegmentPx
                         );
                     }
                     addAction(
