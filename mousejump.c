@@ -3574,10 +3574,10 @@ LRESULT CALLBACK DlgProc(
 
                     lastTangent = addDrag(
                         model, screen.dpi, dragStart, dragMid, idealNormal,
-                        2000, // durationMs
-                        3, // segmentCount
+                        200, // durationMs
+                        20, // segmentCount
                         8, // maxInitialPx
-                        100 // maxSegmentPx
+                        40 // maxSegmentPx
                     );
                     if (model->dragCount > 1) {
                         addAction(
@@ -3593,10 +3593,10 @@ LRESULT CALLBACK DlgProc(
 
                         lastTangent = addDrag(
                             model, screen.dpi, dragMid, dragStop, idealNormal,
-                            2000, // durationMs
-                            3, // segmentCount
+                            200, // durationMs
+                            20, // segmentCount
                             8, // maxInitialPx
-                            100 // maxSegmentPx
+                            40 // maxSegmentPx
                         );
                     }
                     addAction(
