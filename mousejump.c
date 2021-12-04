@@ -867,6 +867,13 @@ Point intersect(Point point1, Point normal1, Point point2, Point normal2) {
     );
 }
 
+POINT roundPoint(Point p) {
+    POINT pInt = { (int)round(p.x), (int)round(p.y) };
+    return pInt;
+}
+
+typedef struct { Point p[2]; } PointPair;
+
 typedef struct { double angle1, angle2, aspect, area; } CellEdgesIn;
 CellEdgesIn cellEdgesIn = { 0, PI, 1, 1 };
 typedef struct { Point shape1; Point shape2; } CellEdgesOut;
@@ -1856,30 +1863,31 @@ DrawLabelsOut drawLabels(
 }
 
 #define KEYFRAME_COUNT 10
-Point keyframes1[KEYFRAME_COUNT] = {
-    { -250.75351 / 450, 199.317716 / 450 },
-    { -236.7338 / 450, 159.511926 / 450 },
-    { -210.54139 / 450, 134.923126 / 450 },
-    { -178.79139 / 450, 103.173126 / 450 },
-    { -152.33306 / 450, 114.512416 / 450 },
-    { -93.25481 / 450, 132.136466 / 450 },
-    { -41.85005 / 450, 155.570986 / 450 },
-    { 12.100406 / 450, 138.984536 / 450 },
-    { 48.0081441 / 450, 107.990486 / 450 },
-    { 70.134467 / 450, 0 / 450 },
-};
-
-Point keyframes2[KEYFRAME_COUNT] = {
-    { 217.87244 / 450 - 0/9.0, 223.221796 / 450 },
-    { 170.57139 / 450 - 1/9.0, 270.598516 / 450 },
-    { 93.88563 / 450 - 2/9.0, 289.307386 / 450 },
-    { 16.196495 / 450 - 3/9.0, 283.038356 / 450 },
-    { -18.328431 / 450 - 4/9.0, 233.854206 / 450 },
-    { 17.432134 / 450 - 5/9.0, 228.053036 / 450 },
-    { 61.067624 / 450 - 6/9.0, 189.088076 / 450 },
-    { 106.791312 / 450 - 7/9.0, 165.794376 / 450 },
-    { 182.90179 / 450 - 8/9.0, 116.840896 / 450 },
-    { 143.688378 / 450 - 9/9.0, 0 / 450 },
+Point keyframes[2][KEYFRAME_COUNT] = {
+    {
+        { -250.75351 / 450, 199.317716 / 450 },
+        { -236.7338 / 450, 159.511926 / 450 },
+        { -210.54139 / 450, 134.923126 / 450 },
+        { -178.79139 / 450, 103.173126 / 450 },
+        { -152.33306 / 450, 114.512416 / 450 },
+        { -93.25481 / 450, 132.136466 / 450 },
+        { -41.85005 / 450, 155.570986 / 450 },
+        { 12.100406 / 450, 138.984536 / 450 },
+        { 48.0081441 / 450, 107.990486 / 450 },
+        { 70.134467 / 450, 0 / 450 },
+    },
+    {
+        { 217.87244 / 450 - 0/9.0, 223.221796 / 450 },
+        { 170.57139 / 450 - 1/9.0, 270.598516 / 450 },
+        { 93.88563 / 450 - 2/9.0, 289.307386 / 450 },
+        { 16.196495 / 450 - 3/9.0, 283.038356 / 450 },
+        { -18.328431 / 450 - 4/9.0, 233.854206 / 450 },
+        { 17.432134 / 450 - 5/9.0, 228.053036 / 450 },
+        { 61.067624 / 450 - 6/9.0, 189.088076 / 450 },
+        { 106.791312 / 450 - 7/9.0, 165.794376 / 450 },
+        { 182.90179 / 450 - 8/9.0, 116.840896 / 450 },
+        { 143.688378 / 450 - 9/9.0, 0 / 450 },
+    }
 };
 
 Point interpolateKeyframes(Point *frames, int count, double t) {
@@ -1902,16 +1910,70 @@ Point interpolateKeyframes(Point *frames, int count, double t) {
     );
 }
 
+// idealNormal doesn't have to be normalized
+PointPair getControlPoints(Point vector, Point idealNormal, UINT dpi) {
+    double ropeLengthPt = 60;
+    double ropeLengthPx = ptToPx(ropeLengthPt, dpi);
+    double length = sqrt(dot(vector, vector));
+    Point tangent = length > 0 ? scale(vector, 1 / length)
+        : getNormal(idealNormal);
+    Point normal = leftTurn(tangent);
+    int normalSign = copysign(1.0, dot(idealNormal, normal));
+    PointPair control;
+    for (int i = 0; i < 2; i++) {
+        control.p[i] = scale(
+            interpolateKeyframes(
+                keyframes[i], KEYFRAME_COUNT, length / ropeLengthPx
+            ),
+            ropeLengthPx
+        );
+        control.p[i] = add(
+            scale(tangent, control.p[i].x),
+            scale(normal, control.p[i].y * normalSign)
+        );
+    }
+
+    return control;
+}
+
+Point getIdealNormal(Screen screen, POINT a) {
+    // edgeDistance: how close you have to be to the edge of the screen before
+    // the normal tries to point away from the edge
+    double edgeDistancePt = 20;
+    double edgeDistancePx = ptToPx(edgeDistancePt, screen.dpi);
+    Point idealNormal = {
+        max(0, screen.left + edgeDistancePx - a.x)
+            + min(
+                0, screen.left + screen.width - edgeDistancePx - a.x
+            ),
+        max(0, screen.top + edgeDistancePx - a.y)
+            + min(
+                0, screen.top + screen.height - edgeDistancePx - a.y
+            ),
+    };
+    return idealNormal; // not normalized. zero if not close to the edge
+}
+
+Point getFinalTangent(Point control2) {
+    return scale(control2, -1 / sqrt(dot(control2, control2)));
+}
+
+Point interpolateBezier(Point a, Point b, Point c, Point d, double t) {
+    Point ab = add(scale(a, 1 - t), scale(b, t));
+    Point bc = add(scale(b, 1 - t), scale(c, t));
+    Point cd = add(scale(c, 1 - t), scale(d, t));
+    Point abc = add(scale(ab, 1 - t), scale(bc, t));
+    Point bcd = add(scale(bc, 1 - t), scale(cd, t));
+    Point abcd = add(scale(abc, 1 - t), scale(bcd, t));
+    return abcd;
+}
+
 typedef struct { POINT dragPoints[7]; POINT arrowHeadPoints[3]; } DrawDragOut;
 DrawDragOut drawDrag(DragGraphics *graphics, Screen screen, HDC memory) {
-    double ropeLengthPt = 60;
     double arrowRadiusPt = 14;
     double arrowLengthPt = 14;
-    double edgeDistancePt = 20;
-    double ropeLengthPx = ptToPx(ropeLengthPt, screen.dpi);
     double arrowRadiusPx = ptToPx(arrowRadiusPt, screen.dpi);
     double arrowLengthPx = ptToPx(arrowLengthPt, screen.dpi);
-    double edgeDistancePx = ptToPx(edgeDistancePt, screen.dpi);
     DrawDragOut result;
     result.dragPoints[0] = graphics->drag[0];
     // as in (tangent, normal) not (sin, cos, tan)
@@ -1922,54 +1984,15 @@ DrawDragOut drawDrag(DragGraphics *graphics, Screen screen, HDC memory) {
         Point a = { aInt.x, aInt.y };
         Point d = { dInt.x, dInt.y };
         Point vector = add(d, scale(a, -1));
-        double length = sqrt(dot(vector, vector));
-        Point idealNormalDirection = {
-            max(0, screen.left + edgeDistancePx - a.x)
-                + min(
-                    0, screen.left + screen.width - edgeDistancePx - a.x
-                ),
-            max(0, screen.top + edgeDistancePx - a.y)
-                + min(
-                    0, screen.top + screen.height - edgeDistancePx - a.y
-                ),
-        };
-        if (idealNormalDirection.x == 0 && idealNormalDirection.y == 0) {
-            idealNormalDirection = lastTangent;
+        Point idealNormal = getIdealNormal(screen, aInt);
+        if (idealNormal.x == 0 && idealNormal.y == 0) {
+            idealNormal = lastTangent;
         }
 
-        Point tangent = length > 0 ? scale(vector, 1 / length)
-            : getNormal(idealNormalDirection);
-        Point normal = leftTurn(tangent);
-        int normalSign = copysign(1.0, dot(idealNormalDirection, normal));
-        Point control1 = scale(
-            interpolateKeyframes(
-                keyframes1, KEYFRAME_COUNT, length / ropeLengthPx
-            ),
-            ropeLengthPx
-        );
-        control1 = add(
-            scale(tangent, control1.x),
-            scale(normal, control1.y * normalSign)
-        );
-        Point b = add(a, control1);
-        POINT bInt = { (int)round(b.x), (int)round(b.y) };
-        result.dragPoints[3 * i + 1] = bInt;
-
-        Point control2 = scale(
-            interpolateKeyframes(
-                keyframes2, KEYFRAME_COUNT, length / ropeLengthPx
-            ),
-            ropeLengthPx
-        );
-        control2 = add(
-            scale(tangent, control2.x),
-            scale(normal, control2.y * normalSign)
-        );
-        Point c = add(d, control2);
-        POINT cInt = { (int)round(c.x), (int)round(c.y) };
-        lastTangent = scale(control2, -1 / sqrt(dot(control2, control2)));
-        result.dragPoints[3 * i + 2] = cInt;
-
+        PointPair control = getControlPoints(vector, idealNormal, screen.dpi);
+        result.dragPoints[3 * i + 1] = roundPoint(add(a, control.p[0]));
+        result.dragPoints[3 * i + 2] = roundPoint(add(d, control.p[1]));
+        lastTangent = getFinalTangent(control.p[1]);
         result.dragPoints[3 * i + 3] = dInt;
         if (i == 1 && graphics->arrowHead) {
             Point lastNormal = leftTurn(lastTangent);
@@ -2738,22 +2761,6 @@ BOOL mouseToPoint(Model *model, ActionParam param) {
     return TRUE;
 }
 
-BOOL nudgeMouse(Model *model, ActionParam param) {
-    INPUT input = {
-        .type = INPUT_MOUSE,
-        .mi = {
-            .dx = 10,
-            .dy = 10,
-            .mouseData = 0,
-            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE,
-            .time = 0,
-            .dwExtraInfo = 0,
-        },
-    };
-    SendInput(1, &input, sizeof(input));
-    return TRUE;
-}
-
 BOOL mouseToDragEnd(Model *model, ActionParam param) {
     HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
     LPWSTR newText = textFromPath(model->dragCount, L"");
@@ -2768,6 +2775,46 @@ BOOL clearTextbox(Model *model, ActionParam param) {
     model->showingPath = TRUE;
     SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
     return TRUE;
+}
+
+Point addDrag(
+    Model *model, UINT dpi, POINT start, POINT stop, Point idealNormal,
+    double durationMs, int segmentCount, int maxInitialPx
+) {
+    // segmentCount does not include the initial segment (which may have
+    // length zero if maxInitialPx is zero)
+    Point a = { start.x, start.y };
+    Point d = { stop.x, stop.y };
+    Point vector = add(d, scale(a, -1));
+    double length = sqrt(dot(vector, vector));
+    double initialT = 0;
+    if (maxInitialPx > 0) {
+        double hypotheticalSegmentCount = length / maxInitialPx;
+        if (hypotheticalSegmentCount > segmentCount + 1) {
+            initialT = maxInitialPx / length;
+        } else {
+            initialT = 1.0 / (segmentCount + 1);
+        }
+    }
+
+    PointPair control = getControlPoints(vector, idealNormal, dpi);
+    Point b = add(a, control.p[0]);
+    Point c = add(d, control.p[1]);
+    Point initialPoint = interpolateBezier(a, b, c, d, initialT);
+    addAction(
+        model, mouseToPoint, actionParamPoint(roundPoint(initialPoint))
+    );
+    int lastMs = 0;
+    for (int i = 1; i <= segmentCount; i++) {
+        int ms = (int)round(durationMs * i / segmentCount);
+        addAction(model, sleep, actionParamMilliseconds(ms - lastMs));
+        lastMs = ms;
+        double t = initialT + (1 - initialT) * i / segmentCount;
+        Point point = interpolateBezier(a, b, c, d, t);
+        addAction(model, mouseToPoint, actionParamPoint(roundPoint(point)));
+    }
+
+    return getFinalTangent(control.p[1]);
 }
 
 LRESULT CALLBACK DlgProc(
@@ -3468,46 +3515,47 @@ LRESULT CALLBACK DlgProc(
                 GetCursorPos(&cursor);
                 Model *model = getModel(dialog);
                 if (model->dragCount > 0) {
+                    Screen screen = getScreen(&model->monitor);
                     POINT dragStart = model->drag[0];
                     addAction(
                         model, mouseToPoint, actionParamPoint(dragStart)
                     );
                     addAction(model, mouseDown, actionParamNone);
-                    addAction(model, sleep, actionParamMilliseconds(1));
-                    addAction(model, nudgeMouse, actionParamNone);
-                    addAction(model, sleep, actionParamMilliseconds(1));
-                    addAction(model, nudgeMouse, actionParamNone);
-                    addAction(model, sleep, actionParamMilliseconds(1));
-                    addAction(model, nudgeMouse, actionParamNone);
-                    addAction(model, sleep, actionParamMilliseconds(1));
-                    addAction(model, nudgeMouse, actionParamNone);
-                    // Point vector = {
-                    //     cursor.x - dragStart.x,
-                    //     cursor.y - dragStart.y,
-                    // };
-                    // if (vector.x == 0 && vector.y == 0) { vector.x = 1; }
-                    // vector = scale(vector, 8 / sqrt(dot(vector, vector)));
-                    // POINT nudgePosition = {
-                    //     .x = dragStart.x + (int)round(vector.x),
-                    //     .y = dragStart.y + (int)round(vector.y),
-                    // };
-                    // addAction(
-                    //     model, mouseToPoint, actionParamPoint(nudgePosition)
-                    // );
-                    if (model->dragCount > 1) {
-                        addAction(
-                            model, mouseToPoint,
-                            actionParamPoint(model->drag[1])
-                        );
-                        if (model->dragCount >= 3) {
-                            cursor = model->drag[2];
-                        }
+                    POINT dragMid = model->dragCount > 1 ? model->drag[1]
+                        : cursor;
 
+                    // as in (tangent, normal) not (sin, cos, tan)
+                    Point lastTangent = { 0, -1 };
+                    Point idealNormal = getIdealNormal(screen, dragStart);
+                    if (idealNormal.x == 0 && idealNormal.y == 0) {
+                        idealNormal = lastTangent;
+                    }
+
+                    lastTangent = addDrag(
+                        model, screen.dpi, dragStart, dragMid, idealNormal,
+                        1000, // durationMs
+                        100, // segmentCount
+                        8 // maxInitialPx
+                    );
+                    if (model->dragCount > 1) {
                         addAction(
                             model, sleep, actionParamMilliseconds(1000)
                         );
+                        POINT dragStop = model->dragCount > 2 ? model->drag[2]
+                            : cursor;
+
+                        idealNormal = getIdealNormal(screen, dragStart);
+                        if (idealNormal.x == 0 && idealNormal.y == 0) {
+                            idealNormal = lastTangent;
+                        }
+
+                        lastTangent = addDrag(
+                            model, screen.dpi, dragMid, dragStop, idealNormal,
+                            1000, // durationMs
+                            100, // segmentCount
+                            8 // maxInitialPx
+                        );
                     }
-                    addAction(model, mouseToPoint, actionParamPoint(cursor));
                     addAction(
                         model, sleep, actionParamMilliseconds(100)
                     );
