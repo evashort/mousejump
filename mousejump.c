@@ -184,10 +184,10 @@ int nextPowerOf2(int n, int start) {
 
 typedef enum {
     MODEL_TEXT_SLOT = 0, TEMP_TEXT_SLOT, PATH_TEXT_SLOT, TITLE_TEXT_SLOT,
-    RANGE_TEXT_SLOT, TEXT_SLOT_COUNT
+    RANGE_TEXT_SLOT, TOOLTIP_TEXT_SLOT, TEXT_SLOT_COUNT
 } TextSlot;
-int textsIn[TEXT_SLOT_COUNT] = { 0, 0, 0, 0, 0 };
-LPWSTR textsOut[TEXT_SLOT_COUNT] = { NULL, NULL, NULL, NULL, NULL };
+int textsIn[TEXT_SLOT_COUNT] = { 0, 0, 0, 0, 0, 0 };
+LPWSTR textsOut[TEXT_SLOT_COUNT] = { NULL, NULL, NULL, NULL, NULL, NULL };
 LPWSTR getText(int capacity, TextSlot slot) {
     if (textsIn[slot] < capacity) {
         textsIn[slot] = nextPowerOf2(capacity, 64);
@@ -1512,7 +1512,6 @@ struct Model {
     double mirrorHeightPt;
     double textBoxWidthPt;
     double textBoxHeightPt;
-    BOOL showLabels;
     BOOL showCaption;
     SIZE minTextBoxSize;
     // used only for calculating the previous dialog size after WM_DPICHANGED
@@ -1527,6 +1526,10 @@ struct Model {
     Action *actions;
     int actionCount;
 };
+
+BOOL shouldShowLabels(Model *model) {
+    return GetFocus() == GetDlgItem(model->dialog, IDC_TEXTBOX);
+}
 
 typedef struct {
     int top, left, width, height, topCrop, bottomCrop;
@@ -1666,7 +1669,7 @@ Graphics *getGraphics(Model *model, Screen screen) {
     graphics->initialized = TRUE;
     graphics->screen = screen;
     graphics->colorKey = model->colorKey;
-    graphics->showLabels = model->showLabels;
+    graphics->showLabels = shouldShowLabels(model);
     if (graphics->showLabels) {
         LabelGraphics *lg = &graphics->lg;
         lg->layout = getLayout(model, screen);
@@ -2340,10 +2343,7 @@ LRESULT CALLBACK WndProc(
     WPARAM wParam,
     LPARAM lParam
 ) {
-    if (message == WM_PAINT) {
-        Model *model = getModel(window);
-        redraw(model, getScreen(&model->monitor));
-    } else if (message == WM_ACTIVATE) {
+    if (message == WM_ACTIVATE) {
         if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE) {
             Model *model = getModel(window);
             // The main window initially receives WM_ACTIVATE before its user
@@ -2541,6 +2541,15 @@ void updateDragChecked(Model *model, BOOL wasChecked) {
     SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &info);
 }
 
+void updateShowLabelsChecked(BOOL focused) {
+    MENUITEMINFO info = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STATE,
+        .fState = focused ? MFS_CHECKED : MFS_UNCHECKED,
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_SHOW_LABELS, FALSE, &info);
+}
+
 BOOL getDragEnabled(Model *model) {
     if (model->dragCount != 1) { return model->dragCount > 0; }
     POINT start = model->drag[model->dragCount - 1];
@@ -2673,6 +2682,11 @@ void setTooltip(
         return;
     }
 
+    LPCWSTR suffix = L"\n(Spacebar to dismiss)";
+    int capacity = wcslen(text) + wcslen(suffix) + 1;
+    LPWSTR actualText = getText(capacity, TOOLTIP_TEXT_SLOT);
+    swprintf_s(actualText, capacity, L"%s%s", text, suffix);
+
     // https://docs.microsoft.com/en-us/windows/win32/controls/create-a-tooltip-for-a-control
     // https://docs.microsoft.com/en-us/windows/win32/controls/implement-balloon-tooltips
     // Recreate the tooltip window every time, otherwise once you
@@ -2698,11 +2712,11 @@ void setTooltip(
         .hwnd = model->dialog,
         .uId = (UINT_PTR)NULL,
         .hinst = NULL,
-        .lpszText = text,
+        .lpszText = actualText,
         .lParam = 0,
         .lpReserved = NULL,
     };
-    model->toolText = text;
+    model->toolText = actualText;
     SendMessage(model->tooltip, TTM_ADDTOOL, 0, (LPARAM)&info);
     SendMessage(model->tooltip, TTM_SETTITLE, icon, (LPARAM)title);
     // https://docs.microsoft.com/en-us/windows/win32/controls/implement-tracking-tooltips
@@ -2714,26 +2728,6 @@ void setTooltip(
         )
     );
     model->autoHideTooltip = autoHide;
-    if (!autoHide) {
-        MENUITEMINFO items[] = {
-            {
-                .cbSize = sizeof(MENUITEMINFO),
-                .fMask = MIIM_TYPE | MIIM_ID,
-                .fType = MFT_SEPARATOR,
-                .wID = IDM_DISMISS_SEPARATOR,
-            },
-            {
-                .cbSize = sizeof(MENUITEMINFO),
-                .fMask = MIIM_TYPE | MIIM_ID,
-                .fType = MFT_STRING,
-                .dwTypeData = L"Dismiss &error\tBackspace",
-                .wID = IDM_DISMISS,
-            },
-        };
-        HMENU menu = GetSubMenu(getDropdownMenu(), 0);
-        InsertMenuItem(menu, 0, TRUE, &items[0]);
-        InsertMenuItem(menu, 0, TRUE, &items[1]);
-    }
 }
 
 const int PRESSED = 0x8000;
@@ -3298,9 +3292,6 @@ LRESULT CALLBACK DlgProc(
             // This program uses toolText to indicate whether the tooltip has
             // been closed or just hidden because the focused changed.
             model->toolText = NULL;
-            HMENU menu = GetSubMenu(getDropdownMenu(), 0);
-            RemoveMenu(menu, IDM_DISMISS, MF_BYCOMMAND);
-            RemoveMenu(menu, IDM_DISMISS_SEPARATOR, MF_BYCOMMAND);
             return TRUE;
         }
     } else if (message == WM_TIMER && wParam == DO_ACTIONS_TIMER) {
@@ -3391,12 +3382,24 @@ LRESULT CALLBACK DlgProc(
                 SendMessage(textBox, EM_SETSEL, 0, -1);
                 SetFocus(textBox);
                 return TRUE;
-            } else if (command == IDM_DISMISS) {
-                SendMessage(
-                    getModel(dialog)->tooltip,
-                    TTM_TRACKACTIVATE, FALSE, getToolInfo(dialog)
-                );
-            } else if (command == IDC_BUTTON) {
+            } else if (
+                // when activated from the menu, just let the menu close
+                command == IDC_BUTTON && HIWORD(wParam) != 0
+            ) {
+                Model *model = getModel(dialog);
+                if (model->toolText != NULL) {
+                    SendMessage(
+                        model->tooltip,
+                        TTM_TRACKACTIVATE, FALSE, getToolInfo(dialog)
+                    );
+                    model->toolText = NULL;
+                    if (GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX)) {
+                        // don't show menu when tooltip is open and textbox is
+                        // focused
+                        return TRUE;
+                    }
+                }
+
                 // https://docs.microsoft.com/en-us/windows/win32/controls/handle-drop-down-buttons
                 LPNMTOOLBAR toolbarMessage = (LPNMTOOLBAR)lParam;
                 RECT buttonRect = { 0, 0, 0, 1 };
@@ -3430,12 +3433,6 @@ LRESULT CALLBACK DlgProc(
                     model, L"Type the label text to move the mouse",
                     L"Move to label", TTI_INFO_LARGE, TRUE
                 );
-                if (!model->showLabels) {
-                    SendMessage(
-                        dialog, WM_COMMAND,
-                        MAKEWPARAM(IDM_SHOW_LABELS, HIWORD(wParam)), 0
-                    );
-                }
 
                 return TRUE;
             } else if (
@@ -3652,7 +3649,6 @@ LRESULT CALLBACK DlgProc(
                     SetWindowText(textBox, newText);
                     int length = wcslen(newText);
                     SendMessage(textBox, EM_SETSEL, length, length);
-                    SetFocus(textBox);
                 }
 
                 if (model->actionCount > oldActionCount) {
@@ -3662,17 +3658,10 @@ LRESULT CALLBACK DlgProc(
 
                 return TRUE;
             } else if (command == IDM_SHOW_LABELS) {
-                Model *model = getModel(dialog);
-                model->showLabels = !model->showLabels;
-                MENUITEMINFO menuItemInfo = {
-                    .cbSize = sizeof(MENUITEMINFO),
-                    .fMask = MIIM_STATE,
-                    .fState = model->showLabels ? MFS_CHECKED : MFS_UNCHECKED,
-                };
-                SetMenuItemInfo(
-                    getDropdownMenu(), IDM_SHOW_LABELS, FALSE, &menuItemInfo
+                HWND nextControl = GetNextDlgTabItem(
+                    dialog, GetFocus(), FALSE
                 );
-                redraw(model, getScreen(&model->monitor));
+                if (nextControl) { SetFocus(nextControl); }
             } else if (command == IDM_SWITCH_MONITOR) {
                 Model *model = getModel(dialog);
                 MonitorCallbackVars vars = {
@@ -3704,13 +3693,18 @@ LRESULT CALLBACK DlgProc(
                     || HIWORD(wParam) == EN_KILLFOCUS
             ) {
                 if (LOWORD(wParam) != IDC_TEXTBOX) { return TRUE; }
-                Model *model = getModel(dialog);
-                if (model->showCaption && model->toolText == NULL) {
-                    return TRUE;
-                }
 
                 HWND focus = GetFocus();
                 BOOL focused = focus == GetDlgItem(dialog, IDC_TEXTBOX);
+                updateShowLabelsChecked(focused);
+
+                Model *model = getModel(dialog);
+                if (model->showCaption && model->toolText == NULL) {
+                    // redraw in case label visibility changed
+                    redraw(model, getScreen(&model->monitor));
+                    return TRUE;
+                }
+
                 HWND toolbar = NULL;
                 if (!model->showCaption) {
                     toolbar = GetDlgItem(dialog, IDC_TOOLBAR);
@@ -3752,6 +3746,9 @@ LRESULT CALLBACK DlgProc(
                     );
                     ignorePop = FALSE;
                 }
+
+                // redraw in case label visibility changed
+                redraw(model, getScreen(&model->monitor));
                 return TRUE;
             } else if (HIWORD(wParam) == EN_UPDATE) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
@@ -3868,11 +3865,7 @@ int getModifiers() {
 
 int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
     if (message->message == WM_KEYDOWN) {
-        if (message->wParam == VK_SPACE && !getModifiers()) {
-            if (GetFocus() != GetDlgItem(dialog, IDC_TEXTBOX)) {
-                return 0;
-            }
-        } else if (
+        if (
             message->wParam == VK_LEFT || message->wParam == VK_RIGHT
         ) {
             int modifiers = getModifiers();
@@ -3896,26 +3889,10 @@ int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
             }
         } else if (message->wParam == VK_BACK && getModifiers() == 0) {
             HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-            if (GetFocus() == textBox) {
-                DWORD selectionStart, selectionStop;
-                SendMessage(
-                    textBox, EM_GETSEL,
-                    (WPARAM)&selectionStart, (LPARAM)&selectionStop
-                );
-                if (selectionStop > 0) { return 0; }
-            }
+            if (GetFocus() == textBox) { return 0; }
         } else if (message->wParam == VK_DELETE && getModifiers() == 0) {
             HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-            if (GetFocus() == textBox) {
-                DWORD selectionStart, selectionStop;
-                SendMessage(
-                    textBox, EM_GETSEL,
-                    (WPARAM)&selectionStart, (LPARAM)&selectionStop
-                );
-                if (selectionStart < GetWindowTextLength(textBox)) {
-                    return 0;
-                }
-            }
+            if (GetFocus() == textBox) { return 0; }
         }
     }
     return TranslateAccelerator(dialog, getAcceleratorTable(), message);
@@ -3944,7 +3921,6 @@ int CALLBACK WinMain(
         .systemFontChanges = 0,
         .textBoxWidthPt = 23.25,
         .textBoxHeightPt = 17.25,
-        .showLabels = TRUE,
         .minTextBoxSize = { 0, 0 },
         .text = L"",
         .hasMatch = FALSE,
