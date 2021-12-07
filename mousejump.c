@@ -1522,7 +1522,6 @@ struct Model {
     BOOL hasMatch;
     int dragCount;
     POINT drag[3];
-    BOOL showingPath;
     Action *actions;
     int actionCount;
 };
@@ -2440,51 +2439,8 @@ SIZE getMinDialogClientSize(Model *model, UINT dpi) {
     return client;
 }
 
-typedef struct {
-    int nodeCount;
-    LPWSTR suffix;
-    BOOL hidePath;
-} TextPath;
-TextPath getTextPath(LPWSTR text) {
-    LPWSTR node = L","; int nodeLength = wcslen(node);
-    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
-    TextPath path = { .nodeCount = 0, .suffix = text };
-    while (!wcsncmp(text, node, nodeLength)) {
-        path.nodeCount++;
-        text += nodeLength;
-        while (!wcsncmp(text, node, nodeLength)) { text += nodeLength; }
-        path.suffix = text;
-        while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
-    }
-
-    path.hidePath = path.nodeCount > 0 && text[0] != L'\0';
-    return path;
-}
-
-LPWSTR textFromPath(int nodeCount, LPWSTR suffix) {
-    if (nodeCount <= 0) { return suffix; }
-    LPWSTR node = L","; int nodeLength = wcslen(node);
-    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
-    int suffixLength = wcslen(suffix);
-    int capacity = (nodeLength + edgeLength) * nodeCount - edgeLength
-        + suffixLength + 1;
-    LPWSTR text = getText(capacity, TEMP_TEXT_SLOT);
-    wcsncpy_s(text, capacity, node, nodeLength + 1);
-    for (int i = 0; i < nodeCount - 1; i++) {
-        int offset = nodeLength + i * (nodeLength + edgeLength);
-        wcsncpy_s(text + offset, capacity - offset, edge, edgeLength + 1);
-        offset += edgeLength;
-        wcsncpy_s(text + offset, capacity - offset, node, nodeLength + 1);
-    }
-
-    int offset = (nodeLength + edgeLength) * nodeCount - edgeLength;
-    wcsncpy_s(text + offset, capacity - offset, suffix, suffixLength + 1);
-    return text;
-}
-
 LPWSTR setNaturalEdge(LPWSTR text, BOOL naturalEdge) {
     LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
-    text = getTextPath(text).suffix;
     if (!naturalEdge) {
         while (!wcsncmp(text, edge, edgeLength)) { text += edgeLength; }
     } else if (wcsncmp(text, edge, edgeLength)) {
@@ -2499,29 +2455,22 @@ LPWSTR setNaturalEdge(LPWSTR text, BOOL naturalEdge) {
     return text;
 }
 
-LPWSTR removeSuffix(LPWSTR text) {
-    LPWSTR node = L","; int nodeLength = wcslen(node);
-    LPWSTR edge = L"-"; int edgeLength = wcslen(edge);
-    int prefixLength;
-    LPWSTR suffix = text;
-    while (!wcsncmp(suffix, node, nodeLength)) {
-        suffix += nodeLength;
-        while (!wcsncmp(suffix, node, nodeLength)) { suffix += nodeLength; }
-        prefixLength = suffix - text;
-        while (!wcsncmp(suffix, edge, edgeLength)) { suffix += edgeLength; }
-    }
+typedef struct {
+    BOOL checked;
+    int count; // number of non-empty drag segments
+} DragMenuState;
 
-    LPWSTR prefix = getText(prefixLength + 1, TEMP_TEXT_SLOT);
-    wcsncpy_s(prefix, prefixLength + 1, text, _TRUNCATE);
-    return prefix;
-}
+DragMenuState getDragMenuState(Model *model) {
+    DragMenuState result = { .checked = FALSE, .count = 0 };
+    if (model->dragCount <= 0) { return result; }
 
-BOOL getDragChecked(Model *model) {
-    if (model->dragCount <= 0) { return FALSE; }
     POINT start = model->drag[model->dragCount - 1];
     POINT stop = model->hasMatch ? model->matchPoint : model->naturalPoint;
-    return start.x == stop.x && start.y == stop.y;
+    result.checked = start.x == stop.x && start.y == stop.y;
+    result.count = model->dragCount - result.checked;
+    return result;
 }
+
 
 LPWSTR dragMenuTexts[4] = {
     L"Set &drag start\tComma (,)",
@@ -2529,34 +2478,6 @@ LPWSTR dragMenuTexts[4] = {
     L"Set &drag end\tComma (,)",
     L"Click (preserves &drag path)\tComma (,)",
 };
-void updateDragChecked(Model *model, BOOL wasChecked) {
-    BOOL isChecked = getDragChecked(model);
-    if (isChecked == wasChecked) { return; }
-    MENUITEMINFO info = {
-        .cbSize = sizeof(MENUITEMINFO),
-        .fMask = MIIM_STATE | MIIM_STRING,
-        .fState = isChecked ? MFS_CHECKED : MFS_UNCHECKED,
-        .dwTypeData = dragMenuTexts[model->dragCount - isChecked],
-    };
-    SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &info);
-}
-
-void updateShowLabelsChecked(BOOL focused) {
-    MENUITEMINFO info = {
-        .cbSize = sizeof(MENUITEMINFO),
-        .fMask = MIIM_STATE,
-        .fState = focused ? MFS_CHECKED : MFS_UNCHECKED,
-    };
-    SetMenuItemInfo(getDropdownMenu(), IDM_SHOW_LABELS, FALSE, &info);
-}
-
-BOOL getDragEnabled(Model *model) {
-    if (model->dragCount != 1) { return model->dragCount > 0; }
-    POINT start = model->drag[model->dragCount - 1];
-    POINT stop = model->hasMatch ? model->matchPoint : model->naturalPoint;
-    return start.x != stop.x || start.y != stop.y;
-}
-
 LPWSTR clickTexts[2] = {
     L"&Click\tSpacebar", L"Dra&g\tSpacebar",
 };
@@ -2566,25 +2487,46 @@ LPWSTR rightClickTexts[2] = {
 LPWSTR wheelClickTexts[2] = {
     L"&Click\tSingle-quote (')", L"Dra&g\tSingle-quote (')",
 };
-void updateDragEnabled(Model *model, BOOL wasEnabled) {
-    BOOL isEnabled = getDragEnabled(model);
-    if (isEnabled == wasEnabled) { return; }
+void updateDragMenuState(Model *model, DragMenuState oldState) {
+    DragMenuState state = getDragMenuState(model);
+    if (state.checked == oldState.checked && state.count == oldState.count) {
+        return;
+    }
+
     MENUITEMINFO info = {
         .cbSize = sizeof(MENUITEMINFO),
-        .fMask = MIIM_STRING,
-        .dwTypeData = clickTexts[isEnabled],
+        .fMask = MIIM_STATE | MIIM_STRING,
+        .fState = state.checked ? MFS_CHECKED : MFS_UNCHECKED,
+        .dwTypeData = dragMenuTexts[state.count],
     };
-    SetMenuItemInfo(getDropdownMenu(), IDM_CLICK, FALSE, &info);
-    info.dwTypeData = rightClickTexts[isEnabled];
-    SetMenuItemInfo(getDropdownMenu(), IDM_RIGHT_CLICK, FALSE, &info);
-    info.dwTypeData = wheelClickTexts[isEnabled];
-    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &info);
+    SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &info);
+
+    if ((state.count > 0) == (oldState.count > 0)) { return; }
+    MENUITEMINFO click = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STRING,
+        .dwTypeData = clickTexts[state.count > 0],
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_CLICK, FALSE, &click);
+    click.dwTypeData = rightClickTexts[state.count > 0];
+    SetMenuItemInfo(getDropdownMenu(), IDM_RIGHT_CLICK, FALSE, &click);
+    click.dwTypeData = wheelClickTexts[state.count > 0];
+    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &click);
     MENUITEMINFO doubleClick = {
         .cbSize = sizeof(MENUITEMINFO),
         .fMask = MIIM_STATE,
-        .fState = isEnabled ? MFS_DISABLED : MFS_ENABLED,
+        .fState = state.count > 0 ? MFS_DISABLED : MFS_ENABLED,
     };
     SetMenuItemInfo(getDropdownMenu(), IDM_DOUBLE_CLICK, FALSE, &doubleClick);
+}
+
+void updateShowLabelsChecked(BOOL focused) {
+    MENUITEMINFO info = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STATE,
+        .fState = focused ? MFS_CHECKED : MFS_UNCHECKED,
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_SHOW_LABELS, FALSE, &info);
 }
 
 void setMatchPoint(Model *model, POINT matchPoint) {
@@ -2604,10 +2546,7 @@ void setMatchPoint(Model *model, POINT matchPoint) {
 }
 
 void unsetMatchPoint(Model *model) {
-    if (
-        model->dragCount > 0
-            && wcsncmp(getTextPath(model->text).suffix, L"-", 1)
-    ) {
+    if (model->dragCount > 0 && wcsncmp(model->text, L"-", 1)) {
         POINT dragEnd = model->drag[model->dragCount - 1];
         SetCursorPos(dragEnd.x, dragEnd.y);
         GetCursorPos(&model->naturalPoint);
@@ -2764,17 +2703,14 @@ BOOL mouseToPoint(Model *model, ActionParam param) {
 }
 
 BOOL mouseToDragEnd(Model *model, ActionParam param) {
-    HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
-    LPWSTR newText = textFromPath(model->dragCount, L"");
-    SetWindowText(textBox, newText);
-    int length = wcslen(newText);
-    SendMessage(textBox, EM_SETSEL, length, length);
-    SetFocus(textBox);
+    SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
     return TRUE;
 }
 
 BOOL clearTextbox(Model *model, ActionParam param) {
-    model->showingPath = TRUE;
+    DragMenuState dragMenuState = getDragMenuState(model);
+    model->dragCount = 0;
+    updateDragMenuState(model, dragMenuState);
     SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
     return TRUE;
 }
@@ -3462,8 +3398,7 @@ LRESULT CALLBACK DlgProc(
                         || (GetKeyState(keys.up) & PRESSED)
                 );
                 Model *model = getModel(dialog);
-                BOOL wasChecked = getDragChecked(model);
-                BOOL wasEnabled = getDragEnabled(model);
+                DragMenuState dragMenuState = getDragMenuState(model);
                 Screen screen = getScreen(&model->monitor);
                 Point oldOffsetPt = model->offsetPt;
                 if (slow) {
@@ -3513,10 +3448,8 @@ LRESULT CALLBACK DlgProc(
                     }
                 }
 
-                updateDragChecked(model, wasChecked);
-                updateDragEnabled(model, wasEnabled);
+                updateDragMenuState(model, dragMenuState);
                 if (newText != model->text) {
-                    model->showingPath = FALSE;
                     HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
                     DWORD start, stop;
                     SendMessage(
@@ -3537,13 +3470,11 @@ LRESULT CALLBACK DlgProc(
                 GetCursorPos(&cursor);
                 Model *model = getModel(dialog);
                 addAction(model, sleep, actionParamMilliseconds(100));
-                if (model->dragCount > 0) {
-                    if (
-                        model->dragCount > 2 && (
-                            cursor.x != model->drag[2].x
-                                || cursor.y != model->drag[2].y
-                        )
-                    ) {
+                DragMenuState state = getDragMenuState(model);
+                // use state.count rather than model->dragCount so that we
+                // ignore the final drag segment if it has zero length
+                if (state.count > 0) {
+                    if (state.count > 2) {
                         // if user has moved the cursor since setting the end
                         // of the 2-segment drag, assume they are trying to
                         // re-activate the starting window or tab before
@@ -3576,7 +3507,7 @@ LRESULT CALLBACK DlgProc(
                         8, // maxInitialPx
                         40 // maxSegmentPx
                     );
-                    if (model->dragCount > 1) {
+                    if (state.count > 1) {
                         addAction(
                             model, sleep, actionParamMilliseconds(1000)
                         );
@@ -3612,26 +3543,28 @@ LRESULT CALLBACK DlgProc(
             } else if (command == IDM_DRAG) {
                 Model *model = getModel(dialog);
                 int oldActionCount = model->actionCount;
+
+                POINT cursor;
+                GetCursorPos(&cursor);
                 BOOL erase = FALSE;
                 if (model->dragCount > 0) {
                     POINT start = model->drag[model->dragCount - 1];
-                    POINT end;
-                    GetCursorPos(&end);
-                    erase = start.x == end.x && start.y == end.y;
+                    erase = start.x == cursor.x && start.y == cursor.y;
                 }
 
+                DragMenuState dragMenuState = getDragMenuState(model);
+
                 LPWSTR newText = NULL;
-                BOOL click = FALSE;
                 if (erase) {
-                    if (model->dragCount <= 1) {
-                        newText = L"";
-                    } else {
-                        newText = textFromPath(model->dragCount - 1, L"-");
-                    }
+                    model->dragCount--;
+                    model->naturalPoint = model->drag[model->dragCount];
+                    newText = model->dragCount > 0 ? L"-" : L"";
                 } else if (model->dragCount < 3) {
-                    newText = textFromPath(model->dragCount + 1, L"");
-                    click = model->dragCount == 1;
-                    if (model->dragCount == 1) {
+                    model->naturalPoint = cursor;
+                    model->drag[model->dragCount] = cursor;
+                    model->dragCount++;
+                    newText = L"";
+                    if (model->dragCount == 2) {
                         addAction(model, mouseDown, actionParamNone);
                         addAction(model, mouseUp, actionParamNone);
                         addAction(model, sleep, actionParamMilliseconds(100));
@@ -3644,12 +3577,13 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 if (newText) {
-                    model->showingPath = TRUE;
                     HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
                     SetWindowText(textBox, newText);
                     int length = wcslen(newText);
                     SendMessage(textBox, EM_SETSEL, length, length);
                 }
+
+                updateDragMenuState(model, dragMenuState);
 
                 if (model->actionCount > oldActionCount) {
                     ShowWindow(model->window, SW_MINIMIZE);
@@ -3757,39 +3691,8 @@ LRESULT CALLBACK DlgProc(
                 return TRUE;
             } else if (HIWORD(wParam) == EN_CHANGE) {
                 Model *model = getModel(dialog);
-                BOOL wasChecked = getDragChecked(model);
-                BOOL wasEnabled = getDragEnabled(model);
-                TextPath path = getTextPath(model->text);
-                model->showingPath = model->showingPath || path.nodeCount > 0;
-                if (model->showingPath) {
-                    if (path.nodeCount > model->dragCount) {
-                        POINT start = model->drag[model->dragCount - 1];
-                        POINT end;
-                        GetCursorPos(&end);
-                        if (start.x != end.x || start.y != end.y) {
-                            model->naturalPoint = end;
-                            model->drag[model->dragCount] = end;
-                            model->dragCount++;
-                            wasChecked = FALSE;
-                        }
-                    } else if (path.nodeCount < model->dragCount) {
-                        model->dragCount = path.nodeCount;
-                        if (
-                            path.nodeCount <= 0
-                                || !wcsncmp(path.suffix, L"-", 1)
-                        ) {
-                            model->naturalPoint = model->drag[path.nodeCount];
-                            SetCursorPos(
-                                model->naturalPoint.x, model->naturalPoint.y
-                            );
-                            wasChecked = TRUE;
-                        } else {
-                            model->naturalPoint
-                                = model->drag[path.nodeCount - 1];
-                            wasChecked = FALSE;
-                        }
-                    }
-                }
+
+                DragMenuState dragMenuState = getDragMenuState(model);
 
                 Screen screen = getScreen(&model->monitor);
                 Layout layout = getLayout(model, screen);
@@ -3807,30 +3710,9 @@ LRESULT CALLBACK DlgProc(
                     unsetMatchPoint(model);
                 }
 
-                updateDragChecked(model, wasChecked);
-                updateDragEnabled(model, wasEnabled);
-                redraw(model, screen);
-                LPWSTR newText = NULL;
-                if (path.hidePath) {
-                    model->showingPath = FALSE;
-                    newText = path.suffix;
-                } else if (path.nodeCount > model->dragCount) {
-                    newText = textFromPath(model->dragCount, path.suffix);
-                }
+                updateDragMenuState(model, dragMenuState);
 
-                if (newText) {
-                    HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-                    DWORD start, stop;
-                    SendMessage(
-                        textBox, EM_GETSEL, (WPARAM)&start, (LPARAM)&stop
-                    );
-                    int delta = wcslen(newText) - wcslen(model->text);
-                    SetWindowText(textBox, newText);
-                    SendMessage(
-                        textBox, EM_SETSEL,
-                        max(0, start + delta), max(0, stop + delta)
-                    );
-                }
+                redraw(model, screen);
 
                 SendMessage(
                     model->tooltip, TTM_TRACKACTIVATE, FALSE,
@@ -3925,7 +3807,6 @@ int CALLBACK WinMain(
         .text = L"",
         .hasMatch = FALSE,
         .dragCount = 0,
-        .showingPath = FALSE,
         .actions = NULL,
         .actionCount = 0,
     };
