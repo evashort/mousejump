@@ -1383,6 +1383,7 @@ int getBubbleCount(
 typedef union {
     int milliseconds;
     POINT point;
+    DWORD clickType;
 } ActionParam;
 ActionParam actionParamNone;
 ActionParam actionParamMilliseconds(int milliseconds) {
@@ -1390,6 +1391,9 @@ ActionParam actionParamMilliseconds(int milliseconds) {
 }
 ActionParam actionParamPoint(POINT point) {
     actionParamNone.point = point; return actionParamNone;
+}
+ActionParam actionParamClickType(DWORD clickType) {
+    actionParamNone.clickType = clickType; return actionParamNone;
 }
 
 // https://stackoverflow.com/questions/7259238/how-to-forward-typedefd-struct-in-h
@@ -2696,19 +2700,10 @@ BOOL sleep(Model *model, ActionParam param) {
     return FALSE;
 }
 
-BOOL mouseDown(Model *model, ActionParam param) {
+BOOL mouseButton(Model *model, ActionParam param) {
     INPUT input = {
         .type = INPUT_MOUSE,
-        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0 },
-    };
-    SendInput(1, &input, sizeof(input));
-    return TRUE;
-}
-
-BOOL mouseUp(Model *model, ActionParam param) {
-    INPUT input = {
-        .type = INPUT_MOUSE,
-        .mi = { 0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0 },
+        .mi = { 0, 0, 0, param.clickType, 0, 0 },
     };
     SendInput(1, &input, sizeof(input));
     return TRUE;
@@ -2787,6 +2782,88 @@ Point addDrag(
     }
 
     return getFinalTangent(control.p[1]);
+}
+
+BOOL clickOrDrag(
+    Model *model, DragMenuState state, DWORD downType, DWORD upType
+) {
+    POINT cursor;
+    GetCursorPos(&cursor);
+    addAction(model, sleep, actionParamMilliseconds(100));
+    // use state.count rather than model->dragCount so that we ignore the
+    // final drag segment if it has zero length
+    if (state.count > 0) {
+        if (
+            // this whole condition is equivalent to (state.count > 2) unless
+            // something other than this program moved the cursor since the
+            // second drag segment was finalized. during testing I kept moving
+            // the cursor with the mouse and getting confused why it wasn't
+            // clicking before dragging so I changed it back to this.
+            model->dragCount > 2 && (
+                cursor.x != model->drag[2].x
+                    || cursor.y != model->drag[2].y
+            )
+        ) {
+            // if user has moved the cursor since setting the end of the
+            // 2-segment drag, assume they are trying to re-activate the
+            // starting window or tab before dragging
+            addAction(
+                model, mouseButton, actionParamClickType(MOUSEEVENTF_LEFTDOWN)
+            );
+            addAction(
+                model, mouseButton, actionParamClickType(MOUSEEVENTF_LEFTUP)
+            );
+            addAction(model, sleep, actionParamMilliseconds(100));
+        }
+
+        Screen screen = getScreen(&model->monitor);
+        POINT dragStart = model->drag[0];
+        addAction(model, mouseToPoint, actionParamPoint(dragStart));
+        addAction(model, mouseButton, actionParamClickType(downType));
+        POINT dragMid = model->dragCount > 1 ? model->drag[1] : cursor;
+
+        // as in (tangent, normal) not (sin, cos, tan)
+        Point lastTangent = { 0, -1 };
+        Point idealNormal = getIdealNormal(screen, dragStart);
+        if (idealNormal.x == 0 && idealNormal.y == 0) {
+            idealNormal = lastTangent;
+        }
+
+        lastTangent = addDrag(
+            model, screen.dpi, dragStart, dragMid, idealNormal,
+            200, // durationMs
+            20, // segmentCount
+            8, // maxInitialPx
+            40 // maxSegmentPx
+        );
+        if (state.count > 1) {
+            addAction(model, sleep, actionParamMilliseconds(1000));
+            POINT dragStop = model->dragCount > 2 ? model->drag[2] : cursor;
+
+            idealNormal = getIdealNormal(screen, dragStart);
+            if (idealNormal.x == 0 && idealNormal.y == 0) {
+                idealNormal = lastTangent;
+            }
+
+            lastTangent = addDrag(
+                model, screen.dpi, dragMid, dragStop, idealNormal,
+                200, // durationMs
+                20, // segmentCount
+                8, // maxInitialPx
+                40 // maxSegmentPx
+            );
+        }
+        addAction(model, sleep, actionParamMilliseconds(100));
+    } else {
+        addAction(model, mouseButton, actionParamClickType(downType));
+    }
+
+    addAction(model, mouseButton, actionParamClickType(upType));
+    addAction(model, sleep, actionParamMilliseconds(100));
+    addAction(model, clearTextbox, actionParamNone);
+    ShowWindow(model->window, SW_MINIMIZE);
+    doActions(model);
+    return TRUE;
 }
 
 LRESULT CALLBACK DlgProc(
@@ -3483,75 +3560,50 @@ LRESULT CALLBACK DlgProc(
 
                 return TRUE;
             } else if (command == IDM_CLICK) {
-                POINT cursor;
-                GetCursorPos(&cursor);
                 Model *model = getModel(dialog);
-                addAction(model, sleep, actionParamMilliseconds(100));
                 DragMenuState state = getDragMenuState(model);
-                // use state.count rather than model->dragCount so that we
-                // ignore the final drag segment if it has zero length
-                if (state.count > 0) {
-                    if (state.count > 2) {
-                        // if user has moved the cursor since setting the end
-                        // of the 2-segment drag, assume they are trying to
-                        // re-activate the starting window or tab before
-                        // dragging
-                        addAction(model, mouseDown, actionParamNone);
-                        addAction(model, mouseUp, actionParamNone);
-                        addAction(model, sleep, actionParamMilliseconds(100));
-                    }
-
-                    Screen screen = getScreen(&model->monitor);
-                    POINT dragStart = model->drag[0];
-                    addAction(
-                        model, mouseToPoint, actionParamPoint(dragStart)
-                    );
-                    addAction(model, mouseDown, actionParamNone);
-                    POINT dragMid = model->dragCount > 1 ? model->drag[1]
-                        : cursor;
-
-                    // as in (tangent, normal) not (sin, cos, tan)
-                    Point lastTangent = { 0, -1 };
-                    Point idealNormal = getIdealNormal(screen, dragStart);
-                    if (idealNormal.x == 0 && idealNormal.y == 0) {
-                        idealNormal = lastTangent;
-                    }
-
-                    lastTangent = addDrag(
-                        model, screen.dpi, dragStart, dragMid, idealNormal,
-                        200, // durationMs
-                        20, // segmentCount
-                        8, // maxInitialPx
-                        40 // maxSegmentPx
-                    );
-                    if (state.count > 1) {
-                        addAction(
-                            model, sleep, actionParamMilliseconds(1000)
-                        );
-                        POINT dragStop = model->dragCount > 2 ? model->drag[2]
-                            : cursor;
-
-                        idealNormal = getIdealNormal(screen, dragStart);
-                        if (idealNormal.x == 0 && idealNormal.y == 0) {
-                            idealNormal = lastTangent;
-                        }
-
-                        lastTangent = addDrag(
-                            model, screen.dpi, dragMid, dragStop, idealNormal,
-                            200, // durationMs
-                            20, // segmentCount
-                            8, // maxInitialPx
-                            40 // maxSegmentPx
-                        );
-                    }
-                    addAction(
-                        model, sleep, actionParamMilliseconds(100)
-                    );
-                } else {
-                    addAction(model, mouseDown, actionParamNone);
+                return clickOrDrag(
+                    model, state, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP
+                );
+            } else if (command == IDM_RIGHT_CLICK) {
+                Model *model = getModel(dialog);
+                DragMenuState state = getDragMenuState(model);
+                return clickOrDrag(
+                    model, state, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP
+                );
+            } else if (command == IDM_WHEEL_CLICK) {
+                Model *model = getModel(dialog);
+                DragMenuState state = getDragMenuState(model);
+                // use state.count instead of model->dragCount to ignore empty
+                // segments
+                if (state.count >= 2) {
+                    return FALSE; // 2-segment wheel drag is just not useful
                 }
 
-                addAction(model, mouseUp, actionParamNone);
+                return clickOrDrag(
+                    model, state, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP
+                );
+            } else if (command == IDM_DOUBLE_CLICK) {
+                Model *model = getModel(dialog);
+                DragMenuState state = getDragMenuState(model);
+                if (state.count > 0) { return FALSE; }
+                addAction(model, sleep, actionParamMilliseconds(100));
+                addAction(
+                    model, mouseButton,
+                    actionParamClickType(MOUSEEVENTF_LEFTDOWN)
+                );
+                addAction(
+                    model, mouseButton,
+                    actionParamClickType(MOUSEEVENTF_LEFTUP)
+                );
+                addAction(
+                    model, mouseButton,
+                    actionParamClickType(MOUSEEVENTF_LEFTDOWN)
+                );
+                addAction(
+                    model, mouseButton,
+                    actionParamClickType(MOUSEEVENTF_LEFTUP)
+                );
                 addAction(model, sleep, actionParamMilliseconds(100));
                 addAction(model, clearTextbox, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
@@ -3582,13 +3634,29 @@ LRESULT CALLBACK DlgProc(
                     model->dragCount++;
                     newText = L"";
                     if (model->dragCount == 2) {
-                        addAction(model, mouseDown, actionParamNone);
-                        addAction(model, mouseUp, actionParamNone);
+                        addAction(
+                            model,
+                            mouseButton,
+                            actionParamClickType(MOUSEEVENTF_LEFTDOWN)
+                        );
+                        addAction(
+                            model,
+                            mouseButton,
+                            actionParamClickType(MOUSEEVENTF_LEFTUP)
+                        );
                         addAction(model, sleep, actionParamMilliseconds(100));
                     }
                 } else {
-                    addAction(model, mouseDown, actionParamNone);
-                    addAction(model, mouseUp, actionParamNone);
+                    addAction(
+                        model,
+                        mouseButton,
+                        actionParamClickType(MOUSEEVENTF_LEFTDOWN)
+                    );
+                    addAction(
+                        model,
+                        mouseButton,
+                        actionParamClickType(MOUSEEVENTF_LEFTUP)
+                    );
                     addAction(model, sleep, actionParamMilliseconds(100));
                     addAction(model, mouseToDragEnd, actionParamNone);
                 }
