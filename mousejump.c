@@ -2471,21 +2471,30 @@ DragMenuState getDragMenuState(Model *model) {
     return result;
 }
 
+int getClickTextIndex(int count) {
+    return (count > 0) + (count >= 3);
+}
 
 LPWSTR dragMenuTexts[4] = {
     L"Set &drag start\tComma (,)",
     L"Click, set &drag midpoint\tComma (,)",
     L"Set &drag end\tComma (,)",
-    L"Click (preserves &drag path)\tComma (,)",
+    L"Click (without &dragging)\tComma (,)",
 };
-LPWSTR clickTexts[2] = {
-    L"&Click\tSpacebar", L"Dra&g\tSpacebar",
+LPWSTR clickTexts[3] = {
+    L"&Click\tSpacebar",
+    L"Dra&g\tSpacebar",
+    L"Click, then dra&g\tSpacebar",
 };
-LPWSTR rightClickTexts[2] = {
-    L"&Right-click\tPeriod (.)", L"Drag with &right mouse button\tPeriod (.)",
+LPWSTR rightClickTexts[3] = {
+    L"&Right-click\tPeriod (.)",
+    L"Drag with &right mouse button\tPeriod (.)",
+    L"Click, then drag with &right mouse button\tPeriod (.)",
 };
-LPWSTR wheelClickTexts[2] = {
-    L"&Click\tSingle-quote (')", L"Dra&g\tSingle-quote (')",
+LPWSTR wheelClickTexts[3] = {
+    L"&Click\tSingle-quote (')",
+    L"Dra&g\tSingle-quote (')",
+    L"Dra&g\tSingle-quote (')",
 };
 void updateDragMenuState(Model *model, DragMenuState oldState) {
     DragMenuState state = getDragMenuState(model);
@@ -2501,21 +2510,29 @@ void updateDragMenuState(Model *model, DragMenuState oldState) {
     };
     SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &info);
 
-    if ((state.count > 0) == (oldState.count > 0)) { return; }
+    if (state.count == oldState.count) { return; }
+    int clickTextIndex = getClickTextIndex(state.count);
+    MENUITEMINFO wheel = {
+        .cbSize = sizeof(MENUITEMINFO),
+        .fMask = MIIM_STATE | MIIM_STRING,
+        .fState = state.count >= 2 ? MFS_DISABLED : MFS_ENABLED,
+        .dwTypeData = wheelClickTexts[clickTextIndex],
+    };
+    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &wheel);
+
+    if (clickTextIndex == getClickTextIndex(oldState.count)) { return; }
     MENUITEMINFO click = {
         .cbSize = sizeof(MENUITEMINFO),
         .fMask = MIIM_STRING,
-        .dwTypeData = clickTexts[state.count > 0],
+        .dwTypeData = clickTexts[clickTextIndex],
     };
     SetMenuItemInfo(getDropdownMenu(), IDM_CLICK, FALSE, &click);
-    click.dwTypeData = rightClickTexts[state.count > 0];
+    click.dwTypeData = rightClickTexts[clickTextIndex];
     SetMenuItemInfo(getDropdownMenu(), IDM_RIGHT_CLICK, FALSE, &click);
-    click.dwTypeData = wheelClickTexts[state.count > 0];
-    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &click);
     MENUITEMINFO doubleClick = {
         .cbSize = sizeof(MENUITEMINFO),
         .fMask = MIIM_STATE,
-        .fState = state.count > 0 ? MFS_DISABLED : MFS_ENABLED,
+        .fState = clickTextIndex > 0 ? MFS_DISABLED : MFS_ENABLED,
     };
     SetMenuItemInfo(getDropdownMenu(), IDM_DOUBLE_CLICK, FALSE, &doubleClick);
 }
