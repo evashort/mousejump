@@ -2475,6 +2475,10 @@ DragMenuState getDragMenuState(Model *model) {
     return result;
 }
 
+BOOL getDragStarted(DragMenuState state) {
+    return state.count > 0 || state.checked;
+}
+
 int getClickTextIndex(int count) {
     return (count > 0) + (count >= 3);
 }
@@ -2506,39 +2510,46 @@ void updateDragMenuState(Model *model, DragMenuState oldState) {
         return;
     }
 
-    MENUITEMINFO info = {
+    MENUITEMINFO dragInfo = {
         .cbSize = sizeof(MENUITEMINFO),
         .fMask = MIIM_STATE | MIIM_STRING,
         .fState = state.checked ? MFS_CHECKED : MFS_UNCHECKED,
         .dwTypeData = dragMenuTexts[state.count],
     };
-    SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &info);
+    SetMenuItemInfo(getDropdownMenu(), IDM_DRAG, FALSE, &dragInfo);
+
+    MENUITEMINFO enabledInfo = {
+        .cbSize = sizeof(MENUITEMINFO), .fMask = MIIM_STATE,
+    };
+    BOOL dragStarted = getDragStarted(state);
+    if (dragStarted != getDragStarted(oldState)) {
+        enabledInfo.fState = dragStarted ? MFS_ENABLED : MFS_DISABLED;
+        SetMenuItemInfo(
+            getDropdownMenu(), IDM_REMOVE_DRAG, FALSE, &enabledInfo
+        );
+    }
 
     if (state.count == oldState.count) { return; }
     int clickTextIndex = getClickTextIndex(state.count);
-    MENUITEMINFO wheel = {
+    MENUITEMINFO wheelInfo = {
         .cbSize = sizeof(MENUITEMINFO),
         .fMask = MIIM_STATE | MIIM_STRING,
         .fState = state.count >= 2 ? MFS_DISABLED : MFS_ENABLED,
         .dwTypeData = wheelClickTexts[clickTextIndex],
     };
-    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &wheel);
+    SetMenuItemInfo(getDropdownMenu(), IDM_WHEEL_CLICK, FALSE, &wheelInfo);
 
     if (clickTextIndex == getClickTextIndex(oldState.count)) { return; }
-    MENUITEMINFO click = {
+    MENUITEMINFO textInfo = {
         .cbSize = sizeof(MENUITEMINFO),
         .fMask = MIIM_STRING,
         .dwTypeData = clickTexts[clickTextIndex],
     };
-    SetMenuItemInfo(getDropdownMenu(), IDM_CLICK, FALSE, &click);
-    click.dwTypeData = rightClickTexts[clickTextIndex];
-    SetMenuItemInfo(getDropdownMenu(), IDM_RIGHT_CLICK, FALSE, &click);
-    MENUITEMINFO doubleClick = {
-        .cbSize = sizeof(MENUITEMINFO),
-        .fMask = MIIM_STATE,
-        .fState = clickTextIndex > 0 ? MFS_DISABLED : MFS_ENABLED,
-    };
-    SetMenuItemInfo(getDropdownMenu(), IDM_DOUBLE_CLICK, FALSE, &doubleClick);
+    SetMenuItemInfo(getDropdownMenu(), IDM_CLICK, FALSE, &textInfo);
+    textInfo.dwTypeData = rightClickTexts[clickTextIndex];
+    SetMenuItemInfo(getDropdownMenu(), IDM_RIGHT_CLICK, FALSE, &textInfo);
+    enabledInfo.fState = clickTextIndex > 0 ? MFS_DISABLED : MFS_ENABLED;
+    SetMenuItemInfo(getDropdownMenu(), IDM_DOUBLE_CLICK, FALSE, &enabledInfo);
 }
 
 void updateShowLabelsChecked(BOOL focused) {
@@ -3681,11 +3692,30 @@ LRESULT CALLBACK DlgProc(
                 }
 
                 return TRUE;
+            } else if (command == IDM_REMOVE_DRAG) {
+                Model *model = getModel(dialog);
+                if (model->dragCount > 0) {
+                    DragMenuState dragMenuState = getDragMenuState(model);
+                    model->dragCount--;
+                    model->naturalPoint = model->drag[model->dragCount];
+                    SetCursorPos(
+                        model->naturalPoint.x, model->naturalPoint.y
+                    );
+                    updateDragMenuState(model, dragMenuState);
+                    LPCWSTR newText = model->dragCount > 0 ? L"-" : L"";
+                    HWND textBox = GetDlgItem(model->dialog, IDC_TEXTBOX);
+                    SetWindowText(textBox, newText);
+                    int length = wcslen(newText);
+                    SendMessage(textBox, EM_SETSEL, length, length);
+                }
+
+                return TRUE;
             } else if (command == IDM_SHOW_LABELS) {
                 HWND nextControl = GetNextDlgTabItem(
                     dialog, GetFocus(), FALSE
                 );
                 if (nextControl) { SetFocus(nextControl); }
+                return TRUE;
             } else if (command == IDM_SWITCH_MONITOR) {
                 Model *model = getModel(dialog);
                 MonitorCallbackVars vars = {
@@ -3858,12 +3888,11 @@ int TranslateAcceleratorCustom(HWND dialog, MSG *message) {
                     ) { return 0; }
                 }
             }
-        } else if (message->wParam == VK_BACK && getModifiers() == 0) {
-            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-            if (GetFocus() == textBox) { return 0; }
-        } else if (message->wParam == VK_DELETE && getModifiers() == 0) {
-            HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
-            if (GetFocus() == textBox) { return 0; }
+        } else if (message->wParam == VK_BACK) {
+            if (
+                getModifiers() == 0
+                    && GetFocus() == GetDlgItem(dialog, IDC_TEXTBOX)
+            ) { return 0; }
         }
     }
     return TranslateAccelerator(dialog, getAcceleratorTable(), message);

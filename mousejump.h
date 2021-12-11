@@ -24,3 +24,4 @@
 #define IDM_SETTINGS 25
 #define IDM_EXIT 26
 #define IDM_SELECT_ALL 27
+#define IDM_REMOVE_DRAG 28
