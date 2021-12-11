@@ -2694,7 +2694,7 @@ const int PRESSED = 0x8000;
 typedef enum {
     WM_APP_FITTOTEXT = WM_APP, WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS,
 } AppMessage;
-typedef enum { DO_ACTIONS_TIMER } TimerID;
+typedef enum { DO_ACTIONS_TIMER, REDRAW_TIMER } TimerID;
 BOOL sleep(Model *model, ActionParam param) {
     SetTimer(model->dialog, DO_ACTIONS_TIMER, param.milliseconds, NULL);
     return FALSE;
@@ -3328,6 +3328,11 @@ LRESULT CALLBACK DlgProc(
         KillTimer(dialog, wParam);
         doActions(getModel(dialog));
         return TRUE;
+    } else if (message == WM_TIMER && wParam == REDRAW_TIMER) {
+        KillTimer(dialog, wParam);
+        Model *model = getModel(dialog);
+        redraw(model, getScreen(&model->monitor));
+        return TRUE;
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
     } else if (message == WM_APP_SETTINGS_CHANGED) {
@@ -3717,10 +3722,11 @@ LRESULT CALLBACK DlgProc(
                 BOOL focused = focus == GetDlgItem(dialog, IDC_TEXTBOX);
                 updateShowLabelsChecked(focused);
 
+                // redraw in case label visibility changed
+                SetTimer(dialog, REDRAW_TIMER, 0, NULL);
+
                 Model *model = getModel(dialog);
                 if (model->showCaption && model->toolText == NULL) {
-                    // redraw in case label visibility changed
-                    redraw(model, getScreen(&model->monitor));
                     return TRUE;
                 }
 
@@ -3766,8 +3772,6 @@ LRESULT CALLBACK DlgProc(
                     ignorePop = FALSE;
                 }
 
-                // redraw in case label visibility changed
-                redraw(model, getScreen(&model->monitor));
                 return TRUE;
             } else if (HIWORD(wParam) == EN_UPDATE) {
                 HWND textBox = GetDlgItem(dialog, IDC_TEXTBOX);
