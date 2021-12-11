@@ -6,7 +6,7 @@
     "grid": {
         "aspectRatio": 1.3333333333333333,
         "cellSize": 30,
-        "edgeDensity": 1,
+        "edgeDensity": 0.5,
         "rotation": 15,
         "skewAngle": 60
     },
