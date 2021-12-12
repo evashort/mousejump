@@ -10,6 +10,8 @@
 #include <ShellScalingApi.h>
 #include <commctrl.h>
 #include <windows.h>
+#include <combaseapi.h>
+#include <shobjidl_core.h>
 #include "./file_watcher.h"
 #include "./json_parser.h"
 
@@ -20,6 +22,7 @@
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "SHCore")
 #pragma comment(lib, "comctl32")
+#pragma comment(lib, "Ole32")
 // https://docs.microsoft.com/en-us/windows/win32/controls/cookbook-overview
 #pragma comment(linker, "\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
@@ -1380,6 +1383,20 @@ int getBubbleCount(
     );
 }
 
+ITaskbarList3 *taskbarOut = NULL;
+ITaskbarList3 *getTaskbar() {
+    if (taskbarOut != NULL) { return taskbarOut; }
+    CoCreateInstance(
+        &CLSID_TaskbarList,
+        NULL,
+        CLSCTX_INPROC_SERVER,
+        &IID_ITaskbarList3,
+        (void**)&taskbarOut
+    );
+    taskbarOut->lpVtbl->HrInit(taskbarOut);
+    return taskbarOut;
+}
+
 typedef union {
     int milliseconds;
     POINT point;
@@ -1474,6 +1491,7 @@ void destroyCache() {
     free(bubblesOut.bubbles);
     free(bubblesOut.added);
     free(bubblesOut.removed);
+    if (taskbarOut != NULL) { taskbarOut->lpVtbl->Release(taskbarOut); }
     free(actionListOut.actions);
 }
 
@@ -1528,6 +1546,8 @@ struct Model {
     POINT drag[3];
     Action *actions;
     int actionCount;
+    int actionDurationMs;
+    int actionElapsedMs;
 };
 
 BOOL shouldShowLabels(Model *model) {
@@ -2611,33 +2631,6 @@ BOOL __stdcall SwitchMonitorCallback(
     return TRUE;
 }
 
-void addAction(
-    Model *model, BOOL (*function)(Model*, ActionParam), ActionParam param
-) {
-    model->actions = getActionList(model->actionCount + 1, model->actions);
-    model->actions[model->actionCount].function = function;
-    model->actions[model->actionCount].param = param;
-    model->actionCount++;
-}
-
-void doActions(Model *model) {
-    if (!IsIconic(model->window)) {
-        model->actions += model->actionCount;
-        model->actionCount = 0;
-    }
-
-    BOOL keepGoing = TRUE;
-    while (keepGoing && model->actionCount > 0) {
-        keepGoing = model->actions->function(model, model->actions->param);
-        model->actions++;
-        model->actionCount--;
-    }
-
-    if (keepGoing && IsIconic(model->window)) {
-        ShowWindow(model->window, SW_RESTORE);
-    }
-}
-
 void setTooltip(
     Model *model, LPWSTR text, LPCWSTR title, DWORD icon, BOOL autoHide
 ) {
@@ -2701,11 +2694,27 @@ void setTooltip(
     model->autoHideTooltip = autoHide;
 }
 
+void setProgress(HWND window, ULONGLONG completed, ULONGLONG total) {
+    ITaskbarList3 *taskbar = getTaskbar();
+    taskbar->lpVtbl->SetProgressValue(taskbar, window, completed, total);
+}
+
+void clearProgress(HWND window) {
+    ITaskbarList3 *taskbar = getTaskbar();
+    taskbar->lpVtbl->SetProgressState(taskbar, window, TBPF_NOPROGRESS);
+    taskbar->lpVtbl->SetProgressValue(taskbar, window, 0, 1);
+}
+
+void errorProgress(HWND window) {
+    ITaskbarList3 *taskbar = getTaskbar();
+    taskbar->lpVtbl->SetProgressState(taskbar, window, TBPF_ERROR);
+}
+
 const int PRESSED = 0x8000;
 typedef enum {
     WM_APP_FITTOTEXT = WM_APP, WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS,
 } AppMessage;
-typedef enum { DO_ACTIONS_TIMER, REDRAW_TIMER } TimerID;
+typedef enum { DO_ACTIONS_TIMER, REDRAW_TIMER, CLEAR_PROGRESS_TIMER } TimerID;
 BOOL sleep(Model *model, ActionParam param) {
     SetTimer(model->dialog, DO_ACTIONS_TIMER, param.milliseconds, NULL);
     return FALSE;
@@ -2736,6 +2745,75 @@ BOOL clearTextbox(Model *model, ActionParam param) {
     updateDragMenuState(model, dragMenuState);
     SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
     return TRUE;
+}
+
+void addAction(
+    Model *model, BOOL (*function)(Model*, ActionParam), ActionParam param
+) {
+    if (model->actionCount == 0) {
+        model->actionDurationMs = 0;
+        model->actionElapsedMs = 0;
+    }
+
+    model->actions = getActionList(model->actionCount + 1, model->actions);
+    model->actions[model->actionCount].function = function;
+    model->actions[model->actionCount].param = param;
+    model->actionCount++;
+    if (function == sleep) {
+        model->actionDurationMs += param.milliseconds;
+    }
+}
+
+void doActions(Model *model) {
+    if (!IsIconic(model->window)) {
+        model->actions += model->actionCount;
+        model->actionCount = 0;
+        errorProgress(model->window);
+        SetTimer(model->dialog, CLEAR_PROGRESS_TIMER, 2000, NULL);
+        return;
+    } else {
+        KillTimer(model->dialog, CLEAR_PROGRESS_TIMER);
+    }
+
+    BOOL keepGoing = TRUE;
+    while (keepGoing && model->actionCount > 0) {
+        if (model->actions->function == sleep) {
+            setProgress(
+                model->window,
+                model->actionElapsedMs * 2
+                    + model->actions->param.milliseconds,
+                model->actionDurationMs * 2
+            );
+            model->actionElapsedMs += model->actions->param.milliseconds;
+        }
+
+        keepGoing = model->actions->function(model, model->actions->param);
+        model->actions++;
+        model->actionCount--;
+    }
+
+    if (keepGoing) {
+        setProgress(
+            model->window,
+            model->actionDurationMs * 2,
+            model->actionDurationMs * 2
+        );
+        SetTimer(model->dialog, CLEAR_PROGRESS_TIMER, 500, NULL);
+        if (IsIconic(model->window)) {
+            ShowWindow(model->window, SW_RESTORE);
+        }
+    }
+}
+
+void addSleep(Model *model, int ms) {
+    const int MAX_SLEEP_INTERVAL = 50;
+    int intervalCount = max(ms / MAX_SLEEP_INTERVAL, 1);
+    int elapsed = 0;
+    for (int i = 0; i < intervalCount; i++) {
+        int interval = ms * (i + 1) / intervalCount - elapsed;
+        addAction(model, sleep, actionParamMilliseconds(interval));
+        elapsed += interval;
+    }
 }
 
 Point addDrag(
@@ -2785,7 +2863,7 @@ Point addDrag(
     int lastMs = 0;
     for (int i = 1; i <= segmentCount; i++) {
         int ms = (int)round(durationMs * i / segmentCount);
-        addAction(model, sleep, actionParamMilliseconds(ms - lastMs));
+        addSleep(model, ms - lastMs);
         lastMs = ms;
         double t = initialT + (1 - initialT) * i / segmentCount;
         Point point = interpolateBezier(a, b, c, d, t);
@@ -2800,7 +2878,7 @@ BOOL clickOrDrag(
 ) {
     POINT cursor;
     GetCursorPos(&cursor);
-    addAction(model, sleep, actionParamMilliseconds(100));
+    addSleep(model, 100);
     // use state.count rather than model->dragCount so that we ignore the
     // final drag segment if it has zero length
     if (state.count > 0) {
@@ -2824,7 +2902,7 @@ BOOL clickOrDrag(
             addAction(
                 model, mouseButton, actionParamClickType(MOUSEEVENTF_LEFTUP)
             );
-            addAction(model, sleep, actionParamMilliseconds(100));
+            addSleep(model, 100);
         }
 
         Screen screen = getScreen(&model->monitor);
@@ -2848,7 +2926,7 @@ BOOL clickOrDrag(
             40 // maxSegmentPx
         );
         if (state.count > 1) {
-            addAction(model, sleep, actionParamMilliseconds(1000));
+            addSleep(model, 1000);
             POINT dragStop = model->dragCount > 2 ? model->drag[2] : cursor;
 
             idealNormal = getIdealNormal(screen, dragStart);
@@ -2864,13 +2942,13 @@ BOOL clickOrDrag(
                 40 // maxSegmentPx
             );
         }
-        addAction(model, sleep, actionParamMilliseconds(100));
+        addSleep(model, 100);
     } else {
         addAction(model, mouseButton, actionParamClickType(downType));
     }
 
     addAction(model, mouseButton, actionParamClickType(upType));
-    addAction(model, sleep, actionParamMilliseconds(100));
+    addSleep(model, 100);
     addAction(model, clearTextbox, actionParamNone);
     ShowWindow(model->window, SW_MINIMIZE);
     doActions(model);
@@ -3344,6 +3422,10 @@ LRESULT CALLBACK DlgProc(
         Model *model = getModel(dialog);
         redraw(model, getScreen(&model->monitor));
         return TRUE;
+    } else if (message == WM_TIMER && wParam == CLEAR_PROGRESS_TIMER) {
+        KillTimer(dialog, wParam);
+        clearProgress(GetWindowOwner(dialog));
+        return TRUE;
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
     } else if (message == WM_APP_SETTINGS_CHANGED) {
@@ -3603,7 +3685,7 @@ LRESULT CALLBACK DlgProc(
                 Model *model = getModel(dialog);
                 DragMenuState state = getDragMenuState(model);
                 if (state.count > 0) { return FALSE; }
-                addAction(model, sleep, actionParamMilliseconds(100));
+                addSleep(model, 100);
                 addAction(
                     model, mouseButton,
                     actionParamClickType(MOUSEEVENTF_LEFTDOWN)
@@ -3620,7 +3702,7 @@ LRESULT CALLBACK DlgProc(
                     model, mouseButton,
                     actionParamClickType(MOUSEEVENTF_LEFTUP)
                 );
-                addAction(model, sleep, actionParamMilliseconds(100));
+                addSleep(model, 100);
                 addAction(model, clearTextbox, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
@@ -3660,7 +3742,7 @@ LRESULT CALLBACK DlgProc(
                             mouseButton,
                             actionParamClickType(MOUSEEVENTF_LEFTUP)
                         );
-                        addAction(model, sleep, actionParamMilliseconds(100));
+                        addSleep(model, 100);
                     }
                 } else {
                     addAction(
@@ -3673,7 +3755,7 @@ LRESULT CALLBACK DlgProc(
                         mouseButton,
                         actionParamClickType(MOUSEEVENTF_LEFTUP)
                     );
-                    addAction(model, sleep, actionParamMilliseconds(100));
+                    addSleep(model, 100);
                     addAction(model, mouseToDragEnd, actionParamNone);
                 }
 
@@ -3927,6 +4009,8 @@ int CALLBACK WinMain(
         .dragCount = 0,
         .actions = NULL,
         .actionCount = 0,
+        .actionDurationMs = 0,
+        .actionElapsedMs = 0,
     };
     WatcherError initError = initializeWatcher(
         &model.watcherData, model.settingsPath,
