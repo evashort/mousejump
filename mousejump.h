@@ -25,3 +25,10 @@
 #define IDM_EXIT 26
 #define IDM_SELECT_ALL 27
 #define IDM_REMOVE_DRAG 28
+#define ICO_MOUSE 101
+#define ICO_LEFT_DOWN 102
+#define ICO_LEFT_UP 103
+#define ICO_RIGHT_DOWN 104
+#define ICO_RIGHT_UP 105
+#define ICO_WHEEL_DOWN 106
+#define ICO_WHEEL_UP 107

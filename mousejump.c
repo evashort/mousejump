@@ -1401,6 +1401,7 @@ typedef union {
     int milliseconds;
     POINT point;
     DWORD clickType;
+    HICON icon;
 } ActionParam;
 ActionParam actionParamNone;
 ActionParam actionParamMilliseconds(int milliseconds) {
@@ -1411,6 +1412,9 @@ ActionParam actionParamPoint(POINT point) {
 }
 ActionParam actionParamClickType(DWORD clickType) {
     actionParamNone.clickType = clickType; return actionParamNone;
+}
+ActionParam actionParamIcon(HICON icon) {
+    actionParamNone.icon = icon; return actionParamNone;
 }
 
 // https://stackoverflow.com/questions/7259238/how-to-forward-typedefd-struct-in-h
@@ -1717,7 +1721,20 @@ Graphics *getGraphics(Model *model, Screen screen) {
             - ptToIntPx(model->mirrorHeightPt, screen.dpi);
     }
 
-    if (model->dragCount > 0) {
+    // hide drag path when window is minimized. this is a strange one. if you
+    // reveal the desktop and use MouseJump to drag across it, the drag will
+    // intermittently appear to move the MouseJump window instead of selecting
+    // desktop icons, as if the drag path is still obstructing the cursor,
+    // even though the drag path is no longer visible because the MouseJump
+    // window is already minimized by the time the mouse button is pressed.
+    // hiding the drag path after minimizing the window appears to fix this
+    // problem. there is no need to explicitly hide the labels as well because
+    // we hide them anyway when the textbox loses focus. you might wonder, if
+    // we already hide everything when dragging, couldn't we get away with not
+    // minimizing the window? well I tried that and after I used MouseJump to
+    // click in the lower right corner of my screen to reveal the desktop, the
+    // MouseJump dialog was no longer visible even though it was focused.
+    if (model->dragCount > 0 && !IsIconic(model->window)) {
         DragGraphics *dg = &graphics->dg;
         dg->labelBackground = model->labelBackground;
         dg->borderColor = model->borderColor;
@@ -2710,6 +2727,11 @@ void errorProgress(HWND window) {
     taskbar->lpVtbl->SetProgressState(taskbar, window, TBPF_ERROR);
 }
 
+void changeIcon(HWND window, DWORD resourceID) {
+    HICON icon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(resourceID));
+    SendMessage(window, WM_SETICON, ICON_BIG, (LPARAM)icon);
+}
+
 const int PRESSED = 0x8000;
 typedef enum {
     WM_APP_FITTOTEXT = WM_APP, WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS,
@@ -2744,6 +2766,11 @@ BOOL clearTextbox(Model *model, ActionParam param) {
     model->dragCount = 0;
     updateDragMenuState(model, dragMenuState);
     SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
+    return TRUE;
+}
+
+BOOL setIcon(Model *model, ActionParam param) {
+    SendMessage(model->window, WM_SETICON, ICON_BIG, (LPARAM)param.icon);
     return TRUE;
 }
 
@@ -2793,6 +2820,7 @@ void doActions(Model *model) {
     }
 
     if (keepGoing) {
+        // ironically, if keepGoing is true at this point it means we are done
         setProgress(
             model->window,
             model->actionDurationMs * 2,
@@ -2801,6 +2829,8 @@ void doActions(Model *model) {
         SetTimer(model->dialog, CLEAR_PROGRESS_TIMER, 500, NULL);
         if (IsIconic(model->window)) {
             ShowWindow(model->window, SW_RESTORE);
+            // redraw is necessary to display drag path if labels are hidden
+            redraw(model, getScreen(&model->monitor));
         }
     }
 }
@@ -2873,12 +2903,24 @@ Point addDrag(
     return getFinalTangent(control.p[1]);
 }
 
+void addIconChange(Model *model, DWORD resourceID) {
+    HICON icon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(resourceID));
+    addAction(model, setIcon, actionParamIcon(icon));
+}
+
 BOOL clickOrDrag(
     Model *model, DragMenuState state, DWORD downType, DWORD upType
 ) {
+    DWORD iconID = ICO_MOUSE;
+    switch (downType) {
+        case MOUSEEVENTF_LEFTDOWN: iconID = ICO_LEFT_DOWN; break;
+        case MOUSEEVENTF_RIGHTDOWN: iconID = ICO_RIGHT_DOWN; break;
+        case MOUSEEVENTF_MIDDLEDOWN: iconID = ICO_WHEEL_DOWN; break;
+    }
+
+    changeIcon(model->window, iconID);
     POINT cursor;
     GetCursorPos(&cursor);
-    addSleep(model, 100);
     // use state.count rather than model->dragCount so that we ignore the
     // final drag segment if it has zero length
     if (state.count > 0) {
@@ -2896,18 +2938,19 @@ BOOL clickOrDrag(
             // if user has moved the cursor since setting the end of the
             // 2-segment drag, assume they are trying to re-activate the
             // starting window or tab before dragging
+            addSleep(model, 100);
             addAction(
                 model, mouseButton, actionParamClickType(MOUSEEVENTF_LEFTDOWN)
             );
             addAction(
                 model, mouseButton, actionParamClickType(MOUSEEVENTF_LEFTUP)
             );
-            addSleep(model, 100);
         }
 
         Screen screen = getScreen(&model->monitor);
         POINT dragStart = model->drag[0];
         addAction(model, mouseToPoint, actionParamPoint(dragStart));
+        addSleep(model, 100);
         addAction(model, mouseButton, actionParamClickType(downType));
         POINT dragMid = model->dragCount > 1 ? model->drag[1] : cursor;
 
@@ -2944,10 +2987,17 @@ BOOL clickOrDrag(
         }
         addSleep(model, 100);
     } else {
+        addSleep(model, 100);
         addAction(model, mouseButton, actionParamClickType(downType));
     }
 
     addAction(model, mouseButton, actionParamClickType(upType));
+    switch (upType) {
+        case MOUSEEVENTF_LEFTUP: addIconChange(model, ICO_LEFT_UP); break;
+        case MOUSEEVENTF_RIGHTUP: addIconChange(model, ICO_RIGHT_UP); break;
+        case MOUSEEVENTF_MIDDLEUP: addIconChange(model, ICO_WHEEL_UP); break;
+    }
+
     addSleep(model, 100);
     addAction(model, clearTextbox, actionParamNone);
     ShowWindow(model->window, SW_MINIMIZE);
@@ -3685,6 +3735,8 @@ LRESULT CALLBACK DlgProc(
                 Model *model = getModel(dialog);
                 DragMenuState state = getDragMenuState(model);
                 if (state.count > 0) { return FALSE; }
+                // TODO: replace with double click icon
+                changeIcon(model->window, ICO_WHEEL_DOWN);
                 addSleep(model, 100);
                 addAction(
                     model, mouseButton,
@@ -3702,6 +3754,8 @@ LRESULT CALLBACK DlgProc(
                     model, mouseButton,
                     actionParamClickType(MOUSEEVENTF_LEFTUP)
                 );
+                // TODO: replace with double click icon
+                addIconChange(model, ICO_WHEEL_UP);
                 addSleep(model, 100);
                 addAction(model, clearTextbox, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
@@ -3732,6 +3786,8 @@ LRESULT CALLBACK DlgProc(
                     model->dragCount++;
                     newText = L"";
                     if (model->dragCount == 2) {
+                        changeIcon(model->window, ICO_LEFT_DOWN);
+                        addSleep(model, 100);
                         addAction(
                             model,
                             mouseButton,
@@ -3742,9 +3798,12 @@ LRESULT CALLBACK DlgProc(
                             mouseButton,
                             actionParamClickType(MOUSEEVENTF_LEFTUP)
                         );
+                        addIconChange(model, ICO_LEFT_UP);
                         addSleep(model, 100);
                     }
                 } else {
+                    changeIcon(model->window, ICO_LEFT_DOWN);
+                    addSleep(model, 100);
                     addAction(
                         model,
                         mouseButton,
@@ -3755,6 +3814,7 @@ LRESULT CALLBACK DlgProc(
                         mouseButton,
                         actionParamClickType(MOUSEEVENTF_LEFTUP)
                     );
+                    addIconChange(model, ICO_LEFT_UP);
                     addSleep(model, 100);
                     addAction(model, mouseToDragEnd, actionParamNone);
                 }
@@ -4057,7 +4117,7 @@ int CALLBACK WinMain(
     WNDCLASS windowClass = {
         .lpfnWndProc   = WndProc,
         .hInstance     = hInstance,
-        .hIcon         = LoadIcon(hInstance, (LPCWSTR)101),
+        .hIcon         = LoadIcon(hInstance, MAKEINTRESOURCE(ICO_MOUSE)),
         .hCursor       = LoadCursor(0, IDC_ARROW),
         // https://www.guidgenerator.com/
         .lpszClassName = L"MouseJump,b354100c-e6a7-4d32-a0bb-643e35a82fb0",
