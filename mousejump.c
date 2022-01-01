@@ -10,6 +10,8 @@
 #include <ShellScalingApi.h>
 #include <commctrl.h>
 #include <windows.h>
+#include <combaseapi.h>
+#include <shobjidl_core.h>
 #include "./file_watcher.h"
 #include "./json_parser.h"
 
@@ -20,6 +22,7 @@
 #pragma comment(lib, "gdi32")
 #pragma comment(lib, "SHCore")
 #pragma comment(lib, "comctl32")
+#pragma comment(lib, "Ole32")
 // https://docs.microsoft.com/en-us/windows/win32/controls/cookbook-overview
 #pragma comment(linker, "\"/manifestdependency:type='win32' \
 name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
@@ -1380,6 +1383,20 @@ int getBubbleCount(
     );
 }
 
+ITaskbarList3 *taskbarOut = NULL;
+ITaskbarList3 *getTaskbar() {
+    if (taskbarOut != NULL) { return taskbarOut; }
+    CoCreateInstance(
+        &CLSID_TaskbarList,
+        NULL,
+        CLSCTX_INPROC_SERVER,
+        &IID_ITaskbarList3,
+        (void**)&taskbarOut
+    );
+    taskbarOut->lpVtbl->HrInit(taskbarOut);
+    return taskbarOut;
+}
+
 typedef union {
     int milliseconds;
     POINT point;
@@ -1478,6 +1495,7 @@ void destroyCache() {
     free(bubblesOut.bubbles);
     free(bubblesOut.added);
     free(bubblesOut.removed);
+    if (taskbarOut != NULL) { taskbarOut->lpVtbl->Release(taskbarOut); }
     free(actionListOut.actions);
 }
 
@@ -4073,6 +4091,12 @@ int CALLBACK WinMain(
     );
     SetWindowLongPtr(model.window, GWLP_USERDATA, (LONG)&model);
     model.dialog = CreateDialog(hInstance, L"TOOL", model.window, DlgProc);
+
+    HICON icon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(ICO_PIN));
+    ITaskbarList3 *taskbar = getTaskbar();
+    taskbar->lpVtbl->SetOverlayIcon(
+        taskbar, model.window, icon, L"Keep open"
+    );
 
     MSG message;
     while (GetMessage(&message, NULL, 0, 0)) {

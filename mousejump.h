@@ -32,3 +32,4 @@
 #define ICO_RIGHT_UP 105
 #define ICO_WHEEL_DOWN 106
 #define ICO_WHEEL_UP 107
+#define ICO_PIN 108
