@@ -2921,13 +2921,13 @@ BOOL clickOrDrag(
     }
 
     addAction(model, mouseButton, actionParamClickType(upType));
+    addSleep(model, 100);
     switch (upType) {
         case MOUSEEVENTF_LEFTUP: addIconChange(model, ICO_LEFT_UP); break;
         case MOUSEEVENTF_RIGHTUP: addIconChange(model, ICO_RIGHT_UP); break;
         case MOUSEEVENTF_MIDDLEUP: addIconChange(model, ICO_WHEEL_UP); break;
     }
 
-    addSleep(model, 100);
     addAction(model, clearTextbox, actionParamNone);
     ShowWindow(model->window, SW_MINIMIZE);
     doActions(model);
@@ -3679,9 +3679,9 @@ LRESULT CALLBACK DlgProc(
                     model, mouseButton,
                     actionParamClickType(MOUSEEVENTF_LEFTUP)
                 );
+                addSleep(model, 100);
                 // TODO: replace with double click icon
                 addIconChange(model, ICO_WHEEL_UP);
-                addSleep(model, 100);
                 addAction(model, clearTextbox, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
@@ -3723,8 +3723,8 @@ LRESULT CALLBACK DlgProc(
                             mouseButton,
                             actionParamClickType(MOUSEEVENTF_LEFTUP)
                         );
-                        addIconChange(model, ICO_LEFT_UP);
                         addSleep(model, 100);
+                        addIconChange(model, ICO_LEFT_UP);
                     }
                 } else {
                     changeIcon(model->window, ICO_LEFT_DOWN);
@@ -3739,8 +3739,8 @@ LRESULT CALLBACK DlgProc(
                         mouseButton,
                         actionParamClickType(MOUSEEVENTF_LEFTUP)
                     );
-                    addIconChange(model, ICO_LEFT_UP);
                     addSleep(model, 100);
+                    addIconChange(model, ICO_LEFT_UP);
                     addAction(model, mouseToDragEnd, actionParamNone);
                 }
 
