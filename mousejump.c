@@ -2775,6 +2775,8 @@ BOOL mouseToDragEnd(Model *model, ActionParam param) {
 BOOL clearTextbox(Model *model, ActionParam param) {
     DragMenuState dragMenuState = getDragMenuState(model);
     model->dragCount = 0;
+    POINT cursor; GetCursorPos(&cursor);
+    model->naturalPoint = cursor;
     updateDragMenuState(model, dragMenuState);
     SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
     return TRUE;
