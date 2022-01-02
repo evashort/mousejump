@@ -3678,8 +3678,7 @@ LRESULT CALLBACK DlgProc(
                 Model *model = getModel(dialog);
                 DragMenuState state = getDragMenuState(model);
                 if (state.count > 0) { return FALSE; }
-                // TODO: replace with double click icon
-                changeIcon(model->window, ICO_WHEEL_DOWN);
+                changeIcon(model->window, ICO_DOUBLE_DOWN);
                 addSleep(model, 100);
                 addAction(
                     model, mouseButton,
@@ -3698,8 +3697,7 @@ LRESULT CALLBACK DlgProc(
                     actionParamClickType(MOUSEEVENTF_LEFTUP)
                 );
                 addSleep(model, 100);
-                // TODO: replace with double click icon
-                addIconChange(model, ICO_WHEEL_UP);
+                addIconChange(model, ICO_DOUBLE_UP);
                 addAction(model, clearTextbox, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
