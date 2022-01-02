@@ -1401,7 +1401,8 @@ typedef union {
     int milliseconds;
     POINT point;
     DWORD clickType;
-    HICON icon;
+    DWORD wheelDelta;
+    DWORD resourceID;
 } ActionParam;
 ActionParam actionParamNone;
 ActionParam actionParamMilliseconds(int milliseconds) {
@@ -1413,8 +1414,11 @@ ActionParam actionParamPoint(POINT point) {
 ActionParam actionParamClickType(DWORD clickType) {
     actionParamNone.clickType = clickType; return actionParamNone;
 }
-ActionParam actionParamIcon(HICON icon) {
-    actionParamNone.icon = icon; return actionParamNone;
+ActionParam actionParamWheelDelta(DWORD wheelDelta) {
+    actionParamNone.wheelDelta = wheelDelta; return actionParamNone;
+}
+ActionParam actionParamResourceID(DWORD resourceID) {
+    actionParamNone.resourceID = resourceID; return actionParamNone;
 }
 
 // https://stackoverflow.com/questions/7259238/how-to-forward-typedefd-struct-in-h
@@ -1550,6 +1554,7 @@ struct Model {
     POINT drag[3];
     Action *actions;
     int actionCount;
+    DWORD nextIcon;
 };
 
 BOOL shouldShowLabels(Model *model) {
@@ -2147,6 +2152,8 @@ void eraseDrag(
     }
 }
 
+typedef enum { DO_ACTIONS_TIMER, REDRAW_TIMER, CHANGE_ICON_TIMER } TimerID;
+
 Graphics *lastGraphics = &graphicsOut[0];
 void redraw(Model *model, Screen screen) {
     Graphics *graphics = getGraphics(model, screen);
@@ -2203,6 +2210,7 @@ void redraw(Model *model, Screen screen) {
     }
 
     DeleteDC(memory);
+    KillTimer(model->dialog, REDRAW_TIMER);
 }
 
 LPWSTR parseModel(
@@ -2709,16 +2717,28 @@ void setTooltip(
     model->autoHideTooltip = autoHide;
 }
 
-void changeIcon(HWND window, DWORD resourceID) {
-    HICON icon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(resourceID));
-    SendMessage(window, WM_SETICON, ICON_BIG, (LPARAM)icon);
+const int ICON_CHANGE_DELAY_MS = 200;
+void changeIcon(Model *model, DWORD resourceID, int delayMs) {
+    if (resourceID == 0) {
+        KillTimer(model->dialog, CHANGE_ICON_TIMER);
+        model->nextIcon = 0;
+    } else if (delayMs > 0) {
+        model->nextIcon = resourceID;
+        SetTimer(model->dialog, CHANGE_ICON_TIMER, delayMs, NULL);
+    } else {
+        KillTimer(model->dialog, CHANGE_ICON_TIMER);
+        model->nextIcon = 0;
+        HICON icon = LoadIcon(
+            GetModuleHandle(NULL), MAKEINTRESOURCE(resourceID)
+        );
+        SendMessage(model->window, WM_SETICON, ICON_BIG, (LPARAM)icon);
+    }
 }
 
 const int PRESSED = 0x8000;
 typedef enum {
     WM_APP_FITTOTEXT = WM_APP, WM_APP_SETTINGS_CHANGED, WM_APP_PARSE_SETTINGS,
 } AppMessage;
-typedef enum { DO_ACTIONS_TIMER, REDRAW_TIMER } TimerID;
 BOOL sleep(Model *model, ActionParam param) {
     SetTimer(model->dialog, DO_ACTIONS_TIMER, param.milliseconds, NULL);
     return FALSE;
@@ -2728,6 +2748,15 @@ BOOL mouseButton(Model *model, ActionParam param) {
     INPUT input = {
         .type = INPUT_MOUSE,
         .mi = { 0, 0, 0, param.clickType, 0, 0 },
+    };
+    SendInput(1, &input, sizeof(input));
+    return TRUE;
+}
+
+BOOL mouseWheel(Model *model, ActionParam param) {
+    INPUT input = {
+        .type = INPUT_MOUSE,
+        .mi = { 0, 0, param.wheelDelta, MOUSEEVENTF_WHEEL, 0, 0 },
     };
     SendInput(1, &input, sizeof(input));
     return TRUE;
@@ -2752,7 +2781,7 @@ BOOL clearTextbox(Model *model, ActionParam param) {
 }
 
 BOOL setIcon(Model *model, ActionParam param) {
-    SendMessage(model->window, WM_SETICON, ICON_BIG, (LPARAM)param.icon);
+    changeIcon(model, param.resourceID, 0);
     return TRUE;
 }
 
@@ -2850,11 +2879,6 @@ Point addDrag(
     return getFinalTangent(control.p[1]);
 }
 
-void addIconChange(Model *model, DWORD resourceID) {
-    HICON icon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(resourceID));
-    addAction(model, setIcon, actionParamIcon(icon));
-}
-
 BOOL clickOrDrag(
     Model *model, DragMenuState state, DWORD downType, DWORD upType
 ) {
@@ -2865,7 +2889,13 @@ BOOL clickOrDrag(
         case MOUSEEVENTF_MIDDLEDOWN: iconID = ICO_WHEEL_DOWN; break;
     }
 
-    changeIcon(model->window, iconID);
+    changeIcon(model, iconID, 0);
+    switch (upType) {
+        case MOUSEEVENTF_LEFTUP: iconID = ICO_LEFT_UP; break;
+        case MOUSEEVENTF_RIGHTUP: iconID = ICO_RIGHT_UP; break;
+        case MOUSEEVENTF_MIDDLEUP: iconID = ICO_WHEEL_UP; break;
+    }
+
     POINT cursor;
     GetCursorPos(&cursor);
     // use state.count rather than model->dragCount so that we ignore the
@@ -2933,17 +2963,15 @@ BOOL clickOrDrag(
             );
         }
         addSleep(model, 100);
+        addAction(model, mouseButton, actionParamClickType(upType));
+        addSleep(model, 100);
+        addAction(model, setIcon, actionParamResourceID(iconID));
     } else {
         addSleep(model, 100);
         addAction(model, mouseButton, actionParamClickType(downType));
-    }
-
-    addAction(model, mouseButton, actionParamClickType(upType));
-    addSleep(model, 100);
-    switch (upType) {
-        case MOUSEEVENTF_LEFTUP: addIconChange(model, ICO_LEFT_UP); break;
-        case MOUSEEVENTF_RIGHTUP: addIconChange(model, ICO_RIGHT_UP); break;
-        case MOUSEEVENTF_MIDDLEUP: addIconChange(model, ICO_WHEEL_UP); break;
+        addAction(model, mouseButton, actionParamClickType(upType));
+        addSleep(model, 100);
+        changeIcon(model, iconID, ICON_CHANGE_DELAY_MS);
     }
 
     addAction(model, clearTextbox, actionParamNone);
@@ -3415,9 +3443,14 @@ LRESULT CALLBACK DlgProc(
         doActions(getModel(dialog));
         return TRUE;
     } else if (message == WM_TIMER && wParam == REDRAW_TIMER) {
-        KillTimer(dialog, wParam);
         Model *model = getModel(dialog);
+        // redraw kills the timer so we don't have to
         redraw(model, getScreen(&model->monitor));
+        return TRUE;
+    } else if (message == WM_TIMER && wParam == CHANGE_ICON_TIMER) {
+        Model *model = getModel(dialog);
+        // changeIcon kills the timer so we don't have to
+        changeIcon(model, model->nextIcon, 0);
         return TRUE;
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
@@ -3678,7 +3711,7 @@ LRESULT CALLBACK DlgProc(
                 Model *model = getModel(dialog);
                 DragMenuState state = getDragMenuState(model);
                 if (state.count > 0) { return FALSE; }
-                changeIcon(model->window, ICO_DOUBLE_DOWN);
+                changeIcon(model, ICO_DOUBLE_DOWN, 0);
                 addSleep(model, 100);
                 addAction(
                     model, mouseButton,
@@ -3697,10 +3730,52 @@ LRESULT CALLBACK DlgProc(
                     actionParamClickType(MOUSEEVENTF_LEFTUP)
                 );
                 addSleep(model, 100);
-                addIconChange(model, ICO_DOUBLE_UP);
+                changeIcon(model, ICO_DOUBLE_UP, ICON_CHANGE_DELAY_MS);
                 addAction(model, clearTextbox, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
+                return TRUE;
+            } else if (command == IDM_ROTATE_UP) {
+                Model *model = getModel(dialog);
+                changeIcon(model, ICO_UPWARD_DOWN, 0);
+
+                HWND focus = GetFocus();
+                if (focus == GetDlgItem(dialog, IDC_TEXTBOX)) {
+                    HWND nextControl = GetNextDlgTabItem(
+                        dialog, focus, FALSE
+                    );
+                    if (nextControl) {
+                        SetFocus(nextControl);
+                        // manually redraw because unfocusing the textbox
+                        // redraws after a zero-second timer rather than
+                        // immediately
+                        redraw(model, getScreen(&model->monitor));
+                    }
+                }
+
+                mouseWheel(model, actionParamWheelDelta(WHEEL_DELTA));
+                changeIcon(model, ICO_UPWARD_UP, ICON_CHANGE_DELAY_MS);
+                return TRUE;
+            } else if (command == IDM_ROTATE_DOWN) {
+                Model *model = getModel(dialog);
+                changeIcon(model, ICO_DOWNWARD_DOWN, 0);
+
+                HWND focus = GetFocus();
+                if (focus == GetDlgItem(dialog, IDC_TEXTBOX)) {
+                    HWND nextControl = GetNextDlgTabItem(
+                        dialog, focus, FALSE
+                    );
+                    if (nextControl) {
+                        SetFocus(nextControl);
+                        // manually redraw because unfocusing the textbox
+                        // redraws after a zero-second timer rather than
+                        // immediately
+                        redraw(model, getScreen(&model->monitor));
+                    }
+                }
+
+                mouseWheel(model, actionParamWheelDelta(-WHEEL_DELTA));
+                changeIcon(model, ICO_DOWNWARD_UP, ICON_CHANGE_DELAY_MS);
                 return TRUE;
             } else if (command == IDM_DRAG) {
                 Model *model = getModel(dialog);
@@ -3727,7 +3802,7 @@ LRESULT CALLBACK DlgProc(
                     model->dragCount++;
                     newText = L"";
                     if (model->dragCount == 2) {
-                        changeIcon(model->window, ICO_LEFT_DOWN);
+                        changeIcon(model, ICO_LEFT_DOWN, 0);
                         addSleep(model, 100);
                         addAction(
                             model,
@@ -3740,10 +3815,10 @@ LRESULT CALLBACK DlgProc(
                             actionParamClickType(MOUSEEVENTF_LEFTUP)
                         );
                         addSleep(model, 100);
-                        addIconChange(model, ICO_LEFT_UP);
+                        changeIcon(model, ICO_LEFT_UP, ICON_CHANGE_DELAY_MS);
                     }
                 } else {
-                    changeIcon(model->window, ICO_LEFT_DOWN);
+                    changeIcon(model, ICO_LEFT_DOWN, 0);
                     addSleep(model, 100);
                     addAction(
                         model,
@@ -3756,7 +3831,7 @@ LRESULT CALLBACK DlgProc(
                         actionParamClickType(MOUSEEVENTF_LEFTUP)
                     );
                     addSleep(model, 100);
-                    addIconChange(model, ICO_LEFT_UP);
+                    changeIcon(model, ICO_LEFT_UP, ICON_CHANGE_DELAY_MS);
                     addAction(model, mouseToDragEnd, actionParamNone);
                 }
 
@@ -4010,6 +4085,7 @@ int CALLBACK WinMain(
         .dragCount = 0,
         .actions = NULL,
         .actionCount = 0,
+        .nextIcon = 0,
     };
     WatcherError initError = initializeWatcher(
         &model.watcherData, model.settingsPath,
