@@ -1512,6 +1512,7 @@ struct Model {
     int lineNumber;
     LPWSTR toolText;
     BOOL autoHideTooltip;
+    BOOL keepOpen;
     HMONITOR monitor;
     BOOL drawnYet;
     COLORREF colorKey;
@@ -3876,6 +3877,32 @@ LRESULT CALLBACK DlgProc(
                 );
                 if (nextControl) { SetFocus(nextControl); }
                 return TRUE;
+            } else if (command == IDM_KEEP_OPEN) {
+                Model *model = getModel(dialog);
+                model->keepOpen = !model->keepOpen;
+                ITaskbarList3 *taskbar = getTaskbar();
+                if (model->keepOpen) {
+                    HICON icon = LoadIcon(
+                        GetModuleHandle(NULL), MAKEINTRESOURCE(ICO_PIN)
+                    );
+                    taskbar->lpVtbl->SetOverlayIcon(
+                        taskbar, model->window, icon, L"Keep open"
+                    );
+                } else {
+                    taskbar->lpVtbl->SetOverlayIcon(
+                        taskbar, model->window, NULL, NULL
+                    );
+                }
+
+                MENUITEMINFO info = {
+                    .cbSize = sizeof(MENUITEMINFO),
+                    .fMask = MIIM_STATE,
+                    .fState = model->keepOpen ? MFS_CHECKED : MFS_UNCHECKED,
+                };
+                SetMenuItemInfo(
+                    getDropdownMenu(), IDM_KEEP_OPEN, FALSE, &info
+                );
+                return TRUE;
             } else if (command == IDM_SWITCH_MONITOR) {
                 Model *model = getModel(dialog);
                 MonitorCallbackVars vars = {
@@ -4072,6 +4099,7 @@ int CALLBACK WinMain(
         .tooltip = NULL,
         .toolText = NULL,
         .autoHideTooltip = FALSE,
+        .keepOpen = FALSE,
         .monitor = MonitorFromWindow(
             GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY
         ),
@@ -4167,12 +4195,6 @@ int CALLBACK WinMain(
     );
     SetWindowLongPtr(model.window, GWLP_USERDATA, (LONG)&model);
     model.dialog = CreateDialog(hInstance, L"TOOL", model.window, DlgProc);
-
-    HICON icon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(ICO_PIN));
-    ITaskbarList3 *taskbar = getTaskbar();
-    taskbar->lpVtbl->SetOverlayIcon(
-        taskbar, model.window, icon, L"Keep open"
-    );
 
     MSG message;
     while (GetMessage(&message, NULL, 0, 0)) {
