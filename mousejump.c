@@ -2773,13 +2773,18 @@ BOOL mouseToDragEnd(Model *model, ActionParam param) {
     return TRUE;
 }
 
-BOOL clearTextbox(Model *model, ActionParam param) {
-    DragMenuState dragMenuState = getDragMenuState(model);
-    model->dragCount = 0;
-    POINT cursor; GetCursorPos(&cursor);
-    model->naturalPoint = cursor;
-    updateDragMenuState(model, dragMenuState);
-    SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
+BOOL clearOrClose(Model *model, ActionParam param) {
+    if (model->keepOpen) {
+        DragMenuState dragMenuState = getDragMenuState(model);
+        model->dragCount = 0;
+        POINT cursor; GetCursorPos(&cursor);
+        model->naturalPoint = cursor;
+        updateDragMenuState(model, dragMenuState);
+        SetDlgItemText(model->dialog, IDC_TEXTBOX, L"");
+    } else {
+        DestroyWindow(model->window);
+    }
+
     return TRUE;
 }
 
@@ -2899,6 +2904,12 @@ BOOL clickOrDrag(
         case MOUSEEVENTF_MIDDLEUP: iconID = ICO_WHEEL_UP; break;
     }
 
+    if (downType == MOUSEEVENTF_RIGHTDOWN && model->keepOpen) {
+        SendMessage(
+            model->dialog, WM_COMMAND, MAKEWPARAM(IDM_KEEP_OPEN, 0), 0
+        );
+    }
+
     POINT cursor;
     GetCursorPos(&cursor);
     // use state.count rather than model->dragCount so that we ignore the
@@ -2977,7 +2988,7 @@ BOOL clickOrDrag(
         changeIcon(model, iconID, ICON_CHANGE_DELAY_MS);
     }
 
-    addAction(model, clearTextbox, actionParamNone);
+    addAction(model, clearOrClose, actionParamNone);
     ShowWindow(model->window, SW_MINIMIZE);
     doActions(model);
     return TRUE;
@@ -3734,7 +3745,7 @@ LRESULT CALLBACK DlgProc(
                 );
                 addSleep(model, 100);
                 changeIcon(model, ICO_DOUBLE_UP, ICON_CHANGE_DELAY_MS);
-                addAction(model, clearTextbox, actionParamNone);
+                addAction(model, clearOrClose, actionParamNone);
                 ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
                 return TRUE;
