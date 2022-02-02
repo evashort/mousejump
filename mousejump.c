@@ -3288,7 +3288,7 @@ LRESULT CALLBACK DlgProc(
                 SetTimer(dialog, REACTIVATE_TIMER, 0, NULL);
                 // in practice we may have to re-activate more than once over
                 // a period of at least 100ms
-                model->keepActiveUntil = now + 500;
+                model->keepActiveUntil = now + 300;
                 // haven't found an easy solution to allow the user to switch
                 // windows with alt+tab during the keep active period.
                 // the task switcher window is not reliably in the foreground
