@@ -1513,6 +1513,7 @@ struct Model {
     LPWSTR toolText;
     BOOL autoHideTooltip;
     BOOL keepOpen;
+    ULONGLONG keepActiveUntil;
     HMONITOR monitor;
     BOOL drawnYet;
     COLORREF colorKey;
@@ -2153,7 +2154,9 @@ void eraseDrag(
     }
 }
 
-typedef enum { DO_ACTIONS_TIMER, REDRAW_TIMER, CHANGE_ICON_TIMER } TimerID;
+typedef enum {
+    DO_ACTIONS_TIMER, REDRAW_TIMER, CHANGE_ICON_TIMER, REACTIVATE_TIMER,
+} TimerID;
 
 Graphics *lastGraphics = &graphicsOut[0];
 void redraw(Model *model, Screen screen) {
@@ -2788,6 +2791,14 @@ BOOL clearOrClose(Model *model, ActionParam param) {
     return TRUE;
 }
 
+BOOL keepActive(Model *model, ActionParam param) {
+    if (model->keepOpen) {
+        model->keepActiveUntil = GetTickCount64() + 5000;
+    }
+
+    return TRUE;
+}
+
 BOOL setIcon(Model *model, ActionParam param) {
     changeIcon(model, param.resourceID, 0);
     return TRUE;
@@ -2989,6 +3000,11 @@ BOOL clickOrDrag(
     }
 
     addAction(model, clearOrClose, actionParamNone);
+    if (downType == MOUSEEVENTF_LEFTDOWN) {
+        addAction(model, keepActive, actionParamNone);
+    }
+
+    model->keepActiveUntil = 0;
     ShowWindow(model->window, SW_MINIMIZE);
     doActions(model);
     return TRUE;
@@ -3266,6 +3282,21 @@ LRESULT CALLBACK DlgProc(
             return 0;
         } else if (LOWORD(wParam) == WA_INACTIVE) {
             HWND window = GetWindowOwner(dialog);
+            Model *model = getModel(dialog);
+            ULONGLONG now = GetTickCount64();
+            while (model->keepActiveUntil > now) {
+                SetTimer(dialog, REACTIVATE_TIMER, 0, NULL);
+                // in practice we may have to re-activate more than once over
+                // a period of at least 100ms
+                model->keepActiveUntil = now + 500;
+                // haven't found an easy solution to allow the user to switch
+                // windows with alt+tab during the keep active period.
+                // the task switcher window is not reliably in the foreground
+                // immediately after MouseJump is inactivated and the
+                // keypress events get swallowed by the textbox control
+                return 0;
+            }
+
             SetWindowPos(
                 window, HWND_NOTOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
@@ -3465,6 +3496,13 @@ LRESULT CALLBACK DlgProc(
         Model *model = getModel(dialog);
         // changeIcon kills the timer so we don't have to
         changeIcon(model, model->nextIcon, 0);
+        return TRUE;
+    } else if (message == WM_TIMER && wParam == REACTIVATE_TIMER) {
+        KillTimer(dialog, wParam);
+        if (!SetForegroundWindow(dialog)) {
+            DestroyWindow(dialog);
+        }
+
         return TRUE;
     } else if (message == WM_NCHITTEST && skipHitTest) {
         return HTTRANSPARENT;
@@ -3746,6 +3784,8 @@ LRESULT CALLBACK DlgProc(
                 addSleep(model, 100);
                 changeIcon(model, ICO_DOUBLE_UP, ICON_CHANGE_DELAY_MS);
                 addAction(model, clearOrClose, actionParamNone);
+                addAction(model, keepActive, actionParamNone);
+                model->keepActiveUntil = 0;
                 ShowWindow(model->window, SW_MINIMIZE);
                 doActions(model);
                 return TRUE;
@@ -3859,6 +3899,7 @@ LRESULT CALLBACK DlgProc(
                 updateDragMenuState(model, dragMenuState);
 
                 if (model->actionCount > oldActionCount) {
+                    model->keepActiveUntil = 0;
                     ShowWindow(model->window, SW_MINIMIZE);
                     doActions(model);
                 }
@@ -4111,6 +4152,7 @@ int CALLBACK WinMain(
         .toolText = NULL,
         .autoHideTooltip = FALSE,
         .keepOpen = FALSE,
+        .keepActiveUntil = 0,
         .monitor = MonitorFromWindow(
             GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY
         ),
