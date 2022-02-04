@@ -2,17 +2,31 @@
 
 import heapq
 
-def getLabels(weights, joins, unions, lists, labels, removeLabels):
-    sequences, sparsities = zip(
-        *(
-            (lists[sequence], 1 / weights[0][sequence])
-            for sequence in unions[labels]
-        )
-    )
-    return list(unionHelp(sequences, sparsities))
+def get_labels(name, definitions):
+    definition = definitions[name]
+    operation = definition['operation']
+    operands = definition['operands']
+    if operation == 'literal':
+        return len(operands), iter(operands)
+    elif operation == 'union':
+        total = 0
+        sequences = []
+        sparsities = []
+        for operand, weight in operands[0].items():
+            count, labels = get_labels(operand, definitions)
+            total += count
+            sequences.append(labels)
+            sparsities.append(1 / weight)
 
-def unionHelp(sequences, sparsities):
-    sequences = list(map(iter, sequences))
+        return total, union_help(sequences, sparsities)
+
+def union_help(sequences, sparsities):
+    '''
+    merge generators.
+    sequences: list or tuple of generators.
+    sparsities: 1/density, one for each sequence. controls the relative
+    frequency of items from each list in the resulting generator.
+    '''
     next_indices = [1 for _ in sequences]
     heap = [(sparsity, i) for i, sparsity in enumerate(sparsities)]
     heapq.heapify(heap)
@@ -26,7 +40,7 @@ def unionHelp(sequences, sparsities):
             next_indices[i] += 1
             heapq.heapreplace(heap, (sparsities[i] * next_indices[i], i))
 
-def getLowProductCombinations(shape, dimensions=None):
+def get_low_product_combinations(shape, dimensions=None):
     '''
     yields (int, sorted tuple of positive ints) pairs where the first item is
     the product of all values in the second item. all possible tuples are
@@ -46,34 +60,34 @@ def getLowProductCombinations(shape, dimensions=None):
         copies = len(shape) - index
         limit = shape[index]
         heap = []
-        combinations = getLowProductCombinations(shape, index)
+        combinations = get_low_product_combinations(shape, index)
         try:
-            peekProduct, peek = next(combinations)
+            peek_product, peek = next(combinations)
         except StopIteration:
-            peekProduct = peek = peekValue = None
+            peek_product = peek = peek_value = None
         else:
-            peekValue = peek[index]
-            peekProduct *= peekValue
+            peek_value = peek[index]
+            peek_product *= peek_value
 
         while peek or heap:
-            if not heap or (peek and peekProduct < heap[0][0]):
-                yield peekProduct, peek
-                if peekValue < limit:
+            if not heap or (peek and peek_product < heap[0][0]):
+                yield peek_product, peek
+                if peek_value < limit:
                     heapq.heappush(
                         heap,
                         (
-                            peekProduct + peekProduct // peekValue,
-                            peek[:index] + (peekValue + 1,) * copies,
+                            peek_product + peek_product // peek_value,
+                            peek[:index] + (peek_value + 1,) * copies,
                         )
                     )
 
                 try:
-                    peekProduct, peek = next(combinations)
+                    peek_product, peek = next(combinations)
                 except StopIteration:
-                    peekProduct = peek = peekValue = None
+                    peek_product = peek = peek_value = None
                 else:
-                    peekValue = peek[index]
-                    peekProduct *= peekValue
+                    peek_value = peek[index]
+                    peek_product *= peek_value
             else:
                 yield heap[0]
                 product, combination = heap[0]
@@ -89,17 +103,44 @@ def getLowProductCombinations(shape, dimensions=None):
                 else:
                     heapq.heappop(heap)
 
-labels = getLabels(
-    weights=[{'digits': 2, 'letters': 1}],
-    joins={},
-    unions={'alphanumeric': ['digits', 'letters']},
-    lists={'digits': '0123456789', 'letters': 'abcdefghijklmnopqrstuvwxyz'},
-    labels='alphanumeric',
-    removeLabels=['5'],
+label_count, labels = get_labels(
+    'alphanumeric',
+    {
+        'digits': {
+            'operation': 'literal',
+            'operands': '0123456789',
+        },
+        'letters': {
+            'operation': 'literal',
+            'operands': 'abcdefghijklmnopqrstuvwxyz',
+        },
+        'alphanumeric': {
+            'operation': 'union',
+            'operands': [
+                {
+                    'digits': 2,
+                    'letters': 1,
+                },
+            ],
+        },
+        'zero': {
+            'operands': ['0'],
+        },
+        'positive_digits': {
+            'operation': 'difference',
+            'operands': ['digits', 'zero'],
+        },
+        'two_digit_numbers': {
+            'operation': 'join',
+            'operands': ['positive_digits', 'digits'],
+        },
+    },
 )
+labels = list(labels)
+assert label_count == len(labels)
 print(labels)
 
 for i, (product, combination) in enumerate(
-    getLowProductCombinations((2, 3, 4))
+    get_low_product_combinations((2, 3, 4))
 ):
     print(i, product, combination)
