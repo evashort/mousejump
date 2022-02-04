@@ -4,21 +4,50 @@ import heapq
 
 def get_labels(name, definitions):
     definition = definitions[name]
-    operation = definition['operation']
-    operands = definition['operands']
-    if operation == 'literal':
-        return len(operands), iter(operands)
-    elif operation == 'union':
-        total = 0
-        sequences = []
-        sparsities = []
-        for operand, weight in operands[0].items():
+    if isinstance(definition, list):
+        return len(definition), iter(definition)
+    else:
+        operation = definition['operation']
+        operands = definition['operands']
+        if operation == 'split':
+            combined, separator = operands
+            labels = combined.split(separator) if separator else combined
+            return len(labels), iter(labels)
+        elif operation == 'union':
+            return union(operands, definitions)
+
+def union(operands, definitions):
+    total = 0
+    stages = []
+    for operand in operands:
+        if isinstance(operand, dict):
+            sequences = []
+            sparsities = []
+            zero_weight_sequences = []
+            zero_weight_sparsities = []
+            for name, weight in operand.items():
+                count, labels = get_labels(name, definitions)
+                total += count
+                if weight > 0:
+                    sequences.append(labels)
+                    sparsities.append(1 / weight)
+                else:
+                    zero_weight_sequences.append(labels)
+                    zero_weight_sparsities.append(1)
+
+            stages.append(union_help(sequences, sparsities))
+            stages.append(
+                union_help(zero_weight_sequences, zero_weight_sparsities)
+            )
+        elif isinstance(operand, list):
+            total += len(operand)
+            stages.append(iter(operand))
+        else:
             count, labels = get_labels(operand, definitions)
             total += count
-            sequences.append(labels)
-            sparsities.append(1 / weight)
+            stages.append(labels)
 
-        return total, union_help(sequences, sparsities)
+    return total, chain(*stages)
 
 def union_help(sequences, sparsities):
     '''
@@ -39,6 +68,9 @@ def union_help(sequences, sparsities):
         else:
             next_indices[i] += 1
             heapq.heapreplace(heap, (sparsities[i] * next_indices[i], i))
+
+def chain(*args):
+    return (item for arg in args for item in arg)
 
 def get_low_product_combinations(shape, dimensions=None):
     '''
@@ -157,28 +189,28 @@ label_count, labels = get_labels(
     'alphanumeric',
     {
         'digits': {
-            'operation': 'literal',
-            'operands': '0123456789',
+            'operation': 'split',
+            'operands': ['0123456789', ''],
         },
         'letters': {
-            'operation': 'literal',
-            'operands': 'abcdefghijklmnopqrstuvwxyz',
+            'operation': 'split',
+            'operands': ['abcdefghijklmnopqrstuvwxyz', ''],
         },
         'alphanumeric': {
             'operation': 'union',
             'operands': [
                 {
+                    'test': 0,
                     'digits': 2,
                     'letters': 1,
                 },
+                ['world'],
             ],
         },
-        'zero': {
-            'operands': ['0'],
-        },
+        'test': ['hello'],
         'positive_digits': {
             'operation': 'difference',
-            'operands': ['digits', 'zero'],
+            'operands': ['digits', ['0']],
         },
         'two_digit_numbers': {
             'operation': 'join',
