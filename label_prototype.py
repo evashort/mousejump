@@ -103,6 +103,56 @@ def get_low_product_combinations(shape, dimensions=None):
                 else:
                     heapq.heappop(heap)
 
+def get_product_heap_size(shape, dimensions=None):
+    if dimensions is None:
+        dimensions = len(shape)
+
+    if dimensions <= 0:
+        return int(not shape or shape[0] > 0)
+    else:
+        index = dimensions - 1
+        result = 0
+        for i in range(index - 1, -1, -1):
+            result *= -shape[i]
+            result += n_choose_k(shape[i], dimensions - i)
+
+        if index % 2 > 0:
+            result = -result
+
+        previous = get_product_heap_size(shape, index)
+        result += shape[index] * previous
+        return result
+
+def n_choose_k(n, k):
+    if 2 * k > n:
+        k = n - k
+
+    result = 1
+    for i in range(k):
+        result *= n - i
+        result //= i + 1
+
+    return result
+
+assert get_product_heap_size([4, 6, 7]) == sum([
+    # top view. imagine these are all aligned with z=7 so only the cell at the
+    # origin with height 7 is touching the ground:
+    # 2222
+    # 3333
+    # 4444
+    # 555
+    # 66
+    # 7
+    #
+    # z * x
+    7 * 1,
+    6 * 2,
+    5 * 3,
+    4 * 4,
+    3 * 4,
+    2 * 4,
+])
+
 label_count, labels = get_labels(
     'alphanumeric',
     {
