@@ -210,4 +210,76 @@ int popLowestProduct(
     return count;
 }
 
+int nextPermutation(int* values, int length){
+    // like this except reversed (think little endian instead of big endian):
+    // http://wordaligned.org/articles/next-permutation#whats-happening-here
+    // so for example,
+    // 1146662312
+    // 114666 2312 (tailStart = 6)
+    // 112666 4312 (swapIndex = 2)
+    // 666211 4312 (reverse head)
+    // however, let's say limits[6] = 3. this makes the swap illegal. but now
+    // we know the subsequence consisting of the first 7 values cannot be
+    // increased. we do the swap anyway and increment tailStart:
+    // 1126664 312 (tailStart = 7)
+    // assuming limits[7] = 3, swapping the 4 and the 3 is also illegal. in
+    // fact, since limits is nonincreasing, the 4 and anything else past the
+    // previous swapIndex will never be useful to swap. let's call that stuff
+    // the "body":
+    // 112 6664 312 (bodyStart = 3)
+    // here's our new algorithm:
+    // while tailStart < length:
+    // 1. move any values greater than limits[tailStart] from the head to the
+    //    body
+    // 2. if all values in the head are less than or equal to
+    //    values[tailStart], swap the values at bodyStart and tailStart, and
+    //    increment both indices
+    // 3. otherwise, swap values[tailStart] with the first greater value in
+    //    the head and stop iteration
+    // 112 6664 312
+    // 112 3664 612 (swap the values at bodyStart and tailStart)
+    // 1123 6646 12 (increment both indices)
+    // 112 36646 12 (move values from head to body assuming limits[8] = 2)
+    // 111 36646 22 (swap values[tailStart] with the first greater value in
+    //               the head)
+    // then we combine and sort the head and body:
+    // 66643111 22
+    // how do we know none of the sorted values is greater than the
+    // corresponding limit? well, we know that's true for the very first
+    // permutation, 6664322111
+    // and if we remove the values in our tail from this permutation, the
+    // value at each index can only decrease.
+    int tailStart = 1;
+    while (tailStart < length && values[tailStart] >= values[tailStart - 1]) {
+        tailStart++;
+    }
+
+    if (tailStart >= length) {
+        return 0; // no more permutations
+    }
+
+    if (tailStart < length) {
+        int value = values[tailStart];
+        int swapIndex = 0;
+        while (values[swapIndex] <= value) {
+            swapIndex++;
+        }
+
+        values[tailStart] = values[swapIndex];
+        values[swapIndex] = value;
+    }
+
+    int *low = values;
+    int *high = values + tailStart - 1;
+    while (low < high) {
+        int tmp = *low;
+        *low = *high;
+        *high = tmp;
+        low++;
+        high--;
+    }
+
+    return 1;
+}
+
 #endif
