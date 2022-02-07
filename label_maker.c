@@ -6,7 +6,8 @@ int countSortedCombinations(int *limits, int length, int maxCount) {
     // returns the number of possible nonincreasing lists of positive integers
     // with the given length such that each element is not higher than the
     // corresponding limit. limits must be nonincreasing and have the given
-    // length.
+    // length. if the result would be greater than maxCount or an intermediate
+    // calculation would cause an integer overflow, returns maxCount.
     //
     // here's what the formula looks like on paper for length = 5, where a, b,
     // c, d, and e are the 5 elements of limits, and (n k) means n choose k:
@@ -227,7 +228,12 @@ int main() {
 
     int i = 0;
     while (count > 0) {
-        printf("%d (%d): %d %d %d\n", i, count, heap[0], heap[1], heap[2]);
+        int product = 1;
+        for (int i = 0; i < length; i++) { product *= heap[i]; }
+        printf(
+            "%d (%d): %d %d %d = %d\n",
+            i, count, heap[0], heap[1], heap[2], product
+        );
         count = popLowestProduct(heap, limits2, length, count, capacity);
         i++;
     }
