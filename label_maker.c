@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 int countSortedCombinations(int *limits, int length) {
     // returns the number of possible nondecreasing lists of positive integers
@@ -58,9 +59,143 @@ int countSortedCombinations(int *limits, int length) {
     return result;
 }
 
+int popLowestProduct(
+    int *heap, int *limits, int length, int count, int capacity
+) {
+    if (count <= 0) {
+        return count;
+    }
+
+    // can we increment the first value?
+    int canIncrement = length > 0 && heap[0] < limits[0];
+
+    // can we increment another value to match the first one?
+    int canExtend = 0;
+    int extendIndex = 0;
+    if (count < capacity || !canIncrement) { // incrementing takes priority
+        while (extendIndex < length && heap[extendIndex] == heap[0]) {
+            extendIndex++;
+        }
+
+        canExtend = extendIndex < length
+            && heap[extendIndex] == heap[0] - 1
+            && heap[0] <= limits[extendIndex];
+    }
+
+    // doing both means pushing a new element onto the heap. extend first.
+    if (canIncrement && canExtend) {
+        heap[extendIndex]++; // use heap root as temporary buffer
+        int product = 1;
+        for (int i = 0; i < length; i++) { product *= heap[i]; }
+
+        int childIndex = count;
+        count++;
+        int *child = heap + childIndex * length;
+        while (childIndex > 0) {
+            int parentIndex = (childIndex - 1) / 2;
+            int *parent = heap + parentIndex * length;
+            int parentProduct = 1;
+            for (int i = 0; i < length; i++) {
+                parentProduct *= parent[i];
+            }
+
+            if (parentProduct <= product) {
+                break;
+            }
+
+            memcpy(child, parent, length * sizeof(heap[0]));
+            childIndex = parentIndex;
+            child = parent;
+        }
+
+        memcpy(child, heap, length * sizeof(heap[0]));
+        heap[extendIndex]--;
+    }
+
+    // do the remaining operation. this can be increment, extend, or pop.
+    int *newItem = heap;
+    if (canIncrement) {
+        heap[0]++;
+    } else if (canExtend) {
+        heap[extendIndex]++;
+    } else {
+        count--;
+        newItem = heap + count * length;
+    }
+
+    // use the remaining capacity as a temporary buffer if possible
+    if (count < capacity && newItem == heap) {
+        newItem = heap + count * length;
+        memcpy(newItem, heap, length * sizeof(heap[0]));
+    }
+
+    int product = 1;
+    for (int i = 0; i < length; i++) { product *= newItem[i]; }
+
+    int parentIndex = 0;
+    int *parent = heap;
+    int childIndex = parentIndex * 2 + 1;
+    int *child = heap + childIndex * length;
+    while (childIndex < count) {
+        int childProduct = 1;
+        for (int i = 0; i < length; i++) { childProduct *= child[i]; }
+
+        if (childIndex + 1 < count) {
+            int *child2 = child + length;
+            int childProduct2 = 1;
+            for (int i = 0; i < length; i++) {
+                childProduct2 *= child2[i];
+            }
+
+            if (childProduct2 < childProduct) {
+                childIndex++;
+                child = child2;
+                childProduct = childProduct2;
+            }
+        }
+
+        if (childProduct >= product) {
+            break;
+        }
+
+        if (count < capacity) {
+            memcpy(parent, child, length * sizeof(heap[0]));
+        } else {
+            for (int i = 0; i < length; i++) {
+                int temp = child[i];
+                child[i] = parent[i];
+                parent[i] = temp;
+            }
+        }
+
+        parentIndex = childIndex;
+        parent = child;
+        childIndex = parentIndex * 2 + 1;
+        child = heap + childIndex * length;
+    }
+
+    if (count < capacity) {
+        memcpy(parent, newItem, length * sizeof(heap[0]));
+    }
+
+    return count;
+}
+
 int main() {
     int limits[] = {4, 6, 7};
     int combinationCount = countSortedCombinations(limits, 3);
-    printf("combination count: %d", combinationCount);
+    printf("combination count: %d\n", combinationCount);
+
+    int limits2[] = {4, 3, 2};
+    int count = 1;
+    int capacity = 5; // 3 * 2 - (2 2)
+    int heap[9 * 3] = {1, 1, 1};
+    int i = 0;
+    while (count > 0) {
+        printf("%d (%d): %d %d %d\n", i, count, heap[0], heap[1], heap[2]);
+        count = popLowestProduct(heap, limits2, 3, count, 9);
+        i++;
+    }
+
     return 0;
 }
