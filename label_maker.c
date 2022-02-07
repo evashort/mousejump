@@ -1,59 +1,84 @@
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
-int countSortedCombinations(int *limits, int length) {
-    // returns the number of possible nondecreasing lists of positive integers
+int countSortedCombinations(int *limits, int length, int maxCount) {
+    // returns the number of possible nonincreasing lists of positive integers
     // with the given length such that each element is not higher than the
-    // corresponding limit. limits must be nondecreasing and have the given
+    // corresponding limit. limits must be nonincreasing and have the given
     // length.
     //
     // here's what the formula looks like on paper for length = 5, where a, b,
     // c, d, and e are the 5 elements of limits, and (n k) means n choose k:
     // abcde
-    // - (a 2)cde - a(b 2)de - ab(c 2)e - abc(d 2)
-    // + (a 3)de  + a(b 3)e  + ab(c 3)
-    // - (a 4)e   - a(b 4)
-    // + (a 5)
+    // - abc(e 2) - ab(d 2)e - a(c 2)de - (b 2)cde
+    // + ab(e 3)  + a(d 3)e  + (c 3)de
+    // - a(e 4)   - (d 4)e
+    // + (e 5)
     //
-    // in this code, (a 5) would be calculated from the previous term -(a 4)e:
-    // (a 5) = -(a 4)e * (4 - a) / 5e
+    // in this code, (e 5) would be calculated from the previous term -a(e 4):
+    // (e 5) = -a(e 4) * (4 - e) / 5a
     // this works because
     // (n k) = n! / (k! * (n - k)!)
     //       = n! * (n - k + 1) / (k * (k - 1)! * (n - k + 1)!)
     //       = (n k-1) * (n - k + 1) / k
     //
-    // here's a specific example with limits = [4, 6, 7]. this illustration is
-    // a top view. imagine each number is a column of that many blocks aligned
-    // with z=7 so only the column at the origin with height 7 is touching the
-    // ground:
-    // 2222
-    // 3333
-    // 4444
-    // 555
-    // 66
-    // 7
+    // here's a specific example with limits = [7, 6, 4]. this illustration is
+    // a top view. imagine each number is a column of that many blocks.
+    //      44
+    //     444
+    //    4444
+    //   33333
+    //  222222
+    // 1111111
     //
-    // 4 * 6 * 7   // entire rectangular prism
-    // - (4 2) * 7 // right triangular column (empty space in lower right)
-    // - 4 * (6 2) // right triangular prism in the space under the top 6 rows
+    // 7 * 6 * 4   // entire rectangular prism
+    // - 7 * (4 2) // right triangular prism that fills the space over the
+    //             // bottom 3 rows: 1111111
+    //             //                2222222
+    //             //                3333333
+    // - 4 * (6 2) // right triangular prism that fills the upper left corner:
+    //             // 44444
+    //             // 4444
+    //             // 444
+    //             // 44
+    //             // 4
     // + (4 3)     // tetrahedral intersection of the two right triangular
-    //             // prisms. looks like  2
-    //             //                    11
+    //             // prisms: 11
+    //             //         2
     // = 168 - 42 - 60 + 4 = 70
+
+    if (length > 0 && limits[length - 1] < 1) { return 0; }
 
     int firstTerm = 1;
     for (int i = 0; i < length; i++) {
+        if (firstTerm > INT_MAX / limits[i]) {
+            return maxCount;
+        }
+
         firstTerm *= limits[i];
     }
 
     int result = firstTerm;
-    for (int i = 0; i < length; i++) {
+    for (int i = length - 1; i > 0; i--) {
         int term = firstTerm;
-        for (int j = i + 1; j < length; j++) {
-            term *= j - i - limits[i]; // switch sign
-            term /= (1 + j - i) * limits[j];
+        for (int j = i - 1; j >= 0; j--) {
+            int factor = i - j - limits[i]; // non-positive
+            if (
+                (factor < 0 && term < INT_MAX / factor)
+                    || (factor < -1 && term > INT_MIN / factor)
+            ) {
+                return maxCount;
+            }
+
+            term *= factor; // switch sign
+            term /= (1 + i - j) * limits[j];
             result += term;
         }
+    }
+
+    if (result > maxCount) {
+        return maxCount;
     }
 
     return result;
@@ -182,20 +207,31 @@ int popLowestProduct(
 }
 
 int main() {
-    int limits[] = {4, 6, 7};
-    int combinationCount = countSortedCombinations(limits, 3);
+    int maxSize = 2000;
+    int limits[] = {7, 6, 4};
+    int combinationCount = countSortedCombinations(limits, 3, maxSize / 3);
     printf("combination count: %d\n", combinationCount);
 
     int limits2[] = {4, 3, 2};
-    int count = 1;
-    int capacity = 5; // 3 * 2 - (2 2)
-    int heap[9 * 3] = {1, 1, 1};
+    int length = sizeof(limits2) / sizeof(limits2[0]);
+    int capacity = countSortedCombinations(
+        limits2 + 1, length - 1, maxSize / length
+    );
+    printf("capacity: %d\n", capacity);
+    int *heap = (int*)malloc(length * capacity * sizeof(int));
+    int count = 0;
+    if (capacity > 0) {
+        count = 1;
+        for (int i = 0; i < length; i++) { heap[i] = 1; }
+    }
+
     int i = 0;
     while (count > 0) {
         printf("%d (%d): %d %d %d\n", i, count, heap[0], heap[1], heap[2]);
-        count = popLowestProduct(heap, limits2, 3, count, 9);
+        count = popLowestProduct(heap, limits2, length, count, capacity);
         i++;
     }
 
+    free(heap);
     return 0;
 }
