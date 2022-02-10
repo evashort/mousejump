@@ -3,6 +3,7 @@
 
 #include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int countSortedCombinations(int *limits, int length, int maxCount) {
@@ -280,6 +281,157 @@ int nextPermutation(int* values, int length){
     }
 
     return 1;
+}
+
+int gcd(a, b) {
+    while (b != 0)  {
+        int remainder = a % b;
+        a = b;
+        b = remainder;
+    }
+
+    return a;
+}
+
+// https://en.wikipedia.org/wiki/Pollard's_rho_algorithm#Variants
+// https://en.wikipedia.org/wiki/Cycle_detection#Brent's_algorithm
+int brentPollardRho(n, hare, constant) {
+    if (n == 1) {
+        return 1;
+    }
+
+    int tortoise = hare;
+    int cycleLength = 0;
+    int maxLength = 1;
+    int divisor = 1;
+    while (divisor == 1) {
+        if (cycleLength >= maxLength) {
+            tortoise = hare;
+            maxLength += maxLength;
+            cycleLength = 0;
+        }
+
+        hare = (hare * hare + constant) % n;
+        cycleLength++;
+        divisor = gcd(abs(tortoise - hare), n);
+    }
+
+    return divisor;
+}
+
+int findDivisor(n) {
+    if (n == 1) {
+        return 1;
+    }
+
+    if (n % 2 == 0) {
+        return 2;
+    }
+
+    if (
+        n == 3 || n == 5 || n == 7 || n == 11 || n == 13 || n == 17 || n == 19
+            || n == 23 || n == 29 || n == 31 || n == 37 || n == 41 || n == 43
+    ) {
+        return n;
+    }
+
+    int maxTries = 10; // non-critical application, don't try too hard
+    int hare = 2;
+    int constant = 1;
+    int divisor = brentPollardRho(n, hare, constant);
+    for (int i = 0; divisor >= n && i < maxTries; i++) {
+        hare = rand() % n;
+        constant = rand() % (n - 1);
+        // don't use n-2, see
+        // https://mathworld.wolfram.com/PollardRhoFactorizationMethod.html
+        constant += constant >= n - 2;
+        brentPollardRho(n, hare, constant);
+    }
+
+    return divisor;
+}
+
+typedef struct {
+    int factor;
+    int count;
+} RepeatedFactor;
+
+typedef struct {
+    RepeatedFactor *factors;
+    int count;
+} Factorization;
+
+typedef struct {
+    RepeatedFactor *factors;
+    int capacity;
+} FactorsOut;
+
+FactorsOut factorsOut = { .capacity = 0, .factors = NULL };
+
+int compareFactors(const void *a, const void *b) {
+    return ((RepeatedFactor*)a)->factor - ((RepeatedFactor*)b)->factor;
+}
+
+Factorization factorize(int n) {
+    if (factorsOut.factors == NULL) {
+        factorsOut.capacity = 16;
+        factorsOut.factors = malloc(
+            factorsOut.capacity * sizeof(RepeatedFactor)
+        );
+    }
+
+    factorsOut.factors[0].factor = n;
+    int factorCount = 1;
+    int primeCount = 0;
+    while (primeCount < factorCount) {
+        int n = factorsOut.factors[primeCount].factor;
+        int divisor = findDivisor(n);
+        if (divisor >= n) {
+            primeCount++;
+        } else {
+            factorsOut.factors[primeCount].factor /= divisor;
+            if (factorCount >= factorsOut.capacity) {
+                factorsOut.capacity *= 2;
+                factorsOut.factors = realloc(
+                    factorsOut.factors,
+                    factorsOut.capacity * sizeof(int)
+                );
+            }
+
+            factorsOut.factors[factorCount].factor = divisor;
+            factorCount++;
+        }
+    }
+
+    qsort(
+        factorsOut.factors,
+        factorCount,
+        sizeof(RepeatedFactor),
+        compareFactors
+    );
+    int repeatedFactorCount = 0;
+    int lastFactor = 1;
+    for (int i = 0; i < factorCount; i++) {
+        int thisFactor = factorsOut.factors[i].factor;
+        if (thisFactor == lastFactor) {
+            factorsOut.factors[repeatedFactorCount - 1].count++;
+        } else {
+            factorsOut.factors[repeatedFactorCount].factor = thisFactor;
+            factorsOut.factors[repeatedFactorCount].count = 1;
+            repeatedFactorCount++;
+            lastFactor = thisFactor;
+        }
+    }
+
+    Factorization result = {
+        .factors = factorsOut.factors,
+        .count = repeatedFactorCount,
+    };
+    return result;
+}
+
+void destroyLabelMaker() {
+    free(factorsOut.factors);
 }
 
 #endif

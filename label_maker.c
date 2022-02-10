@@ -1,6 +1,22 @@
 #include "label_maker.h"
 
 int main() {
+    for (int n = 1; n <= 100; n++) {
+        Factorization factorization = factorize(n);
+        printf("%d =", n);
+        for (int i = 0; i < factorization.count; i++) {
+            printf(
+                " %d^%d",
+                factorization.factors[i].factor,
+                factorization.factors[i].count
+            );
+        }
+
+        printf("\n");
+    }
+
+    destroyLabelMaker();
+
     int maxSize = 2000;
     int limits[] = {7, 6, 4};
     int combinationCount = countSortedCombinations(limits, 3, maxSize / 3);
