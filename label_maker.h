@@ -345,7 +345,7 @@ int findDivisor(n) {
         // don't use n-2, see
         // https://mathworld.wolfram.com/PollardRhoFactorizationMethod.html
         constant += constant >= n - 2;
-        brentPollardRho(n, hare, constant);
+        divisor = brentPollardRho(n, hare, constant);
     }
 
     return divisor;
@@ -359,79 +359,75 @@ typedef struct {
 typedef struct {
     RepeatedFactor *factors;
     int count;
-} Factorization;
-
-typedef struct {
-    RepeatedFactor *factors;
     int capacity;
-} FactorsOut;
-
-FactorsOut factorsOut = { .capacity = 0, .factors = NULL };
+} Factorization;
 
 int compareFactors(const void *a, const void *b) {
     return ((RepeatedFactor*)a)->factor - ((RepeatedFactor*)b)->factor;
 }
 
-Factorization factorize(int n) {
-    if (factorsOut.factors == NULL) {
-        factorsOut.capacity = 16;
-        factorsOut.factors = malloc(
-            factorsOut.capacity * sizeof(RepeatedFactor)
-        );
+void factorize(int n, Factorization *out) {
+    if (out->factors == NULL) {
+        out->capacity = 16;
+        out->factors = malloc(out->capacity * sizeof(RepeatedFactor));
     }
 
-    factorsOut.factors[0].factor = n;
+    out->factors[0].factor = n;
     int factorCount = 1;
     int primeCount = 0;
     while (primeCount < factorCount) {
-        int n = factorsOut.factors[primeCount].factor;
+        int n = out->factors[primeCount].factor;
         int divisor = findDivisor(n);
         if (divisor >= n) {
             primeCount++;
         } else {
-            factorsOut.factors[primeCount].factor /= divisor;
-            if (factorCount >= factorsOut.capacity) {
-                factorsOut.capacity *= 2;
-                factorsOut.factors = realloc(
-                    factorsOut.factors,
-                    factorsOut.capacity * sizeof(int)
+            out->factors[primeCount].factor /= divisor;
+            if (factorCount >= out->capacity) {
+                out->capacity *= 2;
+                out->factors = realloc(
+                    out->factors,
+                    out->capacity * sizeof(RepeatedFactor)
                 );
             }
 
-            factorsOut.factors[factorCount].factor = divisor;
+            out->factors[factorCount].factor = divisor;
             factorCount++;
         }
     }
 
     qsort(
-        factorsOut.factors,
+        out->factors,
         factorCount,
         sizeof(RepeatedFactor),
         compareFactors
     );
-    int repeatedFactorCount = 0;
+    out->count = 0;
     int lastFactor = 1;
     for (int i = 0; i < factorCount; i++) {
-        int thisFactor = factorsOut.factors[i].factor;
+        int thisFactor = out->factors[i].factor;
         if (thisFactor == lastFactor) {
-            factorsOut.factors[repeatedFactorCount - 1].count++;
+            out->factors[out->count - 1].count++;
         } else {
-            factorsOut.factors[repeatedFactorCount].factor = thisFactor;
-            factorsOut.factors[repeatedFactorCount].count = 1;
-            repeatedFactorCount++;
+            out->factors[out->count].factor = thisFactor;
+            out->factors[out->count].count = 1;
+            out->count++;
             lastFactor = thisFactor;
         }
     }
-
-    Factorization result = {
-        .factors = factorsOut.factors,
-        .count = repeatedFactorCount,
-    };
-    return result;
 }
 
-void destroyLabelMaker() {
-    free(factorsOut.factors);
+typedef struct {
+    int *limits;
+    int count;
+    int product;
+    Factorization factorization;
+    int *state;
+    int stateCapacity;
+} JoinIndexGenerator;
+
+void destroyJoinIndexGenerator(JoinIndexGenerator generator) {
+    free(generator.factorization.factors);
+    free(generator.state);
 }
 
 #endif

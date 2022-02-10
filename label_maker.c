@@ -1,8 +1,9 @@
 #include "label_maker.h"
 
 int main() {
+    Factorization factorization = { .factors = NULL };
     for (int n = 1; n <= 100; n++) {
-        Factorization factorization = factorize(n);
+        factorize(n, &factorization);
         printf("%d =", n);
         for (int i = 0; i < factorization.count; i++) {
             printf(
@@ -15,7 +16,7 @@ int main() {
         printf("\n");
     }
 
-    destroyLabelMaker();
+    free(factorization.factors);
 
     int maxSize = 2000;
     int limits[] = {7, 6, 4};
