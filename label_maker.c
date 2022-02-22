@@ -1,4 +1,5 @@
 #include "label_maker.h"
+#include <stdio.h>
 
 int main() {
     Factorization factorization = { .factors = NULL };
@@ -9,7 +10,7 @@ int main() {
             printf(
                 " %d^%d",
                 factorization.factors[i].factor,
-                factorization.factors[i].count
+                factorization.factors[i].copies
             );
         }
 
@@ -18,36 +19,23 @@ int main() {
 
     free(factorization.factors);
 
-    int maxSize = 2000;
-    int limits[] = {7, 6, 4};
-    int combinationCount = countSortedCombinations(limits, 3, maxSize / 3);
-    printf("combination count: %d\n", combinationCount);
-
-    int limits2[] = {4, 3, 2};
-    int length = sizeof(limits2) / sizeof(limits2[0]);
-    int capacity = countSortedCombinations(
-        limits2 + 1, length - 1, maxSize / length
-    );
-    printf("capacity: %d\n", capacity);
-    int *heap = (int*)malloc(length * capacity * sizeof(int));
-    int count = 0;
-    if (capacity > 0) {
-        count = 1;
-        for (int i = 0; i < length; i++) { heap[i] = 1; }
-    }
-
-    int i = 0;
-    while (count > 0) {
+    int limits[] = {3, 2, 4};
+    int length = sizeof(limits) / sizeof(limits[0]);
+    JoinIndexGenerator generator = createJoinIndexGenerator(limits, length);
+    for (int i = 0; nextJoinIndices(&generator); i++) {
         int product = 1;
-        for (int i = 0; i < length; i++) { product *= heap[i]; }
+        for (int j = 0; j < length; j++) { product *= generator.indices[j]; }
         printf(
-            "%d (%d): %d %d %d = %d\n",
-            i, count, heap[0], heap[1], heap[2], product
+            "%d: %d %d %d = %d\n",
+            i + 1,
+            generator.indices[0],
+            generator.indices[1],
+            generator.indices[2],
+            product
         );
-        count = popLowestProduct(heap, limits2, length, count, capacity);
-        i++;
     }
 
-    free(heap);
+    destroyJoinIndexGenerator(generator);
+    printf("success\n");
     return 0;
 }
