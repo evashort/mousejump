@@ -36,6 +36,9 @@ int main() {
     }
 
     destroyJoinIndexGenerator(generator);
+
+    printf("%u %u\n", hash1(L"hello"), hash2(L"hello"));
+
     printf("success\n");
     return 0;
 }

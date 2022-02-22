@@ -1,6 +1,59 @@
 #ifndef LABEL_MAKER_H
 #define LABEL_MAKER_H
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+
+// https://en.wikipedia.org/wiki/Universal_hashing#Hashing_vectors
+#define HASH_VECTOR_LENGTH 8
+#define HASH_VECTOR_WCHAR_LENGTH ( \
+    HASH_VECTOR_LENGTH * sizeof(uint32_t) / sizeof(wchar_t) \
+)
+uint64_t hashConstants1[1 + HASH_VECTOR_LENGTH];
+uint64_t hashConstants2[1 + HASH_VECTOR_LENGTH];
+int hashConstantsInitialized = 0;
+uint32_t hashVector[HASH_VECTOR_LENGTH];
+uint32_t getVectorHash(uint32_t *vector, uint64_t *constants, int length) {
+    if (!hashConstantsInitialized) {
+        hashConstantsInitialized = 1;
+        uint64_t *constantLists[] = { hashConstants1, hashConstants2 };
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 1 + HASH_VECTOR_LENGTH; j++) {
+                uint64_t constant = 0; constant += rand() & 0x7fff;
+                constant <<= 15; constant += rand() & 0x7fff;
+                constant <<= 15; constant += rand() & 0x7fff;
+                constant <<= 15; constant += rand() & 0x7fff;
+                constant <<= 15; constant += rand() & 0x7fff;
+                constantLists[i][j] = constant;
+            }
+        }
+    }
+
+    uint64_t hash = constants[0];
+    for (int i = 0; i < length; i++) {
+        hash += constants[i + 1] * (uint64_t)vector[i];
+    }
+
+    return (uint32_t)(hash >> 32);
+}
+
+// https://en.wikipedia.org/wiki/Universal_hashing#Hashing_strings
+uint32_t hashHelp(wchar_t *string, uint64_t *hashConstants) {
+    int hash = 0;
+    do {
+        wcsncpy((wchar_t*)hashVector, string, HASH_VECTOR_WCHAR_LENGTH);
+        hash *= 31;
+        hash += getVectorHash(hashVector, hashConstants, HASH_VECTOR_LENGTH);
+        string += HASH_VECTOR_WCHAR_LENGTH;
+    } while (((wchar_t*)hashVector)[HASH_VECTOR_WCHAR_LENGTH - 1] > 0);
+
+    return hash;
+}
+
+uint32_t hash1(wchar_t *string) { return hashHelp(string, hashConstants1); }
+uint32_t hash2(wchar_t *string) { return hashHelp(string, hashConstants2); }
+
+// https://xlinux.nist.gov/dads/HTML/twoLeftHashing.html
 
 int gcd(a, b) {
     while (b != 0)  {
