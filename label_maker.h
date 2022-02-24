@@ -38,7 +38,7 @@ uint32_t getVectorHash(uint32_t *vector, uint64_t *constants, int length) {
 }
 
 // https://en.wikipedia.org/wiki/Universal_hashing#Hashing_strings
-uint32_t hashHelp(wchar_t *string, uint64_t *hashConstants) {
+uint32_t hashHelp(const wchar_t *string, uint64_t *hashConstants) {
     int hash = 0;
     do {
         wcsncpy((wchar_t*)hashVector, string, HASH_VECTOR_WCHAR_LENGTH);
@@ -50,10 +50,212 @@ uint32_t hashHelp(wchar_t *string, uint64_t *hashConstants) {
     return hash;
 }
 
-uint32_t hash1(wchar_t *string) { return hashHelp(string, hashConstants1); }
-uint32_t hash2(wchar_t *string) { return hashHelp(string, hashConstants2); }
+uint32_t getHash1(const wchar_t *string) {
+    return hashHelp(string, hashConstants1);
+}
+
+uint32_t getHash2(const wchar_t *string) {
+    return hashHelp(string, hashConstants2);
+}
 
 // https://xlinux.nist.gov/dads/HTML/twoLeftHashing.html
+
+typedef struct {
+    void **table;
+    uint32_t prime;
+    void **tableStop;
+    void **extraStart;
+} HashTable;
+
+// https://www.planetmath.org/goodhashtableprimes
+const uint32_t goodHashTablePrimes[] = {
+    // lots of small primes for testing automatic hash table resizing. the
+    // smallest one I'd use in practice is 29
+    1, 2, 3, 5, 7, 11, 17, 29, 53, 97, 193, 389, 769, 1543,
+    3079, 6151, 12289, 24593, 49157,
+    98317, 196613, 393241, 786433, 1572869,
+    3145739, 6291469, 12582917, 25165843, 50331653,
+    100663319, 201326611, 402653189, 805306457,
+};
+
+uint32_t getNextHashTablePrime(uint32_t lowerBound) {
+    const uint32_t* prime = goodHashTablePrimes;
+    const uint32_t *stop = goodHashTablePrimes + sizeof(goodHashTablePrimes);
+    for (; prime < stop; prime++) {
+        if (*prime >= lowerBound) { return *prime; }
+    }
+
+    return *(prime - 1);
+}
+
+int getHashTableCapacity(uint32_t prime) {
+    // based on the output of collision_metrics.c, ignoring intercept
+    // collisions = 0.3280992986 * prime + -0.8512436528
+    // capacity = size + 2 * collisions
+    return (int)((2 + 2 * 0.3280992986) * prime);
+}
+
+int getHashTablePrime(int expectedLoad) {
+    // choose size of each table so that number of elements in both tables
+    // combined equals expectedLoad when tables are 80% full (this relates to
+    // the 80% load parameter in collision_metrics.c)
+    int prime = getNextHashTablePrime((int)(expectedLoad * 0.625));
+    return prime;
+}
+
+HashTable constructHashTable(int prime) {
+    int capacity = getHashTableCapacity(prime);
+    void **table = (void**)malloc(capacity * sizeof(void*));
+    memset((void*)table, 0, capacity * sizeof(void*));
+    HashTable result = {
+        .table = table,
+        .prime = prime,
+        .tableStop = table + capacity,
+        .extraStart = table + 2 * prime,
+    };
+    return result;
+}
+
+void destroyHashTable(HashTable hashTable) {
+    free(hashTable.table);
+}
+
+void **hashTableGetNewParent(
+    const HashTable this,
+    const wchar_t *item,
+    int comparator(const wchar_t *a, const wchar_t *b)
+) {
+    uint32_t hash1 = getHash1(item) % this.prime;
+    void **entry1 = this.table + hash1;
+    if (*entry1 == NULL) { return entry1; }
+
+    uint32_t hash2 = getHash2(item) % this.prime;
+    void **entry2 = this.table + this.prime + hash2;
+    if (*entry2 == NULL) {
+        if (*entry1 >= this.table && *entry1 < this.tableStop) {
+            entry1 = (void**)(*entry1);
+        }
+
+        if (!comparator(item, *(wchar_t**)entry1)) { return NULL; }
+
+        return entry2;
+    }
+
+    while (
+        *entry1 >= this.table && *entry1 < this.tableStop
+            && *entry2 >= this.table && *entry2 < this.tableStop
+    ) {
+        // both entries point to the overflow area.
+        // entries in the overflow area are in pairs. the first entry in each
+        // pair is always a string.
+        entry1 = (void**)(*entry1);
+        entry2 = (void**)(*entry2);
+        if (
+            !comparator(item, *(wchar_t**)entry1)
+                || !comparator(item, *(wchar_t**)entry2)
+        ) { return NULL; }
+
+        // the second entry in each pair may be a string or a pointer to
+        // another entry in the overflow area
+        entry1++;
+        entry2++;
+    }
+
+    void **insertAfter = entry1;
+    void **otherBranch = entry2;
+    if (*entry1 >= this.table && *entry1 < this.tableStop) {
+        // insert on the second branch only if the first branch is strictly
+        // longer
+        insertAfter = entry2;
+        otherBranch = entry1;
+    }
+
+    if (!comparator(item, *(wchar_t**)insertAfter)) { return NULL; }
+
+    while (*otherBranch >= this.table && *otherBranch < this.tableStop) {
+        otherBranch = (void**)(*otherBranch);
+        if (!comparator(item, *(wchar_t**)otherBranch)) { return NULL; }
+
+        otherBranch++;
+    }
+
+    if (!comparator(item, *(wchar_t**)otherBranch)) { return NULL; }
+
+    return insertAfter;
+}
+
+int hashTableContains(const HashTable this, const wchar_t *item) {
+    return !hashTableGetNewParent(this, item, wcscmp);
+}
+
+int alwaysGreaterStringCompare(const wchar_t *a, const wchar_t *b) {
+    return 1;
+}
+
+int hashTableInsert(HashTable *this, wchar_t *item) {
+    void **insertAfter = hashTableGetNewParent(*this, item, wcscmp);
+    if (insertAfter == NULL) {
+        return 0;
+    } else if (*insertAfter == NULL) {
+        *insertAfter = (void*)item;
+        return 1;
+    }
+
+    int newPrime = this->prime;
+    while (this->extraStart + 2 > this->tableStop) {
+        // resize
+        int lastPrime = newPrime;
+        newPrime = getNextHashTablePrime(newPrime + 1);
+        if (newPrime <= lastPrime) {
+            return 1; // reached maximum size, lie and say we inserted it
+        }
+
+        HashTable replacement = constructHashTable(newPrime);
+        void **entry = this->table;
+        for (; entry < this->extraStart; entry++) {
+            if (
+                *entry != NULL
+                    && (*entry < this->table || *entry >= this->extraStart)
+            ) {
+                void **newInsertAfter = hashTableGetNewParent(
+                    replacement, *(wchar_t**)entry, alwaysGreaterStringCompare
+                );
+                if (*newInsertAfter == NULL) {
+                    *newInsertAfter = *entry;
+                } else if (
+                    replacement.extraStart + 2 > replacement.tableStop
+                ) {
+                    break; // larger hash table somehow fits fewer items? hmm
+                } else {
+                    replacement.extraStart[0] = *newInsertAfter;
+                    *newInsertAfter = (void*)replacement.extraStart;
+                    replacement.extraStart[1] = *entry;
+                    replacement.extraStart += 2;
+                }
+            }
+        }
+
+        if (entry < this->extraStart) {
+            // larger hash table somehow fits fewer items? hmm
+            destroyHashTable(replacement);
+        } else {
+            destroyHashTable(*this);
+            *this = replacement;
+            insertAfter = hashTableGetNewParent(*this, item, wcscmp);
+            // assume item is not in table yet
+            if (*insertAfter == NULL) {
+                *insertAfter = (void*)item;
+                return 1;
+            }
+        }
+    }
+
+    this->extraStart[0] = *insertAfter;
+    *insertAfter = (void*)this->extraStart;
+    this->extraStart[1] = item;
+    this->extraStart += 2;
+    return 1;
+}
 
 int gcd(a, b) {
     while (b != 0)  {
