@@ -1,30 +1,9 @@
 # MouseJump
 AceJump-inspired interface for moving the mouse by keyboard or voice
 
-The program is currently in a finished and usable state.
+## Building MouseJumpSettings
 
-`mousejump.cpp` is the single self-contained file you need to build the program.
-Build instructions are in `mousejump.cpp`.
+1. [Install tools for the Windows App SDK](https://docs.microsoft.com/en-us/windows/apps/windows-app-sdk/set-up-your-development-environment?tabs=vs-2022-17-1-a%2Cvs-2022-17-1-b)
+2. [Unpackaged: Create a new project for an unpackaged C# or C++ WinUI 3 desktop app](https://docs.microsoft.com/en-us/windows/apps/winui/winui3/create-your-first-winui3-app#unpackaged-create-a-new-project-for-an-unpackaged-c-or-c-winui-3-desktop-app)
 
-`.atom-build.js` enables one-button build within Atom, using https://atom.io/packages/build
-
-
-- **Number keys:** Move cursor to label
-
-- **Backspace:** Show all labels
-
-- **Enter:** Click with primary button
-
-- **"Apps" key (the one with the picture of a context menu):** Click with secondary button
-
-- **Tab:** Middle-click
-
-- **Arrow keys:** Move cursor AND labels
-
-- **Space:** Other commands now choose drag destination instead of moving cursor
-
-- **Space and then enter without choosing drag destination:** Double click
-
-
-I control MouseJump using Vocola voice commands that press these keys for me.
-My full voice command setup is here: https://github.com/evanshort73/mypersonalvcl
+   Make sure to run `WindowsAppRuntimeInstall.exe` as administrator.

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "MouseJumpSettings (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "MouseJumpSettings (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
