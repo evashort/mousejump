@@ -5,10 +5,18 @@
     xmlns:local="using:MouseJumpSettings.Views"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:muxc="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-        <TextBlock>Labels</TextBlock>
+
+        <muxc:TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}">
+            <muxc:TreeView.ItemTemplate>
+                <DataTemplate x:DataType="local:Item">
+                    <muxc:TreeViewItem ItemsSource="{x:Bind Children}" Content="{x:Bind Name}"/>
+                </DataTemplate>
+            </muxc:TreeView.ItemTemplate>
+        </muxc:TreeView>
     </Grid>
 </Page>
