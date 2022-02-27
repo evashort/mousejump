@@ -24,9 +24,10 @@
         <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Grid.Column="0" Grid.Row="0" Grid.RowSpan="3">
             <TreeView.ItemTemplate>
                 <DataTemplate x:DataType="local:Item">
-                    <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.Name="{x:Bind AltText}">
+                    <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
                         <StackPanel>
-                            <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False"/>
+                            <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
+                            <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>

@@ -72,6 +72,20 @@ namespace MouseJumpSettings.Views
     {
         public string Name { get; set; }
         public Operation Operation { get; set; }
+        public string OperationName
+        {
+            get
+            {
+                return Operation switch
+                {
+                    Operation.Literal => "Text",
+                    Operation.Merge => "Merge",
+                    Operation.Join => "Join",
+                    Operation.New => "Add",
+                    _ => "",
+                };
+            }
+        }
         public string PathData
         {
             get
@@ -98,29 +112,6 @@ namespace MouseJumpSettings.Views
         public double? Weight { get; set; }
         public bool Used { get; set; }
         public bool HasSeparator { get; set; }
-        public string AltText {
-            get
-            {
-                if (Weight != null)
-                {
-                    if (HasSeparator)
-                    {
-                        return $"{Name} {Weight}, priority 1";
-                    }
-
-                    return $"{Name} {Weight}";
-                }
-                else
-                {
-                    if (HasSeparator)
-                    {
-                        return $"{Name}, priority 1";
-                    }
-
-                    return Name;
-                }
-            }
-        }
         public Visibility SeparatorVisibility {
             get { return HasSeparator ? Visibility.Visible : Visibility.Collapsed; }
         }
