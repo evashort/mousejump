@@ -5,33 +5,42 @@
     xmlns:local="using:MouseJumpSettings.Views"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:muxc="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-        <StackPanel Orientation="Horizontal">
-            <muxc:TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False">
-                <muxc:TreeView.ItemTemplate>
-                    <DataTemplate x:DataType="local:Item">
-                        <muxc:TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.Name="{x:Bind AltText}">
-                            <StackPanel VerticalAlignment="Center">
-                                <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}"/>
-                                <Grid Visibility="{x:Bind NameVisibility}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition/>
-                                    </Grid.ColumnDefinitions>
-                                    <FontIcon FontFamily="{StaticResource SymbolThemeFontFamily}" Glyph="{x:Bind Icon}" Grid.Column="0" Margin="0,0,4,0"/>
-                                    <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,4,0"/>
-                                    <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right"/>
-                                </Grid>
-                            </StackPanel>
-                        </muxc:TreeViewItem>
-                    </DataTemplate>
-                </muxc:TreeView.ItemTemplate>
-            </muxc:TreeView>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition/>
+        </Grid.RowDefinitions>
+        <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2">
+            <TreeView.ItemTemplate>
+                <DataTemplate x:DataType="local:Item">
+                    <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.Name="{x:Bind AltText}">
+                        <StackPanel>
+                            <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition/>
+                                </Grid.ColumnDefinitions>
+                                <PathIcon Data="{x:Bind PathData}" Width="16" Height="16" Grid.Column="0" Margin="0,0,4,0"/>
+                                <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,4,0"/>
+                                <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right"/>
+                            </Grid>
+                        </StackPanel>
+                    </TreeViewItem>
+                </DataTemplate>
+            </TreeView.ItemTemplate>
+        </TreeView>
+        <StackPanel Orientation="Horizontal" Grid.Column="1" Grid.Row="0">
+            <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Priority" SpinButtonPlacementMode="Inline"/>
+            <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Weight" SpinButtonPlacementMode="Hidden"/>
         </StackPanel>
     </Grid>
 </Page>
