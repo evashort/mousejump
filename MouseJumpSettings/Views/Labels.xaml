@@ -13,40 +13,41 @@
             <ColumnDefinition Width="1*" MaxWidth="300"/>
             <ColumnDefinition Width="3*"/>
         </Grid.ColumnDefinitions>
-        <Grid Grid.Column="0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition/>
-            </Grid.RowDefinitions>
-            <ComboBox Header="Label source" SelectedIndex="0" Margin="24" Grid.Row="0">
-                <ComboBoxItem Content="main"/>
-                <ComboBoxItem Content="letters"/>
-                <ComboBoxItem Content="numbers"/>
-                <ComboBoxItem Content="unused"/>
-            </ComboBox>
-            <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Grid.Row="1">
-                <TreeView.ItemTemplate>
-                    <DataTemplate x:DataType="local:Item">
-                        <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
-                            <StackPanel>
-                                <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
-                                <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition/>
-                                    </Grid.ColumnDefinitions>
-                                    <PathIcon Data="{x:Bind PathData}" Grid.Column="0" Margin="0,0,12,0"/>
-                                    <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,12,0"/>
-                                    <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,12,0"/>
-                                </Grid>
-                            </StackPanel>
-                        </TreeViewItem>
-                    </DataTemplate>
-                </TreeView.ItemTemplate>
-            </TreeView>
-        </Grid>
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
+            <StackPanel>
+                <StackPanel Margin="12">
+                    <ComboBox Header="Label source" SelectedIndex="0" Margin="12">
+                        <ComboBoxItem Content="main"/>
+                        <ComboBoxItem Content="letters"/>
+                        <ComboBoxItem Content="numbers"/>
+                        <ComboBoxItem Content="unused"/>
+                    </ComboBox>
+                    <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
+                </StackPanel>
+                <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False">
+                    <TreeView.ItemTemplate>
+                        <DataTemplate x:DataType="local:Item">
+                            <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
+                                <StackPanel>
+                                    <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
+                                    <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition/>
+                                        </Grid.ColumnDefinitions>
+                                        <PathIcon Data="{x:Bind PathData}" Grid.Column="0" Margin="0,0,12,0"/>
+                                        <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,12,0"/>
+                                        <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                                    </Grid>
+                                </StackPanel>
+                            </TreeViewItem>
+                        </DataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </StackPanel>
+        </ScrollViewer>
         <Grid Grid.Column="1" Padding="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="2*" MaxWidth="500"/>
@@ -62,7 +63,7 @@
                 <StackPanel HorizontalAlignment="Left">
                     <StackPanel Orientation="Horizontal" Margin="12">
                         <PathIcon Data="m 10.007812,9.3203125 c 5.9e-4,-0.3151824 0.06104,-0.5524249 0.08594,-0.5761719 l 5.435546,-5.1835937 c 0.46002,-0.4387278 0.572276,-1.0848648 0.375,-1.6113282 C 15.707023,1.4227554 15.167931,1 14.500002,1 H 1.5 C 0.83207057,1 0.29297839,1.4227554 0.09570312,1.9492187 -0.10157214,2.4756821 0.01068223,3.1218191 0.47070313,3.5605469 L 5.90625,8.7441406 c 0.024899,0.023747 0.085346,0.2609895 0.085937,0.5761719 L 6,13.75 9.2207,15.914063 C 9.5533093,16.137976 10.000966,15.899002 10,15.498047 M 8.9960938,14.558594 7,13.216797 6.9921875,9.3183594 C 6.9915694,8.9892608 7.0370426,8.4423955 6.5957031,8.0214844 L 1.1601562,2.8378906 C 0.98965295,2.6752794 0.96841532,2.4717256 1.0332031,2.2988281 1.0979909,2.1259306 1.2169582,2 1.5,2 h 13.000002 c 0.283041,0 0.402009,0.1259306 0.466796,0.2988281 0.06479,0.1728975 0.04355,0.3764513 -0.126953,0.5390625 L 9.4042985,8.0214844 C 8.962959,8.4423955 9.0084322,8.9892608 9.0078116,9.3183594" Margin="0,0,12,0"/>
-                        <TextBlock Text="Filter list"/>
+                        <TextBlock Text="Built-in filter list"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
                         <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Priority" SpinButtonPlacementMode="Inline" Margin="12"/>
