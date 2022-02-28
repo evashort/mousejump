@@ -8,79 +8,97 @@
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
-    <Grid>
+    <Grid VerticalAlignment="Stretch">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition/>
-            <ColumnDefinition/>
-            <ColumnDefinition/>
+            <ColumnDefinition Width="1*" MaxWidth="300"/>
+            <ColumnDefinition Width="3*"/>
         </Grid.ColumnDefinitions>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition/>
-        </Grid.RowDefinitions>
-        <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Grid.Column="0" Grid.Row="0" Grid.RowSpan="3">
-            <TreeView.ItemTemplate>
-                <DataTemplate x:DataType="local:Item">
-                    <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
-                        <StackPanel>
-                            <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
-                            <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition/>
-                                </Grid.ColumnDefinitions>
-                                <PathIcon Data="{x:Bind PathData}" Grid.Column="0" Margin="0,0,4,0"/>
-                                <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,4,0"/>
-                                <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right"/>
-                            </Grid>
-                        </StackPanel>
-                    </TreeViewItem>
-                </DataTemplate>
-            </TreeView.ItemTemplate>
-        </TreeView>
-        <StackPanel Orientation="Horizontal" Grid.Column="1" Grid.Row="0" Grid.ColumnSpan="2">
-            <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Priority" SpinButtonPlacementMode="Inline"/>
-            <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Weight" SpinButtonPlacementMode="Hidden"/>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2">
-            <TextBox Text="positive"/>
-        </StackPanel>
-        <StackPanel Grid.Row="2" Grid.Column="1">
-            <ComboBox Header="List to filter" SelectedIndex="0">
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition/>
+            </Grid.RowDefinitions>
+            <ComboBox Header="Label source" SelectedIndex="0" Margin="24" Grid.Row="0">
+                <ComboBoxItem Content="main"/>
                 <ComboBoxItem Content="letters"/>
                 <ComboBoxItem Content="numbers"/>
                 <ComboBoxItem Content="unused"/>
             </ComboBox>
-            <TextBox Text="0&#xA;" AcceptsReturn="True" Header="Labels to remove"/>
-        </StackPanel>
-        <StackPanel Grid.Row="2" Grid.Column="2">
-            <TextBlock Text="Output"/>
-            <TextBlock IsTextSelectionEnabled="True" Text="1&#xA;2&#xA;3&#xA;4&#xA;5&#xA;6&#xA;7&#xA;8&#xA;9&#xA;"/>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2">
-            <Button Margin="4">
-                <StackPanel Orientation="Horizontal">
-                    <PathIcon Data="M 6.8300781,6.9726562 A 0.5,0.5 0 0 0 6.1640625,7.2089844 0.5,0.5 0 0 0 6.4003906,7.875 c 2.8524223,1.3584083 5.9425534,2.191143 8.9921874,2.863281 A 0.5,0.5 0 0 0 15.988281,10.357422 0.5,0.5 0 0 0 15.607422,9.7617188 C 12.58879,9.096413 9.5720712,8.2784749 6.8300781,6.9726562 Z M 8.5703125,3.0546875 A 0.5,0.5 0 0 0 8.203125,3.1660156 C 5.9215592,5.0281273 2.5694784,6.8976627 0.31640625,7.7851562 a 0.5,0.5 0 0 0 -0.28125,0.6484376 0.5,0.5 0 0 0 0.6484375,0.28125 C 3.0640967,7.7771547 6.4390072,5.8957202 8.8359375,3.9394531 A 0.5,0.5 0 0 0 8.90625,3.2363281 0.5,0.5 0 0 0 8.5703125,3.0546875 Z M 8.2128906,0.00390625 A 0.5,0.5 0 0 0 7.8457031,0.109375 0.5,0.5 0 0 0 7.7695312,0.8125 c 1.9245137,2.3947713 4.9087748,4.7581182 7.5703128,5.6601562 a 0.5,0.5 0 0 0 0.632812,-0.3125 0.5,0.5 0 0 0 -0.3125,-0.6328125 C 13.296987,4.7264277 10.353829,2.4335553 8.5488281,0.1875 A 0.5,0.5 0 0 0 8.2128906,0.00390625 Z M 6,14 A 0.5,0.5 0 0 0 5.5,14.5 0.5,0.5 0 0 0 6,15 h 9.5 A 0.5,0.5 0 0 0 16,14.5 0.5,0.5 0 0 0 15.5,14 Z M 9.7265625,10.738281 C 6.700471,11.242022 3.2029003,11.783929 0.4375,12.128906 A 0.5,0.5 0 0 0 0.00390625,12.6875 0.5,0.5 0 0 0 0.5625,13.121094 c 2.7900142,-0.348048 6.2933615,-0.8913 9.328125,-1.396485 a 0.5,0.5 0 0 0 0.412109,-0.574218 0.5,0.5 0 0 0 -0.5761715,-0.41211 z" Margin="0,0,4,0"/>
-                    <TextBlock Text="Merge"/>
+            <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Grid.Row="1">
+                <TreeView.ItemTemplate>
+                    <DataTemplate x:DataType="local:Item">
+                        <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
+                            <StackPanel>
+                                <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
+                                <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition/>
+                                    </Grid.ColumnDefinitions>
+                                    <PathIcon Data="{x:Bind PathData}" Grid.Column="0" Margin="0,0,12,0"/>
+                                    <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,12,0"/>
+                                    <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                                </Grid>
+                            </StackPanel>
+                        </TreeViewItem>
+                    </DataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+        </Grid>
+        <Grid Grid.Column="1" Padding="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" MaxWidth="500"/>
+                <ColumnDefinition Width="1*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock Text="positive" Style="{ThemeResource SubheaderTextBlockStyle}" Margin="12" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"/>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto" Grid.Row="1" Grid.Column="0">
+                <StackPanel HorizontalAlignment="Left">
+                    <StackPanel Orientation="Horizontal" Margin="12">
+                        <PathIcon Data="m 10.007812,9.3203125 c 5.9e-4,-0.3151824 0.06104,-0.5524249 0.08594,-0.5761719 l 5.435546,-5.1835937 c 0.46002,-0.4387278 0.572276,-1.0848648 0.375,-1.6113282 C 15.707023,1.4227554 15.167931,1 14.500002,1 H 1.5 C 0.83207057,1 0.29297839,1.4227554 0.09570312,1.9492187 -0.10157214,2.4756821 0.01068223,3.1218191 0.47070313,3.5605469 L 5.90625,8.7441406 c 0.024899,0.023747 0.085346,0.2609895 0.085937,0.5761719 L 6,13.75 9.2207,15.914063 C 9.5533093,16.137976 10.000966,15.899002 10,15.498047 M 8.9960938,14.558594 7,13.216797 6.9921875,9.3183594 C 6.9915694,8.9892608 7.0370426,8.4423955 6.5957031,8.0214844 L 1.1601562,2.8378906 C 0.98965295,2.6752794 0.96841532,2.4717256 1.0332031,2.2988281 1.0979909,2.1259306 1.2169582,2 1.5,2 h 13.000002 c 0.283041,0 0.402009,0.1259306 0.466796,0.2988281 0.06479,0.1728975 0.04355,0.3764513 -0.126953,0.5390625 L 9.4042985,8.0214844 C 8.962959,8.4423955 9.0084322,8.9892608 9.0078116,9.3183594" Margin="0,0,12,0"/>
+                        <TextBlock Text="Filter list"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Priority" SpinButtonPlacementMode="Inline" Margin="12"/>
+                        <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Weight" SpinButtonPlacementMode="Hidden" Margin="12"/>
+                        <TextBox Text="positive" Header="Name" Margin="12"/>
+                    </StackPanel>
+                    <ComboBox Header="Input" SelectedIndex="0" Margin="12">
+                        <ComboBoxItem Content="main"/>
+                        <ComboBoxItem Content="letters"/>
+                        <ComboBoxItem Content="numbers"/>
+                        <ComboBoxItem Content="unused"/>
+                    </ComboBox>
+                    <TextBox Text="0&#xA;" AcceptsReturn="True" Header="Labels to remove (one per line)" Margin="12"/>
                 </StackPanel>
-            </Button>
-            <Button Margin="4">
-                <StackPanel Orientation="Horizontal">
-                    <PathIcon Data="M 0.999938,1.50016 C 0.447701,1.5002 3.37071e-5,1.94787 0,2.5001 3.36633e-5,3.05234 0.447701,3.50001 0.999938,3.50004 1.55217,3.50001 1.99984,3.05234 1.99988,2.5001 1.99984,1.94787 1.55217,1.5002 0.999938,1.50016 Z m 14.000162,0 c -0.5522,4e-5 -0.9999,0.44771 -0.9999,0.99994 0,0.55224 0.4477,0.99991 0.9999,0.99994 C 15.5523,3.50001 16,3.05234 16,2.5001 16,1.94787 15.5523,1.5002 15.0001,1.50016 Z M 3.99975,1.99988 C 3.86706,1.99981 3.73979,2.0525 3.64597,2.14632 3.55215,2.24015 3.49946,2.36742 3.49952,2.5001 c -6e-5,0.13269 0.05263,0.25996 0.14645,0.35378 0.09382,0.09383 0.22109,0.14651 0.35378,0.14645 h 7.56745 c 0.0021,0.01362 0.0035,0.02723 0.0057,0.04082 C 10.0766,4.01967 8.99872,5.52837 8.00053,7.07191 7.42253,6.17302 6.82115,5.28159 6.12572,4.49998 H 4.71805 C 5.72035,5.4188 6.5632,6.6792 7.40677,7.99898 6.27975,9.76271 5.15559,11.4224 3.64835,12.301 3.40977,12.44 3.32903,12.7461 3.468,12.9847 3.607,13.2233 3.91308,13.304 4.15168,13.1651 6.01505,12.0788 7.22197,10.1549 8.40051,8.30284 8.41575,8.28238 8.42939,8.26079 8.44133,8.23825 9.62086,6.38552 10.7787,4.61463 12.3553,3.69693 12.5504,3.58319 12.6451,3.35276 12.5863,3.13469 12.5301,2.92685 12.5013,2.71229 12.5,2.497 12.4984,2.22191 12.2749,1.99977 11.9998,1.99988 Z M 9.50018,9.36841 C 9.31299,9.66404 9.1234,9.96334 8.92554,10.2671 c 0.75891,1.0284 1.60706,1.9666 2.65256,2.6546 -0.0045,0.0259 -0.0058,0.0525 -0.0098,0.0785 H 6.79027 c -0.35828,0.3562 -0.74686,0.6926 -1.17408,1 h 6.38361 c 0.2747,10e-5 0.498,-0.2214 0.5002,-0.4961 0.0013,-0.2153 0.0296,-0.4309 0.0858,-0.6388 0.0591,-0.2181 -0.0353,-0.4488 -0.2305,-0.5627 C 11.2471,11.6575 10.3474,10.5882 9.50018,9.36841 Z M 0.999938,12.5 C 0.447701,12.5 3.36925e-5,12.9477 0,13.4999 c 3.38386e-5,0.5523 0.447701,0.9999 0.999938,1 0.552232,-10e-5 0.999902,-0.4477 0.999942,-1 C 1.99984,12.9477 1.55217,12.5 0.999938,12.5 Z m 14.000162,0 c -0.5522,0 -0.9999,0.4477 -0.9999,0.9999 0,0.5523 0.4477,0.9999 0.9999,1 C 15.5523,14.4998 16,14.0522 16,13.4999 16,12.9477 15.5523,12.5 15.0001,12.5 Z" Margin="0,0,4,0"/>
-                    <TextBlock Text="Join"/>
-                </StackPanel>
-            </Button>
-            <Button Margin="4">
-                <StackPanel Orientation="Horizontal">
-                    <PathIcon Data="M 8.00002,0 C 6.79634,0 5.78392,0.862472 5.55056,1.99988 H 0.999938 C 0.72382,2.00003 0.500101,2.22398 0.500227,2.5001 0.500387,2.77602 0.724021,2.99965 0.999938,2.99981 H 1.55443 L 2.84375,14.2947 c 0.05294,0.4637 0.31789,0.8117 0.6289,1.1193 C 3.78366,15.7216 4.1419,16 4.64467,16 h 3.35535 3.35538 c 0.5027,0 0.861,-0.2784 1.172,-0.586 0.311,-0.3076 0.5759,-0.6556 0.6289,-1.1193 L 14.4456,2.99981 h 0.5545 C 15.276,2.99965 15.4997,2.77602 15.4998,2.5001 15.4999,2.22398 15.2762,2.00003 15.0001,1.99988 H 10.4495 C 10.2161,0.862472 9.20369,0 8.00002,0 Z m 0,0.999938 c 0.65864,0 1.21201,0.414782 1.41593,0.999942 H 6.58409 C 6.78801,1.41472 7.34137,0.999938 8.00002,0.999938 Z M 2.55953,2.99981 H 13.4405 L 12.162,14.1815 c -0.0046,0.0403 -0.1382,0.3239 -0.3379,0.5215 -0.1998,0.1975 -0.4643,0.2971 -0.4687,0.2971 H 8.00002 4.64467 c -0.00442,0 -0.26896,-0.0996 -0.4687,-0.2971 C 3.97622,14.5054 3.8426,14.2218 3.838,14.1815 Z M 6.49985,6.00014 C 6.22394,6.0003 6.0003,6.22394 6.00014,6.49985 v 5.00025 c 1.6e-4,0.2759 0.2238,0.4995 0.49971,0.4997 0.27612,10e-5 0.50007,-0.2236 0.50023,-0.4997 V 6.49985 C 6.99992,6.22374 6.77597,6.00002 6.49985,6.00014 Z m 3.00033,0 C 9.22407,6.00002 9.00012,6.22374 8.99996,6.49985 v 5.00025 c 1.6e-4,0.2761 0.22411,0.4998 0.50022,0.4997 0.27592,-2e-4 0.49955,-0.2238 0.49971,-0.4997 V 6.49985 C 9.99973,6.22394 9.7761,6.0003 9.50018,6.00014 Z" Margin="0,0,4,0"/>
-                    <TextBlock Text="Delete"/>
-                </StackPanel>
-            </Button>
-        </StackPanel>
+            </ScrollViewer>
+            <RichEditBox x:Name="outputBox" IsReadOnly="True" Grid.Row="1" Grid.Column="1" Margin="12" Header="Output"/>
+            <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2">
+                <Button Margin="12">
+                    <StackPanel Orientation="Horizontal">
+                        <PathIcon Data="M 6.8300781,6.9726562 A 0.5,0.5 0 0 0 6.1640625,7.2089844 0.5,0.5 0 0 0 6.4003906,7.875 c 2.8524223,1.3584083 5.9425534,2.191143 8.9921874,2.863281 A 0.5,0.5 0 0 0 15.988281,10.357422 0.5,0.5 0 0 0 15.607422,9.7617188 C 12.58879,9.096413 9.5720712,8.2784749 6.8300781,6.9726562 Z M 8.5703125,3.0546875 A 0.5,0.5 0 0 0 8.203125,3.1660156 C 5.9215592,5.0281273 2.5694784,6.8976627 0.31640625,7.7851562 a 0.5,0.5 0 0 0 -0.28125,0.6484376 0.5,0.5 0 0 0 0.6484375,0.28125 C 3.0640967,7.7771547 6.4390072,5.8957202 8.8359375,3.9394531 A 0.5,0.5 0 0 0 8.90625,3.2363281 0.5,0.5 0 0 0 8.5703125,3.0546875 Z M 8.2128906,0.00390625 A 0.5,0.5 0 0 0 7.8457031,0.109375 0.5,0.5 0 0 0 7.7695312,0.8125 c 1.9245137,2.3947713 4.9087748,4.7581182 7.5703128,5.6601562 a 0.5,0.5 0 0 0 0.632812,-0.3125 0.5,0.5 0 0 0 -0.3125,-0.6328125 C 13.296987,4.7264277 10.353829,2.4335553 8.5488281,0.1875 A 0.5,0.5 0 0 0 8.2128906,0.00390625 Z M 6,14 A 0.5,0.5 0 0 0 5.5,14.5 0.5,0.5 0 0 0 6,15 h 9.5 A 0.5,0.5 0 0 0 16,14.5 0.5,0.5 0 0 0 15.5,14 Z M 9.7265625,10.738281 C 6.700471,11.242022 3.2029003,11.783929 0.4375,12.128906 A 0.5,0.5 0 0 0 0.00390625,12.6875 0.5,0.5 0 0 0 0.5625,13.121094 c 2.7900142,-0.348048 6.2933615,-0.8913 9.328125,-1.396485 a 0.5,0.5 0 0 0 0.412109,-0.574218 0.5,0.5 0 0 0 -0.5761715,-0.41211 z" Margin="0,0,12,0"/>
+                        <TextBlock Text="Merge"/>
+                    </StackPanel>
+                </Button>
+                <Button Margin="12">
+                    <StackPanel Orientation="Horizontal">
+                        <PathIcon Data="M 0.999938,1.50016 C 0.447701,1.5002 3.37071e-5,1.94787 0,2.5001 3.36633e-5,3.05234 0.447701,3.50001 0.999938,3.50004 1.55217,3.50001 1.99984,3.05234 1.99988,2.5001 1.99984,1.94787 1.55217,1.5002 0.999938,1.50016 Z m 14.000162,0 c -0.5522,4e-5 -0.9999,0.44771 -0.9999,0.99994 0,0.55224 0.4477,0.99991 0.9999,0.99994 C 15.5523,3.50001 16,3.05234 16,2.5001 16,1.94787 15.5523,1.5002 15.0001,1.50016 Z M 3.99975,1.99988 C 3.86706,1.99981 3.73979,2.0525 3.64597,2.14632 3.55215,2.24015 3.49946,2.36742 3.49952,2.5001 c -6e-5,0.13269 0.05263,0.25996 0.14645,0.35378 0.09382,0.09383 0.22109,0.14651 0.35378,0.14645 h 7.56745 c 0.0021,0.01362 0.0035,0.02723 0.0057,0.04082 C 10.0766,4.01967 8.99872,5.52837 8.00053,7.07191 7.42253,6.17302 6.82115,5.28159 6.12572,4.49998 H 4.71805 C 5.72035,5.4188 6.5632,6.6792 7.40677,7.99898 6.27975,9.76271 5.15559,11.4224 3.64835,12.301 3.40977,12.44 3.32903,12.7461 3.468,12.9847 3.607,13.2233 3.91308,13.304 4.15168,13.1651 6.01505,12.0788 7.22197,10.1549 8.40051,8.30284 8.41575,8.28238 8.42939,8.26079 8.44133,8.23825 9.62086,6.38552 10.7787,4.61463 12.3553,3.69693 12.5504,3.58319 12.6451,3.35276 12.5863,3.13469 12.5301,2.92685 12.5013,2.71229 12.5,2.497 12.4984,2.22191 12.2749,1.99977 11.9998,1.99988 Z M 9.50018,9.36841 C 9.31299,9.66404 9.1234,9.96334 8.92554,10.2671 c 0.75891,1.0284 1.60706,1.9666 2.65256,2.6546 -0.0045,0.0259 -0.0058,0.0525 -0.0098,0.0785 H 6.79027 c -0.35828,0.3562 -0.74686,0.6926 -1.17408,1 h 6.38361 c 0.2747,10e-5 0.498,-0.2214 0.5002,-0.4961 0.0013,-0.2153 0.0296,-0.4309 0.0858,-0.6388 0.0591,-0.2181 -0.0353,-0.4488 -0.2305,-0.5627 C 11.2471,11.6575 10.3474,10.5882 9.50018,9.36841 Z M 0.999938,12.5 C 0.447701,12.5 3.36925e-5,12.9477 0,13.4999 c 3.38386e-5,0.5523 0.447701,0.9999 0.999938,1 0.552232,-10e-5 0.999902,-0.4477 0.999942,-1 C 1.99984,12.9477 1.55217,12.5 0.999938,12.5 Z m 14.000162,0 c -0.5522,0 -0.9999,0.4477 -0.9999,0.9999 0,0.5523 0.4477,0.9999 0.9999,1 C 15.5523,14.4998 16,14.0522 16,13.4999 16,12.9477 15.5523,12.5 15.0001,12.5 Z" Margin="0,0,12,0"/>
+                        <TextBlock Text="Join"/>
+                    </StackPanel>
+                </Button>
+                <Button Margin="12">
+                    <StackPanel Orientation="Horizontal">
+                        <PathIcon Data="M 8.00002,0 C 6.79634,0 5.78392,0.862472 5.55056,1.99988 H 0.999938 C 0.72382,2.00003 0.500101,2.22398 0.500227,2.5001 0.500387,2.77602 0.724021,2.99965 0.999938,2.99981 H 1.55443 L 2.84375,14.2947 c 0.05294,0.4637 0.31789,0.8117 0.6289,1.1193 C 3.78366,15.7216 4.1419,16 4.64467,16 h 3.35535 3.35538 c 0.5027,0 0.861,-0.2784 1.172,-0.586 0.311,-0.3076 0.5759,-0.6556 0.6289,-1.1193 L 14.4456,2.99981 h 0.5545 C 15.276,2.99965 15.4997,2.77602 15.4998,2.5001 15.4999,2.22398 15.2762,2.00003 15.0001,1.99988 H 10.4495 C 10.2161,0.862472 9.20369,0 8.00002,0 Z m 0,0.999938 c 0.65864,0 1.21201,0.414782 1.41593,0.999942 H 6.58409 C 6.78801,1.41472 7.34137,0.999938 8.00002,0.999938 Z M 2.55953,2.99981 H 13.4405 L 12.162,14.1815 c -0.0046,0.0403 -0.1382,0.3239 -0.3379,0.5215 -0.1998,0.1975 -0.4643,0.2971 -0.4687,0.2971 H 8.00002 4.64467 c -0.00442,0 -0.26896,-0.0996 -0.4687,-0.2971 C 3.97622,14.5054 3.8426,14.2218 3.838,14.1815 Z M 6.49985,6.00014 C 6.22394,6.0003 6.0003,6.22394 6.00014,6.49985 v 5.00025 c 1.6e-4,0.2759 0.2238,0.4995 0.49971,0.4997 0.27612,10e-5 0.50007,-0.2236 0.50023,-0.4997 V 6.49985 C 6.99992,6.22374 6.77597,6.00002 6.49985,6.00014 Z m 3.00033,0 C 9.22407,6.00002 9.00012,6.22374 8.99996,6.49985 v 5.00025 c 1.6e-4,0.2761 0.22411,0.4998 0.50022,0.4997 0.27592,-2e-4 0.49955,-0.2238 0.49971,-0.4997 V 6.49985 C 9.99973,6.22394 9.7761,6.0003 9.50018,6.00014 Z" Margin="0,0,12,0"/>
+                        <TextBlock Text="Delete"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Page>

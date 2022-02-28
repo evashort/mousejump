@@ -13,11 +13,15 @@ namespace MouseJumpSettings.Views
         private ObservableCollection<Item> DataSource = new ObservableCollection<Item>();
         private int Priority { get; set; }
         private double Weight { get; set; }
+        private string Output { get; set; }
 
         public Labels()
         {
             this.InitializeComponent();
             DataSource = GetData();
+            outputBox.IsReadOnly = false;
+            outputBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, "1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n");
+            outputBox.IsReadOnly = true;
         }
 
         private ObservableCollection<Item> GetData()
@@ -52,7 +56,7 @@ namespace MouseJumpSettings.Views
                 },
                 new Item
                 {
-                    Name = "New sequence",
+                    Name = "New list",
                     Operation = Operation.New,
                 },
             };
