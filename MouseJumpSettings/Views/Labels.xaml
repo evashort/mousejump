@@ -77,6 +77,7 @@
                         <ComboBoxItem Content="unused"/>
                     </ComboBox>
                     <TextBox Text="0&#xA;" AcceptsReturn="True" Header="Labels to remove (one per line)" Margin="12"/>
+                    <ToggleSwitch Header="First blank line is a label" Margin="12"></ToggleSwitch>
                 </StackPanel>
             </ScrollViewer>
             <RichEditBox x:Name="outputBox" IsReadOnly="True" Grid.Row="1" Grid.Column="1" Margin="12" Header="Output"/>
