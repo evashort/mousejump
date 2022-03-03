@@ -20,7 +20,7 @@
             </Grid.RowDefinitions>
             <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
                 <StackPanel>
-                    <StackPanel Margin="12">
+                    <StackPanel Margin="12,12,0,12">
                         <ComboBox Header="Label source" SelectedIndex="0" Margin="12">
                             <ComboBoxItem Content="main"/>
                             <ComboBoxItem Content="letters"/>
@@ -29,7 +29,7 @@
                         </ComboBox>
                         <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
                     </StackPanel>
-                    <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Margin="0,0,0,12">
+                    <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
                         <TreeView.ItemTemplate>
                             <DataTemplate x:DataType="local:Item">
                                 <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
@@ -53,12 +53,10 @@
                     </TreeView>
                 </StackPanel>
             </ScrollViewer>
-            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
-                <StackPanel Orientation="Horizontal" Padding="12,0,12,12">
-                    <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Priority" SpinButtonPlacementMode="Inline" Margin="12" SmallChange="-1" LargeChange="-10"/>
-                    <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Weight" SpinButtonPlacementMode="Hidden" Margin="12"/>
-                </StackPanel>
-            </ScrollViewer>
+            <StackPanel Padding="12,0,0,12" Grid.Row="1">
+                <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Group index" SpinButtonPlacementMode="Inline" Margin="12" SmallChange="-1" LargeChange="-10"/>
+                <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Frequency within group" SpinButtonPlacementMode="Hidden" Margin="12"/>
+            </StackPanel>
         </Grid>
         <Grid Grid.Column="1">
             <Grid.ColumnDefinitions>
@@ -73,18 +71,16 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <ScrollViewer VerticalScrollBarVisibility="Auto" Grid.Row="0" Grid.RowSpan="4" Grid.Column="0">
-                <StackPanel HorizontalAlignment="Stretch" Padding="12,12,0,0">
+                <StackPanel HorizontalAlignment="Stretch" Padding="0,12,0,0">
                     <TextBox Text="positive" Header="Name" Margin="12"/>
                     <StackPanel Orientation="Horizontal" Margin="12">
                         <PathIcon Data="M 13.379,0.00258382 C 12.7068,0.00224698 12.0346,0.256659 11.5249,0.766361 L 1.31465,10.9797 c -0.06432,0.0639 -0.11005,0.1441 -0.13229,0.232 l -0.999942,3.9992 c -0.042464,0.1704 0.007488,0.3505 0.131609,0.4746 0.124121,0.1241 0.304234,0.1741 0.474554,0.1316 L 4.78833,14.8177 C 4.8765,14.7959 4.95707,14.7505 5.02139,14.6864 L 15.2332,4.47466 c 1.0194,-1.01941 1.0194,-2.68728 0,-3.706749 C 14.7234,0.258176 14.0512,0.00292066 13.379,0.00258382 Z m 0,0.99373618 c 0.4142,3.23e-4 0.8285,0.15983 1.1472,0.47852 0.6374,0.63738 0.6372,1.65569 0,2.29288 L 14.0007,4.29327 11.7068,1.99988 12.2323,1.47381 C 12.5509,1.15521 12.9648,0.995998 13.379,0.99632 Z M 10.9998,2.70681 13.2932,5.00021 4.41109,13.8823 1.35495,14.6461 2.11873,11.59 Z" Margin="0,0,12,0"/>
                         <TextBlock Text="Built-in edit list" VerticalAlignment="Bottom"/>
                     </StackPanel>
-                    <ComboBox Header="Input" SelectedIndex="0" Margin="12">
-                        <ComboBoxItem Content="main"/>
-                        <ComboBoxItem Content="letters"/>
-                        <ComboBoxItem Content="numbers"/>
-                        <ComboBoxItem Content="unused"/>
-                    </ComboBox>
+                    <StackPanel Orientation="Horizontal" Margin="12">
+                        <TextBlock Text="Input:" Margin="0,0,12,0"/>
+                        <TextBlock Text="main" IsTextSelectionEnabled="True"/>
+                    </StackPanel>
                     <TextBox Text="0&#xA;" AcceptsReturn="True" Header="Labels (one per line)" Margin="12"/>
                     <NumberBox Value="1" Header="Page" SpinButtonPlacementMode="Inline" Margin="12"/>
                     <TextBlock Text="1-100 of 512 labels" Margin="12"/>
@@ -105,7 +101,7 @@
             <RichEditBox x:Name="deletionsBox" IsReadOnly="True" Grid.Row="2" Grid.Column="1" Margin="12,12,24,12" Header="1 labels removed"/>
             <RichEditBox x:Name="movesBox" IsReadOnly="True" Grid.Row="3" Grid.Column="1" Margin="12,12,24,12" Header="5 labels moved"/>
             <ScrollViewer Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
-                <StackPanel Orientation="Horizontal" Padding="12,0,12,12">
+                <StackPanel Orientation="Horizontal" Padding="0,0,12,12">
                     <Button Margin="12">
                         <StackPanel Orientation="Horizontal">
                             <PathIcon Data="M 6.8300781,6.9726562 A 0.5,0.5 0 0 0 6.1640625,7.2089844 0.5,0.5 0 0 0 6.4003906,7.875 c 2.8524223,1.3584083 5.9425534,2.191143 8.9921874,2.863281 A 0.5,0.5 0 0 0 15.988281,10.357422 0.5,0.5 0 0 0 15.607422,9.7617188 C 12.58879,9.096413 9.5720712,8.2784749 6.8300781,6.9726562 Z M 8.5703125,3.0546875 A 0.5,0.5 0 0 0 8.203125,3.1660156 C 5.9215592,5.0281273 2.5694784,6.8976627 0.31640625,7.7851562 a 0.5,0.5 0 0 0 -0.28125,0.6484376 0.5,0.5 0 0 0 0.6484375,0.28125 C 3.0640967,7.7771547 6.4390072,5.8957202 8.8359375,3.9394531 A 0.5,0.5 0 0 0 8.90625,3.2363281 0.5,0.5 0 0 0 8.5703125,3.0546875 Z M 8.2128906,0.00390625 A 0.5,0.5 0 0 0 7.8457031,0.109375 0.5,0.5 0 0 0 7.7695312,0.8125 c 1.9245137,2.3947713 4.9087748,4.7581182 7.5703128,5.6601562 a 0.5,0.5 0 0 0 0.632812,-0.3125 0.5,0.5 0 0 0 -0.3125,-0.6328125 C 13.296987,4.7264277 10.353829,2.4335553 8.5488281,0.1875 A 0.5,0.5 0 0 0 8.2128906,0.00390625 Z M 6,14 A 0.5,0.5 0 0 0 5.5,14.5 0.5,0.5 0 0 0 6,15 h 9.5 A 0.5,0.5 0 0 0 16,14.5 0.5,0.5 0 0 0 15.5,14 Z M 9.7265625,10.738281 C 6.700471,11.242022 3.2029003,11.783929 0.4375,12.128906 A 0.5,0.5 0 0 0 0.00390625,12.6875 0.5,0.5 0 0 0 0.5625,13.121094 c 2.7900142,-0.348048 6.2933615,-0.8913 9.328125,-1.396485 a 0.5,0.5 0 0 0 0.412109,-0.574218 0.5,0.5 0 0 0 -0.5761715,-0.41211 z" Margin="0,0,12,0"/>
