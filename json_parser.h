@@ -53,9 +53,14 @@ int getCodepointUTF8Length(int codepoint) {
 #define CODEPOINT_BAD_ESCAPE -7
 #define CODEPOINT_BAD_U_ESCAPE -8
 #define CODEPOINT_SURROGATE_U_ESCAPE -9
+#define CODEPOINT_UNESCAPED -10
 int getCodepointEscaped(LPCBYTE *json, LPCBYTE stop) {
     if (*json + 2 > stop || **json != '\\') {
         int codepoint = getCodepoint(*json, stop);
+        if (codepoint >= 0 && codepoint < 0x20) {
+            return CODEPOINT_UNESCAPED;
+        }
+
         *json += getCodepointUTF8Length(codepoint);
         return codepoint;
     }
@@ -138,7 +143,7 @@ LPWSTR getCodepointError(int codepoint, StringContext context) {
             L"%2$s in key after %1$s",
         };
         return invalidErrors[context];
-    } else if (codepoint >= 0 && codepoint < 0x20) {
+    } else if (codepoint == CODEPOINT_UNESCAPED) {
         LPWSTR unescapedErrors[CONTEXT_COUNT] = {
             L"Unescaped %2$s in %1$s",
             L"Unescaped %2$s in first key of %1$s object",
@@ -341,11 +346,11 @@ LPCWSTR parseString(LPCBYTE *json, LPCBYTE stop, StringContext context) {
         }
     }
 
-    int codepoint = 0x20;
-    while (codepoint >= 0x20) {
+    int codepoint;
+    do {
         if (chomp('"', json, stop)) { return NULL; }
         codepoint = getCodepointEscaped(json, stop);
-    }
+    } while (codepoint >= 0);
 
     return getCodepointError(codepoint, context);
 }
