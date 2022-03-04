@@ -12,6 +12,71 @@
     },
     "labelColor": "#ffffff",
     "labelCount": 1200,
+    "labelLists": {
+        "0-9": {
+            "input": "0123456789",
+            "operation": "split",
+            "separator": ""
+        },
+        "0-99": {
+            "input": ["leading digit", "0-9"],
+            "operation": "join",
+            "order": "lexical"
+        },
+        "0-999": {
+            "input": ["leading digit", "0-99"],
+            "operation": "join",
+            "order": "lexical"
+        },
+        "a-z": {
+            "input": "etaoinshrdlcumwfgypbvkjxqz",
+            "operation": "split",
+            "separator": ""
+        },
+        "a-z mixed": {
+            "deletions": ["l"],
+            "input": "a-z",
+            "insertions": {
+                "k": "L"
+            },
+            "operation": "edit"
+        },
+        "a-z upper": {
+            "case": "upper",
+            "input": "a-z",
+            "operation": "edit"
+        },
+        "aa-zz": {
+            "input": ["a-z", "a-z"],
+            "operation": "join",
+            "order": "product"
+        },
+        "aaa-zzz": {
+            "input": ["a-z", "a-z", "a-z"],
+            "operation": "join",
+            "order": "product"
+        },
+        "default": {
+            "input": [
+                {
+                    "0-9": 1,
+                    "a-z": 1
+                },
+                {
+                    "0-999": 1,
+                    "aa-zz": 1
+                },
+                "aaa-zzz"
+            ],
+            "operation": "merge"
+        },
+        "leading digit": {
+            "input": "\n123456789",
+            "operation": "split",
+            "separator": ""
+        }
+    },
+    "labelSource": "default",
     "showFrame": true,
     "smallDeltaPx": 1
 }

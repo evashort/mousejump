@@ -332,25 +332,21 @@ namespace MouseJumpSettings
             if (val.ValueType == JsonValueType.Array)
             {
                 StringBuilder result = new StringBuilder("[");
-
                 indentation += 4;
-                if (val.GetArray().All(item => item.ValueType != JsonValueType.Array && item.ValueType != JsonValueType.Object))
-                {
-                    indentation = 0;
-                }
-
-                string separator = "\n";
+                bool singleLine = val.GetArray().All(
+                    item => item.ValueType != JsonValueType.Array && item.ValueType != JsonValueType.Object
+                );
+                string separator = singleLine ? "" : "\n" + "".PadLeft(indentation);
+                string nextSeparator = singleLine ? ", " : ",\n" + "".PadLeft(indentation);
                 foreach (IJsonValue item in val.GetArray())
                 {
                     result.Append(separator);
-                    separator = ",\n";
-                    result.Append("".PadLeft(indentation));
+                    separator = nextSeparator;
                     result.Append(PrettyPrint(item, indentation));
                 }
 
-                result.Append("\n");
                 indentation = oldIndentation;
-                result.Append("".PadLeft(indentation));
+                result.Append(singleLine ? "" : "\n" + "".PadLeft(indentation));
                 result.Append("]");
                 return result.ToString();
             }
