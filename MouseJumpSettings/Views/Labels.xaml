@@ -29,9 +29,9 @@
                         </ComboBox>
                         <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
                     </StackPanel>
-                    <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind DataSource}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
+                    <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind settings.GetChildren(x:Null)}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
                         <TreeView.ItemTemplate>
-                            <DataTemplate x:DataType="local:Item">
+                            <DataTemplate x:DataType="local:LabelList">
                                 <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
                                     <StackPanel>
                                         <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
@@ -42,7 +42,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition/>
                                             </Grid.ColumnDefinitions>
-                                            <PathIcon Data="{x:Bind PathData}" Grid.Column="0" Margin="0,0,12,0"/>
+                                            <PathIcon Data="{x:Bind IconPath}" Grid.Column="0" Margin="0,0,12,0"/>
                                             <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,12,0"/>
                                             <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                                         </Grid>
@@ -75,7 +75,7 @@
                     <TextBox Text="positive" Header="Name" Margin="12"/>
                     <StackPanel Orientation="Horizontal" Margin="12">
                         <PathIcon Data="M 13.379,0.00258382 C 12.7068,0.00224698 12.0346,0.256659 11.5249,0.766361 L 1.31465,10.9797 c -0.06432,0.0639 -0.11005,0.1441 -0.13229,0.232 l -0.999942,3.9992 c -0.042464,0.1704 0.007488,0.3505 0.131609,0.4746 0.124121,0.1241 0.304234,0.1741 0.474554,0.1316 L 4.78833,14.8177 C 4.8765,14.7959 4.95707,14.7505 5.02139,14.6864 L 15.2332,4.47466 c 1.0194,-1.01941 1.0194,-2.68728 0,-3.706749 C 14.7234,0.258176 14.0512,0.00292066 13.379,0.00258382 Z m 0,0.99373618 c 0.4142,3.23e-4 0.8285,0.15983 1.1472,0.47852 0.6374,0.63738 0.6372,1.65569 0,2.29288 L 14.0007,4.29327 11.7068,1.99988 12.2323,1.47381 C 12.5509,1.15521 12.9648,0.995998 13.379,0.99632 Z M 10.9998,2.70681 13.2932,5.00021 4.41109,13.8823 1.35495,14.6461 2.11873,11.59 Z" Margin="0,0,12,0"/>
-                        <TextBlock Text="Built-in edit list" VerticalAlignment="Bottom"/>
+                        <TextBlock Text="Built-in edit list"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="12">
                         <TextBlock Text="Input:" Margin="0,0,12,0"/>

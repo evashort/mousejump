@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -90,6 +91,146 @@ namespace MouseJumpSettings
             }
         }
 
+        private JsonObject defaultDefinitions = new JsonObject();
+        private JsonObject Definitions
+        {
+            get
+            {
+                try
+                {
+                    return json.GetNamedObject("labelLists");
+                }
+                catch (COMException)
+                {
+                    return defaultDefinitions;
+                }
+            }
+        }
+
+        public Views.LabelOperation GetOperation(string name)
+        {
+            if (name == null)
+            {
+                return Views.LabelOperation.New;
+            }
+
+            JsonValue definition = Definitions.GetNamedValue(name);
+            if (definition.ValueType == JsonValueType.Array)
+            {
+                return Views.LabelOperation.Basic;
+            }
+
+            return definition.GetObject().GetNamedString("operation") switch
+            {
+                "split" => Views.LabelOperation.Basic,
+                "edit" => Views.LabelOperation.Edit,
+                "merge" => Views.LabelOperation.Merge,
+                "join" => Views.LabelOperation.Join,
+                _ => Views.LabelOperation.New,
+            };
+        }
+
+        public double? GetWeight(string name, string parent, int index)
+        {
+            if (GetOperation(parent) != Views.LabelOperation.Merge)
+            {
+                return null;
+            }
+
+            IJsonValue group = Definitions.GetNamedObject(parent).GetNamedValue("input");
+            if (group.ValueType == JsonValueType.Array)
+            {
+                group = group.GetArray()[index];
+            }
+
+            if (group.ValueType == JsonValueType.Object)
+            {
+                return group.GetObject().GetNamedNumber(name);
+            }
+
+            return 1;
+        }
+
+        private ObservableCollection<Views.LabelList> rootChildren;
+        private Dictionary<string, ObservableCollection<Views.LabelList>> childrenCache = new();
+        public ObservableCollection<Views.LabelList> GetChildren(string parent)
+        {
+            if (parent == null)
+            {
+                if (rootChildren == null)
+                {
+                    HashSet<string> resultKeys = new(Definitions.Keys);
+                    foreach (string parent2 in Definitions.Keys)
+                    {
+                        foreach (Views.LabelList child in GetChildren(parent2))
+                        {
+                            resultKeys.Remove(child.Name);
+                        }
+                    }
+
+                    rootChildren = new(from name in resultKeys select new Views.LabelList(this, name, null));
+                }
+
+                return rootChildren;
+            }
+
+            if (childrenCache.TryGetValue(parent, out ObservableCollection<Views.LabelList> result))
+            {
+                return result;
+            }
+
+            switch (GetOperation(parent))
+            {
+                case Views.LabelOperation.Merge:
+                    JsonValue input = Definitions.GetNamedObject(parent).GetNamedValue("input");
+                    JsonArray groups;
+                    if (input.ValueType == JsonValueType.Object)
+                    {
+                        groups = new JsonArray { input };
+                    }
+                    else
+                    {
+                        groups = input.GetArray();
+                    }
+
+                    result = new();
+                    for (int i = 0; i < groups.Count; i++)
+                    {
+                        IJsonValue group = groups[i];
+                        if (group.ValueType == JsonValueType.String)
+                        {
+                            result.Add(new(this, group.GetString(), parent, i));
+                        }
+                        else
+                        {
+                            foreach (string name in group.GetObject().Keys)
+                            {
+                                result.Add(new(this, name, parent, i));
+                            }
+                        }
+                    }
+
+                    break;
+                case Views.LabelOperation.Join:
+                    JsonArray names = Definitions.GetNamedObject(parent).GetNamedArray("input");
+                    result = new(names.Select((value, i) => new Views.LabelList(this, value.GetString(), parent, i)));
+                    break;
+                case Views.LabelOperation.Edit:
+                    string name2 = Definitions.GetNamedObject(parent).GetNamedString("input");
+                    result = new()
+                    {
+                        new(this, name2, parent)
+                    };
+                    break;
+                default:
+                    result = new();
+                    break;
+            }
+
+            childrenCache[parent] = result;
+            return result;
+        }
+
         public Settings(string path)
         {
             this.path = path;
@@ -128,7 +269,7 @@ namespace MouseJumpSettings
             int sliceLength = (text.Length - 1) / 3;
             return (byte)(
                 (sliceLength == 1 ? 0x11 : 1) * int.Parse(
-                    text.Substring(1 + i * sliceLength, sliceLength),
+                    text.AsSpan(1 + i * sliceLength, sliceLength),
                     System.Globalization.NumberStyles.HexNumber,
                     System.Globalization.NumberFormatInfo.InvariantInfo
                 )
@@ -192,7 +333,12 @@ namespace MouseJumpSettings
             {
                 StringBuilder result = new StringBuilder("[");
 
-                indentation = val.GetArray().Count < 10 ? indentation + 4 : 0;
+                indentation += 4;
+                if (val.GetArray().All(item => item.ValueType != JsonValueType.Array && item.ValueType != JsonValueType.Object))
+                {
+                    indentation = 0;
+                }
+
                 string separator = "\n";
                 foreach (IJsonValue item in val.GetArray())
                 {
