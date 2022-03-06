@@ -29,7 +29,7 @@
                         </ComboBox>
                         <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
                     </StackPanel>
-                    <TreeView Name="LabelSequenceTree" ItemsSource="{x:Bind settings.GetChildren(x:Null)}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
+                    <TreeView Name="LabelListTree" SelectedItem="{x:Bind Selected, Mode=TwoWay}" ItemsSource="{x:Bind settings.GetChildren(x:Null)}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
                         <TreeView.ItemTemplate>
                             <DataTemplate x:DataType="local:LabelList">
                                 <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
@@ -54,7 +54,8 @@
                 </StackPanel>
             </ScrollViewer>
             <StackPanel Padding="12,0,0,12" Grid.Row="1">
-                <NumberBox Value="{x:Bind Path=Priority, Mode=TwoWay}" Header="Group index" SpinButtonPlacementMode="Inline" Margin="12" SmallChange="-1" LargeChange="-10"/>
+                <NumberBox Value="{x:Bind Path=GroupIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Minimum="{x:Bind Path=MinGroupIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="{x:Bind Path=MaxGroupIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{x:Bind Path=GroupIndexVisibility, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Header="Group index" SpinButtonPlacementMode="Inline" Margin="12" SmallChange="-0.5" LargeChange="-5"/>
+                <NumberBox Value="{x:Bind Path=Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="{x:Bind Path=MaxIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{x:Bind Path=IndexVisibility, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Header="Index" SpinButtonPlacementMode="Inline" Margin="12" SmallChange="-1" LargeChange="-10"/>
                 <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Frequency within group" SpinButtonPlacementMode="Hidden" Margin="12"/>
             </StackPanel>
         </Grid>

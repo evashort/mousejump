@@ -179,56 +179,148 @@ namespace MouseJumpSettings
                 return result;
             }
 
-            switch (GetOperation(parent))
+            Views.LabelOperation operation = GetOperation(parent);
+            if (operation == Views.LabelOperation.Merge || operation == Views.LabelOperation.Join)
             {
-                case Views.LabelOperation.Merge:
-                    JsonValue input = Definitions.GetNamedObject(parent).GetNamedValue("input");
-                    JsonArray groups;
-                    if (input.ValueType == JsonValueType.Object)
+                JsonValue input = Definitions.GetNamedObject(parent).GetNamedValue("input");
+                JsonArray groups = input.ValueType == JsonValueType.Array
+                    ? input.GetArray()
+                    : new() { input };
+                result = new();
+                for (int i = 0; i < groups.Count; i++)
+                {
+                    IJsonValue group = groups[i];
+                    if (group.ValueType == JsonValueType.String)
                     {
-                        groups = new JsonArray { input };
+                        result.Add(new(this, group.GetString(), parent, i));
                     }
                     else
                     {
-                        groups = input.GetArray();
-                    }
-
-                    result = new();
-                    for (int i = 0; i < groups.Count; i++)
-                    {
-                        IJsonValue group = groups[i];
-                        if (group.ValueType == JsonValueType.String)
+                        foreach (string name in group.GetObject().Keys)
                         {
-                            result.Add(new(this, group.GetString(), parent, i));
-                        }
-                        else
-                        {
-                            foreach (string name in group.GetObject().Keys)
-                            {
-                                result.Add(new(this, name, parent, i));
-                            }
+                            result.Add(new(this, name, parent, i));
                         }
                     }
-
-                    break;
-                case Views.LabelOperation.Join:
-                    JsonArray names = Definitions.GetNamedObject(parent).GetNamedArray("input");
-                    result = new(names.Select((value, i) => new Views.LabelList(this, value.GetString(), parent, i)));
-                    break;
-                case Views.LabelOperation.Edit:
-                    string name2 = Definitions.GetNamedObject(parent).GetNamedString("input");
-                    result = new()
-                    {
-                        new(this, name2, parent)
-                    };
-                    break;
-                default:
-                    result = new();
-                    break;
+                }
+            }
+            else if (operation == Views.LabelOperation.Edit)
+            {
+                string name = Definitions.GetNamedObject(parent).GetNamedString("input");
+                result = new() { new(this, name, parent) };
+            }
+            else
+            {
+                result = new();
             }
 
             childrenCache[parent] = result;
             return result;
+        }
+
+        public void SetIndex(string name, string parent, int oldIndex, int newIndex)
+        {
+            if (newIndex == oldIndex)
+            {
+                return;
+            }
+
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            JsonValue groupsValue = definition.GetNamedValue("input");
+            JsonArray groups;
+            if (groupsValue.ValueType == JsonValueType.Array)
+            {
+                groups = groupsValue.GetArray();
+            }
+            else
+            {
+                groups = new() { groupsValue };
+                definition["input"] = groups;
+            }
+
+            IJsonValue oldGroupValue = groups[oldIndex];
+            if (oldGroupValue.ValueType == JsonValueType.Object)
+            {
+                JsonObject oldGroup = oldGroupValue.GetObject();
+                if (oldGroup.Count == 1)
+                {
+                    groups.RemoveAt(oldIndex);
+                }
+                else
+                {
+                    oldGroupValue = new JsonObject { new(name, oldGroup.GetNamedValue(name)) };
+                    oldGroup.Remove(name);
+                }
+            } else
+            {
+                groups.RemoveAt(oldIndex);
+            }
+
+            groups.Insert(newIndex, oldGroupValue);
+        }
+
+        public bool SetGroupIndex(string name, string parent, int oldIndex, int newIndex)
+        {
+            bool shifted = false;
+            if (newIndex == oldIndex)
+            {
+                return shifted;
+            }
+
+            JsonArray groups = Definitions.GetNamedObject(parent).GetNamedArray("input");
+            IJsonValue oldGroupValue = groups[oldIndex];
+            JsonValue weight;
+            if (oldGroupValue.ValueType == JsonValueType.Object)
+            {
+                JsonObject oldGroup = oldGroupValue.GetObject();
+                weight = oldGroup.GetNamedValue(name);
+                if (oldGroup.Count == 1)
+                {
+                    groups.RemoveAt(oldIndex);
+                    shifted = true;
+                }
+                else
+                {
+                    oldGroup.Remove(name);
+                }
+            }
+            else
+            {
+                weight = JsonValue.CreateNumberValue(1);
+                groups.RemoveAt(oldIndex);
+                shifted = true;
+            }
+
+            IJsonValue newGroupValue = groups[newIndex];
+            if (newGroupValue.ValueType == JsonValueType.Object)
+            {
+                newGroupValue.GetObject().Add(name, weight);
+            }
+            else
+            {
+                groups[newIndex] = new JsonObject {
+                    new(newGroupValue.GetString(), JsonValue.CreateNumberValue(1)),
+                    new(name, weight),
+                };
+            }
+
+            return shifted;
+        }
+
+        public bool IsSingletonGroup(string parent, int index)
+        {
+            IJsonValue group = Definitions.GetNamedObject(parent).GetNamedValue("input");
+            if (group.ValueType == JsonValueType.Array)
+            {
+                group = group.GetArray()[index];
+            }
+
+            return group.ValueType == JsonValueType.String || group.GetObject().Count == 1;
+        }
+
+        public int CountGroups(string parent)
+        {
+            IJsonValue groups = Definitions.GetNamedObject(parent).GetNamedValue("input");
+            return groups.ValueType == JsonValueType.Array ? groups.GetArray().Count : 1;
         }
 
         public Settings(string path)

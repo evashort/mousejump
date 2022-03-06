@@ -21,14 +21,56 @@ namespace MouseJumpSettings.Views
             this.index = index;
         }
 
-        public int Index => index;
+        public bool InGroup => !settings.IsSingletonGroup(parentName, index);
+
+        public int SiblingGroupCount => settings.CountGroups(parentName);
+
+        public int Index
+        {
+            get => index;
+            set
+            {
+                settings.SetIndex(name, parentName, index, value);
+                if (value > index)
+                {
+                    foreach (LabelList sibling in Siblings)
+                    {
+                        if (sibling.index > value) { break; }
+                        if (sibling.index > index) { sibling.index--; }
+                    }
+                }
+                if (value < index)
+                {
+                    foreach (LabelList sibling in Siblings)
+                    {
+                        if (sibling.index >= index) { break; }
+                        if (sibling.index >= value) { sibling.index++; }
+                    }
+                }
+
+                index = value;
+            }
+        }
+
+        public void SetGroupIndex(int newIndex)
+        {
+            bool shifted = settings.SetGroupIndex(name, parentName, index, newIndex);
+            if (shifted)
+            {
+                foreach (LabelList sibling in Siblings)
+                {
+                    if (sibling.index > index) { sibling.index--; }
+                }
+            }
+        }
+
         public double? Weight => settings.GetWeight(name, parentName, index);
         public Visibility SeparatorVisibility
         {
             get
             {
                 if (settings.GetOperation(parentName) == LabelOperation.Merge) {
-                    foreach (LabelList sibling in settings.GetChildren(parentName))
+                    foreach (LabelList sibling in Siblings)
                     {
                         if (sibling.Index == index)
                         {
@@ -41,8 +83,10 @@ namespace MouseJumpSettings.Views
             }
         }
         public ObservableCollection<LabelList> Children => settings.GetChildren(Name);
+        public ObservableCollection<LabelList> Siblings => settings.GetChildren(parentName);
         public string Name => name;
         public LabelOperation Operation => settings.GetOperation(name);
+        public LabelOperation ParentOperation => settings.GetOperation(parentName);
         public string OperationName => Operation switch
         {
             LabelOperation.Basic => "Basic",
