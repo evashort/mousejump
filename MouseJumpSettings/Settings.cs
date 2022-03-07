@@ -217,13 +217,9 @@ namespace MouseJumpSettings
             return result;
         }
 
-        public void SetIndex(string name, string parent, int oldIndex, int newIndex)
+        public bool SetIndex(string name, string parent, int oldIndex, int newIndex)
         {
-            if (newIndex == oldIndex)
-            {
-                return;
-            }
-
+            bool shifted = false;
             JsonObject definition = Definitions.GetNamedObject(parent);
             JsonValue groupsValue = definition.GetNamedValue("input");
             JsonArray groups;
@@ -243,29 +239,49 @@ namespace MouseJumpSettings
                 JsonObject oldGroup = oldGroupValue.GetObject();
                 if (oldGroup.Count == 1)
                 {
+                    if (newIndex == oldIndex)
+                    {
+                        return shifted;
+                    }
+
                     groups.RemoveAt(oldIndex);
                 }
                 else
                 {
-                    oldGroupValue = new JsonObject { new(name, oldGroup.GetNamedValue(name)) };
+                    shifted = true;
+                    JsonValue weightValue = oldGroup.GetNamedValue(name);
+                    if (weightValue.GetNumber() == 1)
+                    {
+                        oldGroupValue = JsonValue.CreateStringValue(name);
+                    }
+                    else
+                    {
+                        oldGroupValue = new JsonObject { new(name, weightValue) };
+                    }
+                    
                     oldGroup.Remove(name);
+                    if (oldGroup.Count == 1 && oldGroup.Values.First().GetNumber() == 1)
+                    {
+                        groups[oldIndex] = JsonValue.CreateStringValue(oldGroup.Keys.First());
+                    }
                 }
-            } else
+            }
+            else if (newIndex == oldIndex)
+            {
+                return shifted;
+            }
+            else
             {
                 groups.RemoveAt(oldIndex);
             }
 
             groups.Insert(newIndex, oldGroupValue);
+            return shifted;
         }
 
         public bool SetGroupIndex(string name, string parent, int oldIndex, int newIndex)
         {
             bool shifted = false;
-            if (newIndex == oldIndex)
-            {
-                return shifted;
-            }
-
             JsonArray groups = Definitions.GetNamedObject(parent).GetNamedArray("input");
             IJsonValue oldGroupValue = groups[oldIndex];
             JsonValue weight;
@@ -277,6 +293,10 @@ namespace MouseJumpSettings
                 {
                     groups.RemoveAt(oldIndex);
                     shifted = true;
+                }
+                else if (newIndex == oldIndex)
+                {
+                    return shifted;
                 }
                 else
                 {

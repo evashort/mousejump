@@ -30,8 +30,15 @@ namespace MouseJumpSettings.Views
             get => index;
             set
             {
-                settings.SetIndex(name, parentName, index, value);
-                if (value > index)
+                bool shifted = settings.SetIndex(name, parentName, index, value);
+                if (shifted)
+                {
+                    foreach (LabelList sibling in Siblings)
+                    {
+                        if (sibling.index >= value) { sibling.index++; }
+                    }
+                }
+                else if (value > index)
                 {
                     foreach (LabelList sibling in Siblings)
                     {
@@ -39,7 +46,7 @@ namespace MouseJumpSettings.Views
                         if (sibling.index > index) { sibling.index--; }
                     }
                 }
-                if (value < index)
+                else if (value < index)
                 {
                     foreach (LabelList sibling in Siblings)
                     {
@@ -62,6 +69,8 @@ namespace MouseJumpSettings.Views
                     if (sibling.index > index) { sibling.index--; }
                 }
             }
+
+            index = newIndex;
         }
 
         public double? Weight => settings.GetWeight(name, parentName, index);

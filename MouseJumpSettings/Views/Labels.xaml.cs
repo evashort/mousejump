@@ -16,27 +16,67 @@ namespace MouseJumpSettings.Views
         private Settings settings;
 
         private LabelList selected;
-        private LabelList Selected {
+        private LabelList Selected
+        {
             get
             {
                 return selected;
             }
             set
             {
+                int oldIndex = Index;
+                double oldGroupIndex = GroupIndex;
                 selected = value;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Index)));
+                int newIndex = Index;
+                double newGroupIndex = GroupIndex;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IndexVisibility)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GroupIndex)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GroupIndexVisibility)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinGroupIndex)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxGroupIndex)));
+                if (newIndex > oldIndex)
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
+                }
+
+                if (newGroupIndex > oldGroupIndex)
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxGroupIndex)));
+                }
+                else
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinGroupIndex)));
+                }
+
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Index)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GroupIndex)));
+                if (newIndex <= oldIndex)
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
+                }
+
+                if (newGroupIndex <= oldGroupIndex)
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
+                }
+                else
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxGroupIndex)));
+                }
+
+                indexBox.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline;
+                groupIndexBox.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline;
             }
         }
 
-        private int Index {
+        private int Index
+        {
             get => Selected != null && Selected.ParentOperation == LabelOperation.Join ? Selected.Index : 0;
-            set => Selected.Index = value;
+            set {
+                if (Selected == null || Selected.ParentOperation != LabelOperation.Join)
+                {
+                    return;
+                }
+
+                Selected.Index = value;
+            }
         }
 
         private double GroupIndex
@@ -47,6 +87,13 @@ namespace MouseJumpSettings.Views
                 ? Selected.Index - (Selected.InGroup ? 0 : 0.5) : 0;
             set
             {
+                if (Selected == null
+                    || Selected.ParentOperation != LabelOperation.Merge
+                    || Selected.Siblings.Count == 1)
+                {
+                    return;
+                }
+
                 int intValue = (int)(value + 1);
                 if (intValue - 1 == value)
                 {
