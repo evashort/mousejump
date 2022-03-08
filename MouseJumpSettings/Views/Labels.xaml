@@ -54,8 +54,13 @@
                 </StackPanel>
             </ScrollViewer>
             <StackPanel Padding="12,0,0,12" Grid.Row="1">
-                <NumberBox x:Name="groupIndexBox" Value="{x:Bind Path=GroupIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Minimum="{x:Bind Path=MinGroupIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="{x:Bind Path=MaxGroupIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{x:Bind Path=GroupIndexVisibility, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SpinButtonPlacementMode="Inline" Header="Group index" Margin="12" SmallChange="-0.5" LargeChange="-5"/>
-                <NumberBox x:Name="indexBox" Value="{x:Bind Path=Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="{x:Bind Path=MaxIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Minimum="0" Visibility="{x:Bind Path=IndexVisibility, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Header="Index" SpinButtonPlacementMode="Inline" Margin="12" SmallChange="-1" LargeChange="-10"/>
+                <NumberBox
+                    Value="{x:Bind Path=NegIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    Maximum="0"
+                    Minimum="{x:Bind Path=MinNegIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    Header="{x:Bind IndexHeader, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    SpinButtonPlacementMode="Inline"
+                    Margin="12"/>
                 <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Frequency within group" SpinButtonPlacementMode="Hidden" Margin="12"/>
             </StackPanel>
         </Grid>

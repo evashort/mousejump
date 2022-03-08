@@ -18,144 +18,75 @@ namespace MouseJumpSettings.Views
         private LabelList selected;
         private LabelList Selected
         {
-            get
-            {
-                return selected;
-            }
+            get => selected;
             set
             {
-                int oldIndex = Index;
-                double oldGroupIndex = GroupIndex;
+                int oldMaxIndex = -MinNegIndex;
                 selected = value;
-                int newIndex = Index;
-                double newGroupIndex = GroupIndex;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IndexVisibility)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GroupIndexVisibility)));
-                if (newIndex > oldIndex)
+                int newMaxIndex = -MinNegIndex;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IndexHeader)));
+                if (newMaxIndex >= oldMaxIndex)
                 {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinNegIndex)));
                 }
 
-                if (newGroupIndex > oldGroupIndex)
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NegIndex)));
+                if (newMaxIndex < oldMaxIndex)
                 {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxGroupIndex)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinNegIndex)));
                 }
-                else
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinGroupIndex)));
-                }
-
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Index)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GroupIndex)));
-                if (newIndex <= oldIndex)
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
-                }
-
-                if (newGroupIndex <= oldGroupIndex)
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
-                }
-                else
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxGroupIndex)));
-                }
-
-                indexBox.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline;
-                groupIndexBox.SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline;
             }
         }
 
-        private int Index
+        private int NegIndex
         {
-            get => Selected != null && Selected.ParentOperation == LabelOperation.Join ? Selected.Index : 0;
-            set {
-                if (Selected == null || Selected.ParentOperation != LabelOperation.Join)
-                {
-                    return;
-                }
-
-                Selected.Index = value;
-            }
-        }
-
-        private double GroupIndex
-        {
-            get => Selected != null
-                && Selected.ParentOperation == LabelOperation.Merge
-                && Selected.Siblings.Count != 1
-                ? Selected.Index - (Selected.InGroup ? 0 : 0.5) : 0;
+            get => Selected == null ? 0 : (
+                Selected.ParentOperation == LabelOperation.Merge
+                ? -2 * Selected.Index + (Selected.InGroup ? -1 : 0)
+                : -Selected.Index
+            );
             set
             {
-                if (Selected == null
-                    || Selected.ParentOperation != LabelOperation.Merge
-                    || Selected.Siblings.Count == 1)
+                if (Selected == null)
                 {
                     return;
                 }
 
-                int intValue = (int)(value + 1);
-                if (intValue - 1 == value)
+                if (Selected.ParentOperation == LabelOperation.Merge)
                 {
-                    Selected.SetGroupIndex(intValue - 1);
+                    if (-value % 2 == 0)
+                    {
+                        Selected.Index = -value / 2;
+                    }
+                    else
+                    {
+                        Selected.SetGroupIndex(-value / 2);
+                    }
+
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinNegIndex)));
                 }
                 else
                 {
-                    Selected.Index = intValue;
-                }
-
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MaxIndex)));
-                if (Selected.Index != value)
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(GroupIndex)));
+                    Selected.Index = -value;
                 }
             }
         }
 
-        private Visibility IndexVisibility
+        private int MinNegIndex
         {
-            get
-            => Selected != null
-            && Selected.ParentOperation == LabelOperation.Join
-            ? Visibility.Visible : Visibility.Collapsed;
+            get => Selected == null ? 0 : (
+                Selected.ParentOperation == LabelOperation.Merge
+                ? (Selected.InGroup ? 0 : 2) - 2 * Selected.SiblingGroupCount
+                : 1 - Selected.SiblingGroupCount
+            );
             set { }
         }
 
-        private Visibility GroupIndexVisibility
+        private string IndexHeader
         {
-            get
-            => Selected != null
-            && Selected.ParentOperation == LabelOperation.Merge
-            ? Visibility.Visible : Visibility.Collapsed;
-            set { }
-        }
-
-        private int MaxIndex
-        {
-            get
-            => Selected != null
-            && Selected.ParentOperation == LabelOperation.Join
-            ? selected.Siblings.Count - 1 : 0;
-            set { }
-        }
-
-        private double MinGroupIndex
-        {
-            get
-            => Selected != null
-            && Selected.ParentOperation == LabelOperation.Merge
-            && Selected.Siblings.Count != 1
-            ? -0.5 : 0;
-            set { }
-        }
-
-        private double MaxGroupIndex
-        {
-            get
-            => Selected != null
-            && Selected.ParentOperation == LabelOperation.Merge
-            && Selected.Siblings.Count != 1
-            ? Selected.SiblingGroupCount - (Selected.InGroup ? 0.5 : 1.5) : 0;
+            get => Selected != null && Selected.ParentOperation == LabelOperation.Merge
+                ? "-Index (odd numbers are groups)"
+                : "-Index";
             set { }
         }
 
