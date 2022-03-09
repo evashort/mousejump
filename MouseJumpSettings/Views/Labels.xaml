@@ -29,13 +29,13 @@
                         </ComboBox>
                         <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
                     </StackPanel>
-                    <TreeView Name="LabelListTree" SelectedItem="{x:Bind Selected, Mode=TwoWay}" ItemsSource="{x:Bind settings.GetChildren(x:Null)}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
+                    <TreeView Name="LabelListTree" SelectedItem="{x:Bind Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{x:Bind settings.GetChildren(x:Null)}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
                         <TreeView.ItemTemplate>
                             <DataTemplate x:DataType="local:LabelList">
                                 <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
                                     <StackPanel>
                                         <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
-                                        <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
+                                        <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>

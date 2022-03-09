@@ -2,16 +2,20 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
 using Windows.Data.Json;
 
 namespace MouseJumpSettings.Views
 {
-    public class LabelList
+    public class LabelList : INotifyPropertyChanged
     {
         private readonly Settings settings;
         private string name;
         private string parentName;
         private int index;
+
+        public event PropertyChangedEventHandler PropertyChanged;
 
         public LabelList(Settings settings, string name, string parentName, int index=0)
         {
@@ -56,6 +60,47 @@ namespace MouseJumpSettings.Views
                 }
 
                 index = value;
+                // https://github.com/microsoft/microsoft-ui-xaml/issues/3119
+                int removeIndex = Siblings.IndexOf(this);
+                int insertIndex = 0;
+                for (
+                    ;
+                    insertIndex < Siblings.Count && (
+                        insertIndex == removeIndex || Siblings[insertIndex].index < index
+                    );
+                    insertIndex++
+                ) { }
+                if (insertIndex > removeIndex)
+                {
+                    insertIndex--;
+                }
+
+                if (insertIndex != removeIndex)
+                {
+                    Siblings.RemoveAt(removeIndex);
+                    Siblings.Insert(insertIndex, this);
+                }
+                else
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
+                }
+
+                if (insertIndex <= removeIndex)
+                {
+                    removeIndex++;
+                }
+
+                if (insertIndex + 1 < Siblings.Count)
+                {
+                    LabelList successor = Siblings[insertIndex + 1];
+                    successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
+                }
+
+                if (removeIndex < Siblings.Count)
+                {
+                    LabelList successor = Siblings[removeIndex];
+                    successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
+                }
             }
         }
 
@@ -71,6 +116,59 @@ namespace MouseJumpSettings.Views
             }
 
             index = newIndex;
+            // https://github.com/microsoft/microsoft-ui-xaml/issues/3119
+            int removeIndex = Siblings.IndexOf(this);
+            int insertIndex = 0;
+            for (; insertIndex < Siblings.Count; insertIndex++)
+            {
+                if (insertIndex == removeIndex) {
+                    continue;
+                }
+
+                LabelList sibling = Siblings[insertIndex];
+                if (
+                    sibling.index > index || (
+                        sibling.index == index && (
+                            sibling.Weight < Weight || (
+                                sibling.Weight == Weight && sibling.name.CompareTo(name) >= 0
+                            )
+                        )
+                    )
+                )
+                { break; }
+            }
+
+            if (insertIndex > removeIndex)
+            {
+                insertIndex--;
+            }
+
+            if (insertIndex != removeIndex)
+            {
+                Siblings.RemoveAt(removeIndex);
+                Siblings.Insert(insertIndex, this);
+            }
+            else
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
+            }
+
+            if (insertIndex <= removeIndex)
+            {
+                removeIndex++;
+            }
+
+            if (insertIndex + 1 < Siblings.Count)
+            {
+                LabelList successor = Siblings[insertIndex + 1];
+                successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
+            }
+
+            if (removeIndex < Siblings.Count)
+            {
+                LabelList successor = Siblings[removeIndex];
+                successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
+            }
         }
 
         public double? Weight => settings.GetWeight(name, parentName, index);
@@ -78,7 +176,7 @@ namespace MouseJumpSettings.Views
         {
             get
             {
-                if (settings.GetOperation(parentName) == LabelOperation.Merge) {
+                if (index > 0 && settings.GetOperation(parentName) == LabelOperation.Merge) {
                     foreach (LabelList sibling in Siblings)
                     {
                         if (sibling.Index == index)
@@ -90,7 +188,9 @@ namespace MouseJumpSettings.Views
 
                 return Visibility.Collapsed;
             }
+            set { }
         }
+
         public ObservableCollection<LabelList> Children => settings.GetChildren(Name);
         public ObservableCollection<LabelList> Siblings => settings.GetChildren(parentName);
         public string Name => name;

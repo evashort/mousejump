@@ -52,6 +52,8 @@ namespace MouseJumpSettings.Views
                     return;
                 }
 
+                // https://github.com/microsoft/microsoft-ui-xaml/issues/3119
+                LabelList oldSelected = Selected;
                 if (Selected.ParentOperation == LabelOperation.Merge)
                 {
                     if (-value % 2 == 0)
@@ -69,6 +71,9 @@ namespace MouseJumpSettings.Views
                 {
                     Selected.Index = -value;
                 }
+
+                Selected = oldSelected;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
             }
         }
 

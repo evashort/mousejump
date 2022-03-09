@@ -196,9 +196,11 @@ namespace MouseJumpSettings
                     }
                     else
                     {
-                        foreach (string name in group.GetObject().Keys)
+                        IOrderedEnumerable<KeyValuePair<string, IJsonValue>> sortedPairs
+                            = group.GetObject().OrderBy(pair => -pair.Value.GetNumber()).ThenBy(pair => pair.Key);
+                        foreach (KeyValuePair<string, IJsonValue> pair in sortedPairs)
                         {
-                            result.Add(new(this, name, parent, i));
+                            result.Add(new(this, pair.Key, parent, i));
                         }
                     }
                 }
