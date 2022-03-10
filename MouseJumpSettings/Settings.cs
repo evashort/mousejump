@@ -151,9 +151,9 @@ namespace MouseJumpSettings
             return 1;
         }
 
-        private ObservableCollection<Views.LabelList> rootChildren;
-        private Dictionary<string, ObservableCollection<Views.LabelList>> childrenCache = new();
-        public ObservableCollection<Views.LabelList> GetChildren(string parent)
+        private Views.ObservableSortedList<Views.LabelList> rootChildren;
+        private Dictionary<string, Views.ObservableSortedList<Views.LabelList>> childrenCache = new();
+        public Views.ObservableSortedList<Views.LabelList> GetChildren(string parent)
         {
             if (parent == null)
             {
@@ -168,13 +168,16 @@ namespace MouseJumpSettings
                         }
                     }
 
-                    rootChildren = new(from name in resultKeys select new Views.LabelList(this, name, null));
+                    rootChildren = new(new Views.LabelListComparer());
+                    rootChildren.AddRange(
+                        from name in resultKeys
+                        select new Views.LabelList(this, name, null));
                 }
 
                 return rootChildren;
             }
 
-            if (childrenCache.TryGetValue(parent, out ObservableCollection<Views.LabelList> result))
+            if (childrenCache.TryGetValue(parent, out Views.ObservableSortedList<Views.LabelList> result))
             {
                 return result;
             }
@@ -186,7 +189,7 @@ namespace MouseJumpSettings
                 JsonArray groups = input.ValueType == JsonValueType.Array
                     ? input.GetArray()
                     : new() { input };
-                result = new();
+                result = new(new Views.LabelListComparer());
                 for (int i = 0; i < groups.Count; i++)
                 {
                     IJsonValue group = groups[i];
@@ -198,21 +201,20 @@ namespace MouseJumpSettings
                     {
                         IOrderedEnumerable<KeyValuePair<string, IJsonValue>> sortedPairs
                             = group.GetObject().OrderBy(pair => -pair.Value.GetNumber()).ThenBy(pair => pair.Key);
-                        foreach (KeyValuePair<string, IJsonValue> pair in sortedPairs)
-                        {
-                            result.Add(new(this, pair.Key, parent, i));
-                        }
+                        result.AddRange(
+                            from pair in sortedPairs
+                            select new Views.LabelList(this, pair.Key, parent, i));
                     }
                 }
             }
             else if (operation == Views.LabelOperation.Edit)
             {
                 string name = Definitions.GetNamedObject(parent).GetNamedString("input");
-                result = new() { new(this, name, parent) };
+                result = new(new Views.LabelListComparer()) { new(this, name, parent) };
             }
             else
             {
-                result = new();
+                result = new(new Views.LabelListComparer());
             }
 
             childrenCache[parent] = result;

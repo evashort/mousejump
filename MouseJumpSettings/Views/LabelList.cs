@@ -34,17 +34,19 @@ namespace MouseJumpSettings.Views
             get => index;
             set
             {
+                ObservableSortedList<LabelList> siblings = Siblings;
+                int removeIndex = siblings.BinarySearch(this);
                 bool shifted = settings.SetIndex(name, parentName, index, value);
                 if (shifted)
                 {
-                    foreach (LabelList sibling in Siblings)
+                    foreach (LabelList sibling in siblings)
                     {
                         if (sibling.index >= value) { sibling.index++; }
                     }
                 }
                 else if (value > index)
                 {
-                    foreach (LabelList sibling in Siblings)
+                    foreach (LabelList sibling in siblings)
                     {
                         if (sibling.index > value) { break; }
                         if (sibling.index > index) { sibling.index--; }
@@ -52,7 +54,7 @@ namespace MouseJumpSettings.Views
                 }
                 else if (value < index)
                 {
-                    foreach (LabelList sibling in Siblings)
+                    foreach (LabelList sibling in siblings)
                     {
                         if (sibling.index >= index) { break; }
                         if (sibling.index >= value) { sibling.index++; }
@@ -60,45 +62,21 @@ namespace MouseJumpSettings.Views
                 }
 
                 index = value;
-                // https://github.com/microsoft/microsoft-ui-xaml/issues/3119
-                int removeIndex = Siblings.IndexOf(this);
-                int insertIndex = 0;
-                for (
-                    ;
-                    insertIndex < Siblings.Count && (
-                        insertIndex == removeIndex || Siblings[insertIndex].index < index
-                    );
-                    insertIndex++
-                ) { }
-                if (insertIndex > removeIndex)
-                {
-                    insertIndex--;
-                }
-
-                if (insertIndex != removeIndex)
-                {
-                    Siblings.RemoveAt(removeIndex);
-                    Siblings.Insert(insertIndex, this);
-                }
-                else
+                int insertIndex = siblings.ChangedAt(removeIndex);
+                if (insertIndex == removeIndex)
                 {
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
                 }
 
-                if (insertIndex <= removeIndex)
+                if (insertIndex + 1 < siblings.Count)
                 {
-                    removeIndex++;
-                }
-
-                if (insertIndex + 1 < Siblings.Count)
-                {
-                    LabelList successor = Siblings[insertIndex + 1];
+                    LabelList successor = siblings[insertIndex + 1];
                     successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
                 }
 
-                if (removeIndex < Siblings.Count)
+                if (removeIndex < siblings.Count)
                 {
-                    LabelList successor = Siblings[removeIndex];
+                    LabelList successor = siblings[removeIndex];
                     successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
                 }
             }
@@ -106,67 +84,33 @@ namespace MouseJumpSettings.Views
 
         public void SetGroupIndex(int newIndex)
         {
+            ObservableSortedList<LabelList> siblings = Siblings;
+            int removeIndex = siblings.BinarySearch(this);
             bool shifted = settings.SetGroupIndex(name, parentName, index, newIndex);
             if (shifted)
             {
-                foreach (LabelList sibling in Siblings)
+                for (int i = removeIndex + 1; i < siblings.Count; i++)
                 {
-                    if (sibling.index > index) { sibling.index--; }
+                    siblings[i].index--;
                 }
             }
 
             index = newIndex;
-            // https://github.com/microsoft/microsoft-ui-xaml/issues/3119
-            int removeIndex = Siblings.IndexOf(this);
-            int insertIndex = 0;
-            for (; insertIndex < Siblings.Count; insertIndex++)
-            {
-                if (insertIndex == removeIndex) {
-                    continue;
-                }
-
-                LabelList sibling = Siblings[insertIndex];
-                if (
-                    sibling.index > index || (
-                        sibling.index == index && (
-                            sibling.Weight < Weight || (
-                                sibling.Weight == Weight && sibling.name.CompareTo(name) >= 0
-                            )
-                        )
-                    )
-                )
-                { break; }
-            }
-
-            if (insertIndex > removeIndex)
-            {
-                insertIndex--;
-            }
-
-            if (insertIndex != removeIndex)
-            {
-                Siblings.RemoveAt(removeIndex);
-                Siblings.Insert(insertIndex, this);
-            }
-            else
+            int insertIndex = siblings.ChangedAt(removeIndex);
+            if (insertIndex == removeIndex)
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
             }
 
-            if (insertIndex <= removeIndex)
+            if (insertIndex + 1 < siblings.Count)
             {
-                removeIndex++;
-            }
-
-            if (insertIndex + 1 < Siblings.Count)
-            {
-                LabelList successor = Siblings[insertIndex + 1];
+                LabelList successor = siblings[insertIndex + 1];
                 successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
             }
 
-            if (removeIndex < Siblings.Count)
+            if (removeIndex < siblings.Count)
             {
-                LabelList successor = Siblings[removeIndex];
+                LabelList successor = siblings[removeIndex];
                 successor.PropertyChanged?.Invoke(successor, new PropertyChangedEventArgs(nameof(SeparatorVisibility)));
             }
         }
@@ -191,8 +135,8 @@ namespace MouseJumpSettings.Views
             set { }
         }
 
-        public ObservableCollection<LabelList> Children => settings.GetChildren(Name);
-        public ObservableCollection<LabelList> Siblings => settings.GetChildren(parentName);
+        public ObservableSortedList<LabelList> Children => settings.GetChildren(Name);
+        public ObservableSortedList<LabelList> Siblings => settings.GetChildren(parentName);
         public string Name => name;
         public LabelOperation Operation => settings.GetOperation(name);
         public LabelOperation ParentOperation => settings.GetOperation(parentName);
@@ -214,6 +158,34 @@ namespace MouseJumpSettings.Views
             LabelOperation.New => IconPaths.New,
             _ => throw new NotImplementedException(),
         };
+    }
+
+    public class LabelListComparer : IComparer<LabelList>
+    {
+        public int Compare(LabelList a, LabelList b)
+        {
+            if (a.Index < b.Index)
+            {
+                return -1;
+            }
+            else if (a.Index > b.Index)
+            {
+                return 1;
+            }
+
+            double aWeight = a.Weight ?? 0;
+            double bWeight = b.Weight ?? 0;
+            if (aWeight > bWeight)
+            {
+                return -1;
+            }
+            else if (aWeight < bWeight)
+            {
+                return 1;
+            }
+
+            return a.Name.CompareTo(b.Name);
+        }
     }
 
     public enum LabelOperation
