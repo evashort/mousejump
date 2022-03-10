@@ -286,7 +286,8 @@ namespace MouseJumpSettings
         public bool SetGroupIndex(string name, string parent, int oldIndex, int newIndex)
         {
             bool shifted = false;
-            JsonArray groups = Definitions.GetNamedObject(parent).GetNamedArray("input");
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            JsonArray groups = definition.GetNamedArray("input");
             IJsonValue oldGroupValue = groups[oldIndex];
             JsonValue weight;
             if (oldGroupValue.ValueType == JsonValueType.Object)
@@ -317,14 +318,27 @@ namespace MouseJumpSettings
             IJsonValue newGroupValue = groups[newIndex];
             if (newGroupValue.ValueType == JsonValueType.Object)
             {
-                newGroupValue.GetObject().Add(name, weight);
+                newGroupValue.GetObject()[name] = weight;
             }
             else
             {
-                groups[newIndex] = new JsonObject {
-                    new(newGroupValue.GetString(), JsonValue.CreateNumberValue(1)),
-                    new(name, weight),
-                };
+                string newGroup = newGroupValue.GetString();
+                if (newGroup != name)
+                {
+                    groups[newIndex] = new JsonObject {
+                        new(newGroup, JsonValue.CreateNumberValue(1)),
+                        new(name, weight),
+                    };
+                }
+                else if (weight.GetNumber() != 1)
+                {
+                    groups[newIndex] = new JsonObject { new(name, weight) };
+                }
+            }
+
+            if (groups.Count == 1 && groups[0].ValueType == JsonValueType.Object)
+            {
+                definition["input"] = groups[0];
             }
 
             return shifted;
