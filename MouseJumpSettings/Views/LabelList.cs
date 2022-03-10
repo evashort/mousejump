@@ -36,7 +36,8 @@ namespace MouseJumpSettings.Views
             {
                 ObservableSortedList<LabelList> siblings = Siblings;
                 int removeIndex = siblings.BinarySearch(this);
-                bool shifted = settings.SetIndex(name, parentName, index, value);
+                bool shifted = !settings.RemoveChildAt(name, parentName, index, out double weight);
+                settings.InsertChild(name, parentName, value, weight);
                 if (shifted)
                 {
                     foreach (LabelList sibling in siblings)
@@ -86,7 +87,8 @@ namespace MouseJumpSettings.Views
         {
             ObservableSortedList<LabelList> siblings = Siblings;
             int removeIndex = siblings.BinarySearch(this);
-            bool shifted = settings.SetGroupIndex(name, parentName, index, newIndex);
+            bool shifted = settings.RemoveChildAt(name, parentName, index, out double weight);
+            settings.AddChildToGroup(name, parentName, newIndex, weight);
             if (shifted)
             {
                 for (int i = removeIndex + 1; i < siblings.Count; i++)
