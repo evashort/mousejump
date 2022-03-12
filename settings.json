@@ -18,6 +18,13 @@
             "operation": "split",
             "separator": ""
         },
+        "0-9 a-z": {
+            "input": {
+                "0-9": 1,
+                "a-z": 1
+            },
+            "operation": "interleave"
+        },
         "0-99": {
             "input": ["leading digit", "0-9"],
             "operation": "join",
@@ -28,6 +35,13 @@
             "operation": "join",
             "order": "lexical"
         },
+        "0-999 aa-zz": {
+            "input": {
+                "0-999": 1,
+                "aa-zz": 1
+            },
+            "operation": "interleave"
+        },
         "a-z": {
             "input": "etaoinshrdlcumwfgypbvkjxqz",
             "operation": "split",
@@ -37,7 +51,7 @@
             "deletions": ["l"],
             "input": "a-z",
             "insertions": {
-                "k": "L"
+                "l": "L"
             },
             "operation": "edit"
         },
@@ -57,18 +71,8 @@
             "order": "product"
         },
         "default": {
-            "input": [
-                {
-                    "0-9": 1,
-                    "a-z": 1
-                },
-                {
-                    "0-999": 1,
-                    "aa-zz": 1
-                },
-                "aaa-zzz"
-            ],
-            "operation": "merge"
+            "input": ["0-9 a-z", "0-999 aa-zz", "aaa-zzz"],
+            "operation": "union"
         },
         "leading digit": {
             "input": "\n123456789",
