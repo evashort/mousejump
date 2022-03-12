@@ -107,275 +107,159 @@ namespace MouseJumpSettings
             }
         }
 
-        public Views.LabelOperation GetOperation(string name)
+        private const string FieldOperation = "operation";
+        private const string FieldInput = "input";
+        private const string OperationSplit = "split";
+        private const string OperationEdit = "edit";
+        private const string OperationUnion = "union";
+        private const string OperationInterleave = "interleave";
+        private const string OperationJoin = "join";
+        public enum Operation { Split, Edit, Union, Interleave, Join }
+        public Operation GetLabelListOperation(string name)
+            => Definitions.GetNamedObject(name).GetNamedString(FieldOperation) switch
         {
-            if (name == null)
-            {
-                return Views.LabelOperation.New;
-            }
+            OperationSplit => Operation.Split,
+            OperationEdit => Operation.Edit,
+            OperationUnion => Operation.Union,
+            OperationInterleave => Operation.Interleave,
+            OperationJoin => Operation.Join,
+            _ => throw new ArgumentException("unknown operation"),
+        };
 
-            JsonValue definition = Definitions.GetNamedValue(name);
-            if (definition.ValueType == JsonValueType.Array)
-            {
-                return Views.LabelOperation.Basic;
-            }
-
-            return definition.GetObject().GetNamedString("operation") switch
-            {
-                "split" => Views.LabelOperation.Basic,
-                "edit" => Views.LabelOperation.Edit,
-                "merge" => Views.LabelOperation.Merge,
-                "join" => Views.LabelOperation.Join,
-                _ => Views.LabelOperation.New,
-            };
-        }
-
-        public double? GetWeight(string name, string parent, int index)
+        public bool RenameLabelList(string oldName, string newName)
         {
-            if (GetOperation(parent) != Views.LabelOperation.Merge)
+            if (oldName == newName)
             {
-                return null;
+                return true;
             }
 
-            IJsonValue group = Definitions.GetNamedObject(parent).GetNamedValue("input");
-            if (group.ValueType == JsonValueType.Array)
+            JsonObject definitions = Definitions;
+            if (definitions.ContainsKey(newName))
             {
-                group = group.GetArray()[index];
+                return false;
             }
 
-            if (group.ValueType == JsonValueType.Object)
-            {
-                return group.GetObject().GetNamedNumber(name);
-            }
-
-            return 1;
-        }
-
-        private Views.ObservableSortedList<Views.LabelList> rootChildren;
-        private Dictionary<string, Views.ObservableSortedList<Views.LabelList>> childrenCache = new();
-        public Views.ObservableSortedList<Views.LabelList> GetChildren(string parent)
-        {
-            if (parent == null)
-            {
-                if (rootChildren == null)
-                {
-                    HashSet<string> resultKeys = new(Definitions.Keys);
-                    foreach (string parent2 in Definitions.Keys)
-                    {
-                        foreach (Views.LabelList child in GetChildren(parent2))
+            definitions.Remove(oldName, out IJsonValue definitionValue);
+            JsonObject definition = definitionValue.GetObject();
+            definitions.Add(newName, definition);
+            JsonValue newNameValue = JsonValue.CreateStringValue(newName);
+            foreach (IJsonValue definitionValue2 in definitions.Values) {
+                definition = definitionValue2.GetObject();
+                switch (definition.GetNamedString(FieldOperation)) {
+                    case OperationEdit:
+                        if (definition.GetNamedString(FieldInput) == oldName)
                         {
-                            resultKeys.Remove(child.Name);
+                            definition.SetNamedValue(FieldInput, newNameValue);
                         }
-                    }
 
-                    rootChildren = new(new Views.LabelListComparer());
-                    rootChildren.AddRange(
-                        from name in resultKeys
-                        select new Views.LabelList(this, name, null));
+                        break;
+                    case OperationUnion:
+                    case OperationJoin:
+                        JsonArray inputs = definition.GetNamedArray(FieldInput);
+                        for (int i = 0; i < inputs.Count; i++)
+                        {
+                            if (inputs.GetStringAt((uint)i) == oldName)
+                            {
+                                inputs[i] = newNameValue;
+                            }
+                        }
+
+                        break;
+                    case OperationInterleave:
+                        JsonObject inputWeights = definition.GetNamedObject(FieldInput);
+                        if (inputWeights.Remove(oldName, out IJsonValue weightValue))
+                        {
+                            inputWeights.Add(newName, weightValue);
+                        }
+
+                        break;
                 }
-
-                return rootChildren;
             }
 
-            if (childrenCache.TryGetValue(parent, out Views.ObservableSortedList<Views.LabelList> result))
+            if (labelLists.Remove(oldName, out LabelList labelList))
             {
-                return result;
+                labelLists.Add(newName, labelList);
             }
 
-            Views.LabelOperation operation = GetOperation(parent);
-            if (operation == Views.LabelOperation.Merge || operation == Views.LabelOperation.Join)
+            return true;
+        }
+
+        public IEnumerable<string> LabelListNames => Definitions.Keys;
+
+        private readonly Dictionary<string, LabelList> labelLists = new();
+        public LabelList GetLabelList(string name)
+        {
+            LabelList labelList;
+            if (!labelLists.TryGetValue(name, out labelList))
             {
-                JsonValue input = Definitions.GetNamedObject(parent).GetNamedValue("input");
-                JsonArray groups = input.ValueType == JsonValueType.Array
-                    ? input.GetArray()
-                    : new() { input };
-                result = new(new Views.LabelListComparer());
-                for (int i = 0; i < groups.Count; i++)
+                labelList = LabelList.Create(this, name);
+                labelLists.Add(name, labelList);
+            }
+
+            return labelList;
+        }
+
+        public IEnumerable<string> GetLabelListChildren(string parent)
+        {
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            switch (definition.GetNamedString(FieldOperation))
+            {
+                case OperationEdit:
+                    return Enumerable.Repeat(definition.GetNamedString(FieldInput), 1);
+                case OperationUnion:
+                case OperationJoin:
+                    return from inputValue in definition.GetNamedArray(FieldInput)
+                           select inputValue.GetString();
+                case OperationInterleave:
+                    return definition.GetNamedObject(FieldInput).Keys;
+                default:
+                    return Enumerable.Empty<string>();
+            }
+        }
+
+        public Dictionary<string, int> GetLabelListDepths(string root)
+        {
+            Dictionary<string, int> depths = new();
+            Queue<KeyValuePair<string, int>> fringe = new();
+            fringe.Enqueue(new(root, 0));
+            while (fringe.TryDequeue(out KeyValuePair<string, int> pair))
+            {
+                if (depths.TryAdd(pair.Key, pair.Value))
                 {
-                    IJsonValue group = groups[i];
-                    if (group.ValueType == JsonValueType.String)
+                    foreach (string child in GetLabelListChildren(pair.Key))
                     {
-                        result.Add(new(this, group.GetString(), parent, i));
+                        fringe.Enqueue(new(child, pair.Value + 1));
                     }
-                    else
+                }
+            }
+
+            return depths;
+        }
+
+        public string LabelSource
+        {
+            get
+            {
+                try
+                {
+                    return json.GetNamedString("labelSource");
+                }
+                catch (COMException)
+                {
+                    return "default";
+                }
+            }
+            set
+            {
+                if (value != LabelSource)
+                {
+                    lock (this)
                     {
-                        IOrderedEnumerable<KeyValuePair<string, IJsonValue>> sortedPairs
-                            = group.GetObject().OrderBy(pair => -pair.Value.GetNumber()).ThenBy(pair => pair.Key);
-                        result.AddRange(
-                            from pair in sortedPairs
-                            select new Views.LabelList(this, pair.Key, parent, i));
+                        json.SetNamedValue("labelSource", JsonValue.CreateStringValue(value));
+                        Save();
                     }
                 }
             }
-            else if (operation == Views.LabelOperation.Edit)
-            {
-                string name = Definitions.GetNamedObject(parent).GetNamedString("input");
-                result = new(new Views.LabelListComparer()) { new(this, name, parent) };
-            }
-            else
-            {
-                result = new(new Views.LabelListComparer());
-            }
-
-            childrenCache[parent] = result;
-            return result;
-        }
-
-        public bool RemoveChildAt(string name, string parent, int index, out double weight)
-        {
-            JsonObject definition = Definitions.GetNamedObject(parent);
-            JsonValue groupsValue = definition.GetNamedValue("input");
-            if (groupsValue.ValueType == JsonValueType.Object)
-            {
-                if (index != 0)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(index), index, null);
-                }
-
-                JsonObject onlyGroup = groupsValue.GetObject();
-                weight = onlyGroup.GetNamedNumber(name);
-                onlyGroup.Remove(name);
-                return onlyGroup.Count <= 0;
-            }
-
-            JsonArray groups = groupsValue.GetArray();
-            IJsonValue groupValue = groups[index];
-            if (groupValue.ValueType == JsonValueType.String)
-            {
-                weight = 1;
-                groups.RemoveAt(index);
-                if (groups.Count <= 1 && definition.GetNamedString("operation") == "merge")
-                {
-                    definition["input"] = CastMergeGroupToObject(groups[0]);
-                }
-
-                return true;
-            }
-
-            JsonObject group = groupValue.GetObject();
-            weight = group.GetNamedNumber(name);
-            if (group.Count <= 1)
-            {
-                groups.RemoveAt(index);
-                if (groups.Count <= 1 && definition.GetNamedString("operation") == "merge")
-                {
-                    definition["input"] = CastMergeGroupToObject(groups[0]);
-                }
-
-                return true;
-            }
-
-            group.Remove(name);
-            if (group.Count <= 1 && group.Values.First().GetNumber() == 1)
-            {
-                groups[index] = JsonValue.CreateStringValue(group.Keys.First());
-            }
-
-            return false;
-        }
-
-        private static JsonObject CastMergeGroupToObject(IJsonValue group)
-        {
-            if (group.ValueType == JsonValueType.Object)
-            {
-                return group.GetObject();
-            }
-
-            JsonObject result = new();
-            result[group.GetString()] = JsonValue.CreateNumberValue(1);
-            return result;
-        }
-
-        public void InsertChild(string name, string parent, int index, double weight = 1)
-        {
-            JsonObject definition = Definitions.GetNamedObject(parent);
-            JsonValue groupsValue = definition.GetNamedValue("input");
-            JsonArray groups;
-            if (groupsValue.ValueType == JsonValueType.Array)
-            {
-                groups = groupsValue.GetArray();
-            }
-            else
-            {
-                JsonObject group = groupsValue.GetObject();
-                groups = new();
-                if (group.Count > 0)
-                {
-                    groups.Add(group);
-                }
-
-                definition["input"] = groups;
-            }
-
-            if (weight == 1)
-            {
-                groups.Insert(index, JsonValue.CreateStringValue(name));
-            }
-            else
-            {
-                JsonObject group = new();
-                group[name] = JsonValue.CreateNumberValue(weight);
-                groups.Insert(index, group);
-            }
-        }
-
-        public void AddChildToGroup(string name, string parent, int index, double weight)
-        {
-            JsonObject definition = Definitions.GetNamedObject(parent);
-            JsonValue groupsValue = definition.GetNamedValue("input");
-            if (groupsValue.ValueType == JsonValueType.Object)
-            {
-                if (index != 0)
-                {
-                    throw new ArgumentOutOfRangeException(nameof(index), index, null);
-                }
-
-                groupsValue.GetObject()[name] = JsonValue.CreateNumberValue(weight);
-                return;
-            }
-
-            JsonArray groups = groupsValue.GetArray();
-            IJsonValue groupValue = groups[index];
-            if (groupValue.ValueType == JsonValueType.Object)
-            {
-                JsonObject group = groupValue.GetObject();
-                if (group.Count == 1 && weight == 1 && group.ContainsKey(name))
-                {
-                    groups[index] = JsonValue.CreateStringValue(name);
-                }
-                else
-                {
-                    groupValue.GetObject()[name] = JsonValue.CreateNumberValue(weight);
-                }
-            }
-            else
-            {
-                string existingName = groupValue.GetString();
-                if (weight != 1 || name != existingName)
-                {
-                    JsonObject group = new();
-                    group[existingName] = JsonValue.CreateNumberValue(1);
-                    group[name] = JsonValue.CreateNumberValue(weight);
-                    groups[index] = group;
-                }
-            }
-        }
-
-        public bool IsSingletonGroup(string parent, int index)
-        {
-            IJsonValue group = Definitions.GetNamedObject(parent).GetNamedValue("input");
-            if (group.ValueType == JsonValueType.Array)
-            {
-                group = group.GetArray()[index];
-            }
-
-            return group.ValueType == JsonValueType.String || group.GetObject().Count == 1;
-        }
-
-        public int CountGroups(string parent)
-        {
-            IJsonValue groups = Definitions.GetNamedObject(parent).GetNamedValue("input");
-            return groups.ValueType == JsonValueType.Array ? groups.GetArray().Count : 1;
         }
 
         public Settings(string path)

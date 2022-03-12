@@ -2,68 +2,51 @@
     x:Class="MouseJumpSettings.Views.Labels"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:MouseJumpSettings.Views"
+    xmlns:local="using:MouseJumpSettings"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
-
     <Grid VerticalAlignment="Stretch">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="1*" MaxWidth="300"/>
             <ColumnDefinition Width="2*"/>
         </Grid.ColumnDefinitions>
-        <Grid Grid.Column="0">
-            <Grid.RowDefinitions>
-                <RowDefinition/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
-                <StackPanel>
-                    <StackPanel Margin="12,12,0,12">
-                        <ComboBox Header="Label source" SelectedIndex="0" Margin="12">
-                            <ComboBoxItem Content="main"/>
-                            <ComboBoxItem Content="letters"/>
-                            <ComboBoxItem Content="numbers"/>
-                            <ComboBoxItem Content="unused"/>
-                        </ComboBox>
-                        <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
-                    </StackPanel>
-                    <TreeView Name="LabelListTree" SelectedItem="{x:Bind Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{x:Bind settings.GetChildren(x:Null)}" CanDragItems="False" CanReorderItems="False" Margin="0,0,12,12">
-                        <TreeView.ItemTemplate>
-                            <DataTemplate x:DataType="local:LabelList">
-                                <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="True" AutomationProperties.ItemType="{x:Bind OperationName}">
-                                    <StackPanel>
-                                        <!-- https://docs.microsoft.com/en-us/windows/win32/winauto/uiauto-treeoverview -->
-                                        <MenuFlyoutSeparator Visibility="{x:Bind SeparatorVisibility, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" IsTabStop="False" AutomationProperties.Name="Separator" AutomationProperties.AccessibilityView="Control"/>
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition/>
-                                            </Grid.ColumnDefinitions>
-                                            <PathIcon Data="{x:Bind IconPath}" Grid.Column="0" Margin="0,0,12,0"/>
-                                            <TextBlock Text="{x:Bind Name}" Grid.Column="1" Margin="0,0,12,0"/>
-                                            <TextBlock Text="{x:Bind Weight}" Grid.Column="2" HorizontalAlignment="Right" Margin="0,0,12,0"/>
-                                        </Grid>
-                                    </StackPanel>
-                                </TreeViewItem>
-                            </DataTemplate>
-                        </TreeView.ItemTemplate>
-                    </TreeView>
+        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
+            <StackPanel>
+                <StackPanel.Resources>
+                    <CollectionViewSource x:Name="labelListSource" IsSourceGrouped="True" Source="{x:Bind LabelLists, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                </StackPanel.Resources>
+                <StackPanel Margin="12,12,0,12">
+                    <ComboBox Header="Label source" SelectedIndex="0" Margin="12">
+                        <ComboBoxItem Content="main"/>
+                        <ComboBoxItem Content="letters"/>
+                        <ComboBoxItem Content="numbers"/>
+                        <ComboBoxItem Content="unused"/>
+                    </ComboBox>
+                    <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
                 </StackPanel>
-            </ScrollViewer>
-            <StackPanel Padding="12,0,0,12" Grid.Row="1">
-                <NumberBox
-                    Value="{x:Bind Path=NegIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    Maximum="0"
-                    Minimum="{x:Bind Path=MinNegIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    Header="{x:Bind IndexHeader, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    SpinButtonPlacementMode="Inline"
-                    Margin="12"/>
-                <NumberBox Value="{x:Bind Path=Weight, Mode=TwoWay}" Header="Frequency within group" SpinButtonPlacementMode="Hidden" Margin="12"/>
+                <ListView SelectedItem="{x:Bind Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding Source={StaticResource labelListSource}}" Margin="0,0,12,24">
+                    <ListView.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Path=Key.Name}"/>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListView.GroupStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
+                                <TextBlock Text="{Binding Name}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </StackPanel>
-        </Grid>
+        </ScrollViewer>
         <Grid Grid.Column="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="2*" MaxWidth="500"/>
@@ -78,7 +61,7 @@
             </Grid.RowDefinitions>
             <ScrollViewer VerticalScrollBarVisibility="Auto" Grid.Row="0" Grid.RowSpan="4" Grid.Column="0">
                 <StackPanel HorizontalAlignment="Stretch" Padding="0,12,0,0">
-                    <TextBox Text="positive" Header="Name" Margin="12"/>
+                    <TextBox Text="{x:Bind Path=SelectedName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Header="Name" IsSpellCheckEnabled="False" Margin="12"/>
                     <StackPanel Orientation="Horizontal" Margin="12">
                         <PathIcon Data="M 13.379,0.00258382 C 12.7068,0.00224698 12.0346,0.256659 11.5249,0.766361 L 1.31465,10.9797 c -0.06432,0.0639 -0.11005,0.1441 -0.13229,0.232 l -0.999942,3.9992 c -0.042464,0.1704 0.007488,0.3505 0.131609,0.4746 0.124121,0.1241 0.304234,0.1741 0.474554,0.1316 L 4.78833,14.8177 C 4.8765,14.7959 4.95707,14.7505 5.02139,14.6864 L 15.2332,4.47466 c 1.0194,-1.01941 1.0194,-2.68728 0,-3.706749 C 14.7234,0.258176 14.0512,0.00292066 13.379,0.00258382 Z m 0,0.99373618 c 0.4142,3.23e-4 0.8285,0.15983 1.1472,0.47852 0.6374,0.63738 0.6372,1.65569 0,2.29288 L 14.0007,4.29327 11.7068,1.99988 12.2323,1.47381 C 12.5509,1.15521 12.9648,0.995998 13.379,0.99632 Z M 10.9998,2.70681 13.2932,5.00021 4.41109,13.8823 1.35495,14.6461 2.11873,11.59 Z" Margin="0,0,12,0"/>
                         <TextBlock Text="Built-in edit list"/>

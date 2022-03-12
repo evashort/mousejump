@@ -1,109 +1,75 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using System;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
-
-// To learn more about WinUI, the WinUI project structure,
-// and more about our project templates, see: http://aka.ms/winui-project-info.
+using System.Linq;
 
 namespace MouseJumpSettings.Views
 {
     public sealed partial class Labels : Page, INotifyPropertyChanged
     {
-        public event PropertyChangedEventHandler PropertyChanged;
+        private readonly Settings settings;
 
-        private Settings settings;
-
+        private bool renaming = false;
         private LabelList selected;
-        private LabelList Selected
-        {
+        private LabelList Selected {
             get => selected;
             set
             {
-                int oldMaxIndex = -MinNegIndex;
-                selected = value;
-                int newMaxIndex = -MinNegIndex;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IndexHeader)));
-                if (newMaxIndex >= oldMaxIndex)
+                if (!renaming)
                 {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinNegIndex)));
-                }
-
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NegIndex)));
-                if (newMaxIndex < oldMaxIndex)
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinNegIndex)));
+                    selected = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
                 }
             }
         }
 
-        private int NegIndex
+        private string SelectedName
         {
-            get => Selected == null ? 0 : (
-                Selected.ParentOperation == LabelOperation.Merge
-                ? -2 * Selected.Index + (Selected.InGroup ? -1 : 0)
-                : -Selected.Index
-            );
-            set
+            get => Selected?.Name;
+            set {
+                if (selected == null)
+                {
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
+                }
+                else if (value != Selected.Name)
+                {
+                    Selected.Name = value;
+                    renaming = true;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelLists)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
+                    renaming = false;
+                }
+            }
+        }
+
+        private readonly NewList newList;
+        private IOrderedEnumerable<IGrouping<LabelListGroup, LabelList>> LabelLists
+        {
+            get
             {
-                if (Selected == null)
-                {
-                    return;
-                }
-
-                // https://github.com/microsoft/microsoft-ui-xaml/issues/3119
-                LabelList oldSelected = Selected;
-                if (Selected.ParentOperation == LabelOperation.Merge)
-                {
-                    if (-value % 2 == 0)
-                    {
-                        Selected.Index = -value / 2;
-                    }
-                    else
-                    {
-                        Selected.SetGroupIndex(-value / 2);
-                    }
-
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinNegIndex)));
-                }
-                else
-                {
-                    Selected.Index = -value;
-                }
-
-                Selected = oldSelected;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
+                return from labelList in (
+                           from name in settings.LabelListNames
+                           select settings.GetLabelList(name)
+                       ).Append(newList)
+                       orderby labelList.IsNew, labelList.Name
+                       group labelList by labelList.Group into grp
+                       orderby grp.Key
+                       select grp;
             }
-        }
-
-        private int MinNegIndex
-        {
-            get => Selected == null ? 0 : (
-                Selected.ParentOperation == LabelOperation.Merge
-                ? (Selected.InGroup ? 0 : 2) - 2 * Selected.SiblingGroupCount
-                : 1 - Selected.SiblingGroupCount
-            );
             set { }
         }
-
-        private string IndexHeader
-        {
-            get => Selected != null && Selected.ParentOperation == LabelOperation.Merge
-                ? "-Index (odd numbers are groups)"
-                : "-Index";
-            set { }
-        }
-
-        private double Weight { get; set; }
 
         public Labels()
         {
             settings = (Application.Current as App).Settings;
+            newList = new(settings);
             this.InitializeComponent();
             outputBox.IsReadOnly = false;
             outputBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, "1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n");
             outputBox.IsReadOnly = true;
         }
+
+        public event PropertyChangedEventHandler PropertyChanged;
     }
 }

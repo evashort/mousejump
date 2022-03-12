@@ -9,6 +9,32 @@
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
 
     <Grid>
-        <TextBlock>Review Changes</TextBlock>
+        <Grid.Resources>
+            <CollectionViewSource x:Name="groupInfoCVS" IsSourceGrouped="True" Source="{x:Bind GroupedTestData}"/>
+        </Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="auto"/>
+            <RowDefinition/>
+        </Grid.RowDefinitions>
+        <NumberBox x:Name="indexBox" Grid.Row="0" Value="{x:Bind Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Minimum="-5" Maximum="0"/>
+        <ListView Grid.Row="1" IsMultiSelectCheckBoxEnabled="True" SelectionMode="Multiple" ItemsSource="{Binding Source={StaticResource groupInfoCVS}}">
+            <ListView.GroupStyle>
+                <GroupStyle>
+                    <GroupStyle.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Key}"/>
+                        </DataTemplate>
+                    </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+            </ListView.GroupStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="local:TestDataType">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{x:Bind Name}"/>
+                        <NumberBox/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
     </Grid>
 </Page>
