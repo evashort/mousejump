@@ -1,6 +1,6 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 
@@ -43,7 +43,7 @@ namespace MouseJumpSettings.Views
             }
         }
 
-        private readonly NewList newList;
+        private readonly List<NewList> newLists;
         private IOrderedEnumerable<IGrouping<LabelListGroup, LabelList>> LabelLists
         {
             get
@@ -51,8 +51,8 @@ namespace MouseJumpSettings.Views
                 return from labelList in (
                            from name in settings.LabelListNames
                            select settings.GetLabelList(name)
-                       ).Append(newList)
-                       orderby labelList.IsNew, labelList.Name
+                       ).Concat(newLists)
+                       orderby labelList.Name
                        group labelList by labelList.Group into grp
                        orderby grp.Key
                        select grp;
@@ -63,7 +63,20 @@ namespace MouseJumpSettings.Views
         public Labels()
         {
             settings = (Application.Current as App).Settings;
-            newList = new(settings);
+            newLists = new()
+            {
+                new InputList(settings, "a-z input")
+                {
+                    Parent = settings.GetLabelList("a-z"),
+                },
+                new InputList(settings, "list 1"),
+                new WrapList(settings, "aaa-zzz edited", LabelOperation.Edit) {
+                    ParentsSelected = new List<KeyValuePair<LabelList, bool>>
+                    {
+                        new(settings.GetLabelList("default"), true),
+                    },
+                },
+            };
             this.InitializeComponent();
             outputBox.IsReadOnly = false;
             outputBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, "1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n");

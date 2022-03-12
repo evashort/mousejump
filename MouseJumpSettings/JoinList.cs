@@ -1,6 +1,6 @@
 ﻿namespace MouseJumpSettings
 {
-    internal class JoinList : LabelList
+    public class JoinList : LabelList
     {
         public JoinList(Settings settings, string name) : base(settings, name)
         { }

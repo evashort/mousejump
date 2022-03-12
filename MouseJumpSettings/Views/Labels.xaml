@@ -25,6 +25,12 @@
                         <ComboBoxItem Content="unused"/>
                     </ComboBox>
                     <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
+                    <Button Margin="12">
+                        <StackPanel Orientation="Horizontal">
+                            <PathIcon Data="{x:Bind local:IconPaths.New}" Margin="0,0,12,0"/>
+                            <TextBlock Text="New list"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
                 <ListView SelectedItem="{x:Bind Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding Source={StaticResource labelListSource}}" Margin="0,0,12,24">
                     <ListView.GroupStyle>
@@ -40,7 +46,7 @@
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal">
                                 <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
-                                <TextBlock Text="{Binding Name}"/>
+                                <TextBlock Text="{Binding Title}"/>
                             </StackPanel>
                         </DataTemplate>
                     </ListView.ItemTemplate>

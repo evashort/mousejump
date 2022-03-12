@@ -1,6 +1,6 @@
 ﻿namespace MouseJumpSettings
 {
-    internal class InterleaveList : LabelList
+    public class InterleaveList : LabelList
     {
         public InterleaveList(Settings settings, string name) : base(settings, name)
         { }

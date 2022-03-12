@@ -114,15 +114,14 @@ namespace MouseJumpSettings
         private const string OperationUnion = "union";
         private const string OperationInterleave = "interleave";
         private const string OperationJoin = "join";
-        public enum Operation { Split, Edit, Union, Interleave, Join }
-        public Operation GetLabelListOperation(string name)
+        public LabelOperation GetLabelListOperation(string name)
             => Definitions.GetNamedObject(name).GetNamedString(FieldOperation) switch
         {
-            OperationSplit => Operation.Split,
-            OperationEdit => Operation.Edit,
-            OperationUnion => Operation.Union,
-            OperationInterleave => Operation.Interleave,
-            OperationJoin => Operation.Join,
+            OperationSplit => LabelOperation.Split,
+            OperationEdit => LabelOperation.Edit,
+            OperationUnion => LabelOperation.Union,
+            OperationInterleave => LabelOperation.Interleave,
+            OperationJoin => LabelOperation.Join,
             _ => throw new ArgumentException("unknown operation"),
         };
 

@@ -8,12 +8,15 @@ namespace MouseJumpSettings
         public static LabelList Create(Settings settings, string name)
             => settings.GetLabelListOperation(name) switch
             {
-                Settings.Operation.Split => new BasicList(settings, name),
-                Settings.Operation.Edit => new EditList(settings, name),
-                Settings.Operation.Union => new UnionList(settings, name),
-                Settings.Operation.Interleave => new InterleaveList(settings, name),
-                Settings.Operation.Join => new JoinList(settings, name),
-                _ => throw new InvalidEnumArgumentException(),
+                LabelOperation.Split => new BasicList(settings, name),
+                LabelOperation.Edit => new EditList(settings, name),
+                LabelOperation.Union => new UnionList(settings, name),
+                LabelOperation.Interleave => new InterleaveList(settings, name),
+                LabelOperation.Join => new JoinList(settings, name),
+                _ => throw new InvalidEnumArgumentException(
+                    "operation",
+                    (int)settings.GetLabelListOperation(name),
+                    typeof(LabelOperation)),
             };
 
         protected readonly Settings settings;
@@ -41,9 +44,9 @@ namespace MouseJumpSettings
             }
         }
 
-        public abstract string IconPath { get; }
+        public virtual string Title => Name;
 
-        public virtual bool IsNew => false;
+        public abstract string IconPath { get; }
 
         public virtual int Depth => settings.GetLabelListDepths(settings.LabelSource).GetValueOrDefault(name, -1);
 

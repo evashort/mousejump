@@ -1,24 +1,51 @@
-﻿using System;
+﻿using System.Collections.Generic;
 
 namespace MouseJumpSettings
 {
-    internal class NewList : LabelList
+    public abstract class NewList : LabelList
     {
-        public NewList(Settings settings) : base(settings, null)
-        { }
+        public NewList(Settings settings, string name, LabelOperation operation = LabelOperation.Split)
+            : base(settings, name)
+        {
+            Operation = operation;
+        }
+
+        public abstract IEnumerable<LabelList> Parents { get; }
+
+        public virtual LabelOperation Operation { get; set; }
 
         public override string Name
         {
-            get => "New...";
-            set => throw new InvalidOperationException();
+            get => name;
+            set => name = value;
         }
 
-        public override string IconPath => IconPaths.New;
+        public override string Title => $"*{Name}";
 
-        public override bool IsNew => true;
+        public override string IconPath => IconPaths.FromOperation(Operation);
 
-        public override int Depth => 0;
+        public override int Depth
+        {
+            get
+            {
+                IEnumerator<LabelList> parents = Parents.GetEnumerator();
+                if (!parents.MoveNext())
+                {
+                    return -1;
+                }
 
-        public override LabelListGroup Group => LabelListGroup.Unused;
+                Dictionary<string, int> depths = settings.GetLabelListDepths(settings.LabelSource);
+                int depth = -1;
+                do
+                {
+                    if (depths.TryGetValue(parents.Current.Name, out int parentDepth))
+                    {
+                        depth = depth < 0 || parentDepth < depth ? parentDepth + 1 : depth;
+                    }
+                } while (depth != 1 && parents.MoveNext());
+
+                return depth;
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 ﻿namespace MouseJumpSettings
 {
-    internal class EditList : LabelList
+    public class EditList : LabelList
     {
         public EditList(Settings settings, string name) : base(settings, name)
         { }
