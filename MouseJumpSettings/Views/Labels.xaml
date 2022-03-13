@@ -7,32 +7,33 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Page.Resources>
+        <DataTemplate x:Name="labelListTemplate">
+            <StackPanel Orientation="Horizontal">
+                <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
+                <TextBlock Text="{Binding Title}"/>
+            </StackPanel>
+        </DataTemplate>
+        <CollectionViewSource x:Name="labelListSource" IsSourceGrouped="True" Source="{x:Bind LabelListsGrouped, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+    </Page.Resources>
     <Grid VerticalAlignment="Stretch">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="1*" MaxWidth="300"/>
             <ColumnDefinition Width="2*"/>
         </Grid.ColumnDefinitions>
-        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
+        <ScrollViewer x:Name="sidebar" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled">
             <StackPanel>
-                <StackPanel.Resources>
-                    <CollectionViewSource x:Name="labelListSource" IsSourceGrouped="True" Source="{x:Bind LabelLists, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                </StackPanel.Resources>
                 <StackPanel Margin="12,12,0,12">
-                    <ComboBox Header="Label source" SelectedIndex="0" Margin="12">
-                        <ComboBoxItem Content="main"/>
-                        <ComboBoxItem Content="letters"/>
-                        <ComboBoxItem Content="numbers"/>
-                        <ComboBoxItem Content="unused"/>
-                    </ComboBox>
+                    <ComboBox Header="Label source" SelectedItem="{x:Bind LabelSource, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{x:Bind LabelLists, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="12" ItemTemplate="{Binding Source={StaticResource labelListTemplate}}"/>
                     <ToggleSwitch Header="Match case" Margin="12"></ToggleSwitch>
-                    <Button Margin="12">
+                    <Button Margin="12" Click="CreateLabelList">
                         <StackPanel Orientation="Horizontal">
                             <PathIcon Data="{x:Bind local:IconPaths.New}" Margin="0,0,12,0"/>
                             <TextBlock Text="New list"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
-                <ListView SelectedItem="{x:Bind Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding Source={StaticResource labelListSource}}" Margin="0,0,12,24">
+                <ListView x:Name="labelListsView" SelectedItem="{x:Bind Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding Source={StaticResource labelListSource}}" ItemTemplate="{Binding Source={StaticResource labelListTemplate}}" LayoutUpdated="LabelListsView_LayoutUpdated" Margin="0,0,12,24">
                     <ListView.GroupStyle>
                         <GroupStyle>
                             <GroupStyle.HeaderTemplate>
@@ -42,14 +43,6 @@
                             </GroupStyle.HeaderTemplate>
                         </GroupStyle>
                     </ListView.GroupStyle>
-                    <ListView.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Orientation="Horizontal">
-                                <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
-                                <TextBlock Text="{Binding Title}"/>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
                 </ListView>
             </StackPanel>
         </ScrollViewer>

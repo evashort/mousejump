@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
+using System;
 
 namespace MouseJumpSettings.Views
 {
@@ -10,13 +11,13 @@ namespace MouseJumpSettings.Views
     {
         private readonly Settings settings;
 
-        private bool renaming = false;
+        private bool surpressSelectedChange = false;
         private LabelList selected;
         private LabelList Selected {
             get => selected;
             set
             {
-                if (!renaming)
+                if (!surpressSelectedChange)
                 {
                     selected = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
@@ -35,23 +36,42 @@ namespace MouseJumpSettings.Views
                 else if (value != Selected.Name)
                 {
                     Selected.Name = value;
-                    renaming = true;
+                    surpressSelectedChange = true;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelLists)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelListsGrouped)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelSource)));
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
-                    renaming = false;
+                    surpressSelectedChange = false;
+                }
+            }
+        }
+
+        private LabelList LabelSource
+        {
+            get => settings.LabelLists[settings.LabelSource];
+            set
+            {
+                if (value != null)
+                {
+                    settings.LabelSource = value.Name;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelListsGrouped)));
                 }
             }
         }
 
         private readonly List<NewList> newLists;
-        private IOrderedEnumerable<IGrouping<LabelListGroup, LabelList>> LabelLists
+        private IOrderedEnumerable<LabelList> LabelLists
+        {
+            get => settings.LabelLists.Values.OrderBy(labelList => labelList.Name);
+            set { }
+        }
+
+        private IOrderedEnumerable<IGrouping<LabelListGroup, LabelList>> LabelListsGrouped
         {
             get
             {
-                return from labelList in (
-                           from name in settings.LabelListNames
-                           select settings.GetLabelList(name)
-                       ).Concat(newLists)
+                return from labelList
+                       in settings.LabelLists.Values.Concat(newLists)
                        orderby labelList.Name
                        group labelList by labelList.Group into grp
                        orderby grp.Key
@@ -63,26 +83,58 @@ namespace MouseJumpSettings.Views
         public Labels()
         {
             settings = (Application.Current as App).Settings;
-            newLists = new()
-            {
-                new InputList(settings, "a-z input")
-                {
-                    Parent = settings.GetLabelList("a-z"),
-                },
-                new InputList(settings, "list 1"),
-                new WrapList(settings, "aaa-zzz edited", LabelOperation.Edit) {
-                    ParentsSelected = new List<KeyValuePair<LabelList, bool>>
-                    {
-                        new(settings.GetLabelList("default"), true),
-                    },
-                },
-            };
+            newLists = new();
             this.InitializeComponent();
             outputBox.IsReadOnly = false;
             outputBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, "1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n");
             outputBox.IsReadOnly = true;
         }
 
+        private static int? GetNumberSuffix(string prefix, string name)
+        {
+            if (name.StartsWith(prefix) && int.TryParse(name.AsSpan(prefix.Length), out int suffix))
+            {
+                return suffix;
+            }
+
+            return null;
+        }
+
+        private void CreateLabelList(object sender, RoutedEventArgs e)
+        {
+            const string prefix = "list ";
+            int lastSuffix = (
+                from name in settings.LabelLists.Keys.Concat(
+                    from labelList in newLists select labelList.Name)
+                select GetNumberSuffix(prefix, name)).Max() ?? 0;
+            lastSuffix = lastSuffix < 0 ? 0 : lastSuffix;
+            InputList newList = new(settings, prefix + (lastSuffix + 1));
+            newLists.Add(newList);
+            toBringIntoView = newList;
+            surpressSelectedChange = true;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelListsGrouped)));
+            surpressSelectedChange = false;
+            Selected = newList;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
+        }
+
+        private LabelList toBringIntoView;
+
         public event PropertyChangedEventHandler PropertyChanged;
+
+        private void LabelListsView_LayoutUpdated(object sender, object e)
+        {
+            if (toBringIntoView == null)
+            {
+                return;
+            }
+
+            if (labelListsView.ContainerFromItem(toBringIntoView) is ListViewItem item)
+            {
+                item.StartBringIntoView();
+            }
+
+            toBringIntoView = null;
+        }
     }
 }

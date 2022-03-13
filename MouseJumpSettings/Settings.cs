@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -14,10 +13,16 @@ namespace MouseJumpSettings
 {
     public class Settings : IDisposable
     {
+        // Encoding.UTF8 adds a byte order mark so we have to make our own
+        private static readonly Encoding encoding = new UTF8Encoding();
         private JsonObject json;
         private readonly string path;
         private Task saveTask;
         private bool savePending;
+        private Dictionary<string, LabelList> labelLists;
+
+        public IReadOnlyDictionary<string, LabelList> LabelLists => labelLists;
+
         public Color LabelColor
         {
             get
@@ -37,7 +42,7 @@ namespace MouseJumpSettings
             }
         }
 
-        private double defaultFontSize = 0;
+        private readonly double defaultFontSize = 10;
         public double FontSize
         {
             get
@@ -64,7 +69,7 @@ namespace MouseJumpSettings
             }
         }
 
-        private string defaultFont = "";
+        private readonly string defaultFont = "Segoe UI";
         public string Font
         {
             get
@@ -91,7 +96,7 @@ namespace MouseJumpSettings
             }
         }
 
-        private JsonObject defaultDefinitions = new JsonObject();
+        private readonly JsonObject defaultDefinitions = new JsonObject();
         private JsonObject Definitions
         {
             get
@@ -116,14 +121,14 @@ namespace MouseJumpSettings
         private const string OperationJoin = "join";
         public LabelOperation GetLabelListOperation(string name)
             => Definitions.GetNamedObject(name).GetNamedString(FieldOperation) switch
-        {
-            OperationSplit => LabelOperation.Split,
-            OperationEdit => LabelOperation.Edit,
-            OperationUnion => LabelOperation.Union,
-            OperationInterleave => LabelOperation.Interleave,
-            OperationJoin => LabelOperation.Join,
-            _ => throw new ArgumentException("unknown operation"),
-        };
+            {
+                OperationSplit => LabelOperation.Split,
+                OperationEdit => LabelOperation.Edit,
+                OperationUnion => LabelOperation.Union,
+                OperationInterleave => LabelOperation.Interleave,
+                OperationJoin => LabelOperation.Join,
+                _ => throw new ArgumentException("unknown operation"),
+            };
 
         public bool RenameLabelList(string oldName, string newName)
         {
@@ -138,41 +143,53 @@ namespace MouseJumpSettings
                 return false;
             }
 
-            definitions.Remove(oldName, out IJsonValue definitionValue);
-            JsonObject definition = definitionValue.GetObject();
-            definitions.Add(newName, definition);
-            JsonValue newNameValue = JsonValue.CreateStringValue(newName);
-            foreach (IJsonValue definitionValue2 in definitions.Values) {
-                definition = definitionValue2.GetObject();
-                switch (definition.GetNamedString(FieldOperation)) {
-                    case OperationEdit:
-                        if (definition.GetNamedString(FieldInput) == oldName)
-                        {
-                            definition.SetNamedValue(FieldInput, newNameValue);
-                        }
-
-                        break;
-                    case OperationUnion:
-                    case OperationJoin:
-                        JsonArray inputs = definition.GetNamedArray(FieldInput);
-                        for (int i = 0; i < inputs.Count; i++)
-                        {
-                            if (inputs.GetStringAt((uint)i) == oldName)
+            lock (this)
+            {
+                definitions.Remove(oldName, out IJsonValue definitionValue);
+                JsonObject definition = definitionValue.GetObject();
+                definitions.Add(newName, definition);
+                JsonValue newNameValue = JsonValue.CreateStringValue(newName);
+                foreach (IJsonValue definitionValue2 in definitions.Values)
+                {
+                    definition = definitionValue2.GetObject();
+                    switch (definition.GetNamedString(FieldOperation))
+                    {
+                        case OperationEdit:
+                            if (definition.GetNamedString(FieldInput) == oldName)
                             {
-                                inputs[i] = newNameValue;
+                                definition.SetNamedValue(FieldInput, newNameValue);
                             }
-                        }
 
-                        break;
-                    case OperationInterleave:
-                        JsonObject inputWeights = definition.GetNamedObject(FieldInput);
-                        if (inputWeights.Remove(oldName, out IJsonValue weightValue))
-                        {
-                            inputWeights.Add(newName, weightValue);
-                        }
+                            break;
+                        case OperationUnion:
+                        case OperationJoin:
+                            JsonArray inputs = definition.GetNamedArray(FieldInput);
+                            for (int i = 0; i < inputs.Count; i++)
+                            {
+                                if (inputs.GetStringAt((uint)i) == oldName)
+                                {
+                                    inputs[i] = newNameValue;
+                                }
+                            }
 
-                        break;
+                            break;
+                        case OperationInterleave:
+                            JsonObject inputWeights = definition.GetNamedObject(FieldInput);
+                            if (inputWeights.Remove(oldName, out IJsonValue weightValue))
+                            {
+                                inputWeights.Add(newName, weightValue);
+                            }
+
+                            break;
+                    }
                 }
+
+                if (LabelSource == oldName)
+                {
+                    json.SetNamedValue("labelSource", newNameValue);
+                }
+
+                Save();
             }
 
             if (labelLists.Remove(oldName, out LabelList labelList))
@@ -183,37 +200,18 @@ namespace MouseJumpSettings
             return true;
         }
 
-        public IEnumerable<string> LabelListNames => Definitions.Keys;
-
-        private readonly Dictionary<string, LabelList> labelLists = new();
-        public LabelList GetLabelList(string name)
-        {
-            LabelList labelList;
-            if (!labelLists.TryGetValue(name, out labelList))
-            {
-                labelList = LabelList.Create(this, name);
-                labelLists.Add(name, labelList);
-            }
-
-            return labelList;
-        }
-
         public IEnumerable<string> GetLabelListChildren(string parent)
         {
             JsonObject definition = Definitions.GetNamedObject(parent);
-            switch (definition.GetNamedString(FieldOperation))
+            return definition.GetNamedString(FieldOperation) switch
             {
-                case OperationEdit:
-                    return Enumerable.Repeat(definition.GetNamedString(FieldInput), 1);
-                case OperationUnion:
-                case OperationJoin:
-                    return from inputValue in definition.GetNamedArray(FieldInput)
-                           select inputValue.GetString();
-                case OperationInterleave:
-                    return definition.GetNamedObject(FieldInput).Keys;
-                default:
-                    return Enumerable.Empty<string>();
-            }
+                OperationEdit => Enumerable.Repeat(definition.GetNamedString(FieldInput), 1),
+                OperationUnion or OperationJoin => from inputValue
+                                                   in definition.GetNamedArray(FieldInput)
+                                                   select inputValue.GetString(),
+                OperationInterleave => definition.GetNamedObject(FieldInput).Keys,
+                _ => Enumerable.Empty<string>(),
+            };
         }
 
         public Dictionary<string, int> GetLabelListDepths(string root)
@@ -266,22 +264,26 @@ namespace MouseJumpSettings
             this.path = path;
             saveTask = Task.CompletedTask;
             savePending = false;
-            NONCLIENTMETRICSW metrics = new NONCLIENTMETRICSW();
+            NONCLIENTMETRICSW metrics = new();
             metrics.cbSize = (uint)Marshal.SizeOf(metrics);
-            Win32.SystemParametersInfoW(
+            int hResult = Win32.SystemParametersInfoW(
                 0x29, // SPI_GETNONCLIENTMETRICS
                 (uint)Marshal.SizeOf(metrics),
                 ref metrics,
                 0
             );
-            defaultFontSize = -0.75 * metrics.lfMessageFont.lfHeight;
-            defaultFont = metrics.lfMessageFont.lfFaceName;
+            if (hResult == 1)
+            {
+                defaultFontSize = -0.75 * metrics.lfMessageFont.lfHeight;
+                defaultFont = metrics.lfMessageFont.lfFaceName;
+            }
         }
 
         public void Load()
         {
-            string text = File.ReadAllText(path, Encoding.UTF8);
+            string text = File.ReadAllText(path, encoding);
             json = JsonObject.Parse(text);
+            labelLists = Definitions.Keys.ToDictionary(name => name, name => LabelList.Create(this, name));
         }
 
         private static Color ParseColor(string text)
@@ -320,23 +322,24 @@ namespace MouseJumpSettings
 
         private void SaveHelp(Task task)
         {
-            string text;
+            StringBuilder text = new();
             lock (this)
             {
-                text = PrettyPrint(json, 0);
+                PrettyPrint(json, text, 0);
                 savePending = false;
             }
 
-            File.WriteAllText(path, text + "\n");
+            text.Append('\n');
+            File.WriteAllText(path, text.ToString(), encoding);
             Thread.Sleep(100);
         }
 
-        public static string PrettyPrint(IJsonValue val, int indentation)
+        public static void PrettyPrint(IJsonValue val, StringBuilder result, int indentation)
         {
             int oldIndentation = indentation;
             if (val.ValueType == JsonValueType.Object)
             {
-                StringBuilder result = new StringBuilder("{");
+                result.Append('{');
                 indentation += 4;
                 string separator = "\n";
                 foreach (
@@ -349,19 +352,17 @@ namespace MouseJumpSettings
                     result.Append("".PadLeft(indentation));
                     result.Append(JsonValue.CreateStringValue(item.Key).ToString());
                     result.Append(": ");
-                    result.Append(PrettyPrint(item.Value, indentation));
+                    PrettyPrint(item.Value, result, indentation);
                 }
 
-                result.Append("\n");
+                result.Append('\n');
                 indentation = oldIndentation;
                 result.Append("".PadLeft(indentation));
-                result.Append("}");
-                return result.ToString();
+                result.Append('}');
             }
-
-            if (val.ValueType == JsonValueType.Array)
+            else if (val.ValueType == JsonValueType.Array)
             {
-                StringBuilder result = new StringBuilder("[");
+                result.Append('[');
                 indentation += 4;
                 bool singleLine = val.GetArray().All(
                     item => item.ValueType != JsonValueType.Array && item.ValueType != JsonValueType.Object
@@ -372,16 +373,17 @@ namespace MouseJumpSettings
                 {
                     result.Append(separator);
                     separator = nextSeparator;
-                    result.Append(PrettyPrint(item, indentation));
+                    PrettyPrint(item, result, indentation);
                 }
 
                 indentation = oldIndentation;
                 result.Append(singleLine ? "" : "\n" + "".PadLeft(indentation));
-                result.Append("]");
-                return result.ToString();
+                result.Append(']');
             }
-
-            return val.Stringify();
+            else
+            {
+                result.Append(val.Stringify());
+            }
         }
 
         public void Dispose()
