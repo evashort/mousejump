@@ -5,6 +5,6 @@
         public InterleaveList(Settings settings, string name) : base(settings, name)
         { }
 
-        public override string IconPath => IconPaths.Interleave;
+        public override LabelOperation Operation => LabelOperation.Interleave;
     }
 }

@@ -12,7 +12,7 @@ namespace MouseJumpSettings
 
         public abstract IEnumerable<LabelList> Parents { get; }
 
-        public virtual LabelOperation Operation { get; set; }
+        public override LabelOperation Operation { get; set; }
 
         public override string Name
         {

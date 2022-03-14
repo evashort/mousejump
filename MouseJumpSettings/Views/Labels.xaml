@@ -15,6 +15,7 @@
             </StackPanel>
         </DataTemplate>
         <CollectionViewSource x:Name="labelListSource" IsSourceGrouped="True" Source="{x:Bind LabelListsGrouped, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+        <local:VisibilityConverter x:Key="VisibilityConverter"/>
     </Page.Resources>
     <Grid VerticalAlignment="Stretch">
         <Grid.ColumnDefinitions>
@@ -69,6 +70,16 @@
                         <TextBlock Text="Input:" Margin="0,0,12,0"/>
                         <TextBlock Text="main" IsTextSelectionEnabled="True"/>
                     </StackPanel>
+                    <ListView x:Name="inputsView" Header="Inputs" ItemsSource="{x:Bind Inputs}" Visibility="{x:Bind SelectedIsInterleave, Converter={StaticResource VisibilityConverter}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionMode="Multiple" IsMultiSelectCheckBoxEnabled="True" Margin="12,12,12,12">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
+                                    <TextBlock Text="{Binding Title}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
                     <TextBox Text="0&#xA;" AcceptsReturn="True" Header="Labels (one per line)" Margin="12"/>
                     <NumberBox Value="1" Header="Page" SpinButtonPlacementMode="Inline" Margin="12"/>
                     <TextBlock Text="1-100 of 512 labels" Margin="12"/>

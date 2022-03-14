@@ -5,6 +5,6 @@
         public JoinList(Settings settings, string name) : base(settings, name)
         { }
 
-        public override string IconPath => IconPaths.Join;
+        public override LabelOperation Operation => LabelOperation.Join;
     }
 }

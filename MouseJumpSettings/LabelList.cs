@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 
 namespace MouseJumpSettings
@@ -21,6 +22,10 @@ namespace MouseJumpSettings
 
         protected readonly Settings settings;
         protected string name;
+        public virtual LabelOperation Operation {
+            get => throw new NotImplementedException();
+            set => throw new NotImplementedException();
+        }
 
         public LabelList(Settings settings, string name)
         {
@@ -46,7 +51,7 @@ namespace MouseJumpSettings
 
         public virtual string Title => Name;
 
-        public abstract string IconPath { get; }
+        public virtual string IconPath => IconPaths.FromOperation(Operation);
 
         public virtual int Depth => settings.GetLabelListDepths(settings.LabelSource).GetValueOrDefault(name, -1);
 

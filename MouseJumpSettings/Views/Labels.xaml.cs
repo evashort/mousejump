@@ -12,15 +12,15 @@ namespace MouseJumpSettings.Views
         private readonly Settings settings;
 
         private bool surpressSelectedChange = false;
-        private LabelList selected;
         private LabelList Selected {
-            get => selected;
+            get => settings.selectedList;
             set
             {
                 if (!surpressSelectedChange)
                 {
-                    selected = value;
+                    settings.selectedList = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsInterleave)));
                 }
             }
         }
@@ -29,7 +29,7 @@ namespace MouseJumpSettings.Views
         {
             get => Selected?.Name;
             set {
-                if (selected == null)
+                if (Selected == null)
                 {
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
                 }
@@ -44,6 +44,12 @@ namespace MouseJumpSettings.Views
                     surpressSelectedChange = false;
                 }
             }
+        }
+
+        private bool SelectedIsInterleave
+        {
+            get => Selected != null && Selected.Operation == LabelOperation.Interleave;
+            set { }
         }
 
         private LabelList LabelSource
@@ -77,6 +83,15 @@ namespace MouseJumpSettings.Views
                        orderby grp.Key
                        select grp;
             }
+            set { }
+        }
+
+        public IOrderedEnumerable<LabelList> Inputs
+        {
+            get => from labelList in settings.LabelLists.Values
+                   where labelList != Selected
+                   orderby labelList.Name
+                   select labelList;
             set { }
         }
 

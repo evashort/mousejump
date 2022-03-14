@@ -5,6 +5,6 @@
         public BasicList(Settings settings, string name) : base(settings, name)
         { }
 
-        public override string IconPath => IconPaths.Basic;
+        public override LabelOperation Operation => LabelOperation.Split;
     }
 }

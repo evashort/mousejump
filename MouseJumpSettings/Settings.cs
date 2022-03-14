@@ -20,6 +20,7 @@ namespace MouseJumpSettings
         private Task saveTask;
         private bool savePending;
         private Dictionary<string, LabelList> labelLists;
+        public LabelList selectedList;
 
         public IReadOnlyDictionary<string, LabelList> LabelLists => labelLists;
 

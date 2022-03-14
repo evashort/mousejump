@@ -5,6 +5,6 @@
         public EditList(Settings settings, string name) : base(settings, name)
         { }
 
-        public override string IconPath => IconPaths.Edit;
+        public override LabelOperation Operation => LabelOperation.Edit;
     }
 }
