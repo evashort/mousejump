@@ -70,7 +70,7 @@
                         <TextBlock Text="Input:" Margin="0,0,12,0"/>
                         <TextBlock Text="main" IsTextSelectionEnabled="True"/>
                     </StackPanel>
-                    <ListView x:Name="inputsView" Header="Inputs" ItemsSource="{x:Bind Inputs}" Visibility="{x:Bind SelectedIsInterleave, Converter={StaticResource VisibilityConverter}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionMode="Multiple" IsMultiSelectCheckBoxEnabled="True" Margin="12,12,12,12">
+                    <ListView x:Name="inputsView" Header="Inputs" ItemsSource="{x:Bind Inputs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{x:Bind SelectedIsInterleave, Converter={StaticResource VisibilityConverter}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionMode="Multiple" IsMultiSelectCheckBoxEnabled="True" SelectionChanged="InputsView_SelectionChanged" LayoutUpdated="InputsView_LayoutUpdated" Margin="12,12,12,12">
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">

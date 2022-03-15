@@ -21,6 +21,8 @@ namespace MouseJumpSettings.Views
                     settings.selectedList = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsInterleave)));
+                    shouldSelectInputs = true;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
                 }
             }
         }
@@ -88,10 +90,31 @@ namespace MouseJumpSettings.Views
 
         public IOrderedEnumerable<LabelList> Inputs
         {
-            get => from labelList in settings.LabelLists.Values
-                   where labelList != Selected
-                   orderby labelList.Name
-                   select labelList;
+            get
+            {
+                HashSet<string> ancestors = new();
+                Queue<string> fringe = new();
+                if (settings.selectedList != null) {
+                    fringe.Enqueue(settings.selectedList.Name);
+                }
+
+                while (fringe.TryPeek(out string child))
+                {
+                    fringe.Dequeue();
+                    if (ancestors.Add(child))
+                    {
+                        foreach (string parent in settings.GetLabelListParents(child))
+                        {
+                            fringe.Enqueue(parent);
+                        }
+                    }
+                }
+
+                return from labelList in settings.LabelLists.Values
+                       where !ancestors.Contains(labelList.Name)
+                       orderby labelList.Name
+                       select labelList;
+            }
             set { }
         }
 
@@ -134,6 +157,7 @@ namespace MouseJumpSettings.Views
         }
 
         private LabelList toBringIntoView;
+        private bool shouldSelectInputs;
 
         public event PropertyChangedEventHandler PropertyChanged;
 
@@ -150,6 +174,40 @@ namespace MouseJumpSettings.Views
             }
 
             toBringIntoView = null;
+        }
+
+        private void InputsView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (shouldSelectInputs) {
+                return;
+            }
+
+            settings.SetLabelListChildren(
+                settings.selectedList.Name,
+                inputsView.SelectedItems.Select(item => ((LabelList)item).Name));
+            surpressSelectedChange = true;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelListsGrouped)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
+            surpressSelectedChange = false;
+        }
+
+        private void InputsView_LayoutUpdated(object sender, object e)
+        {
+            if (!shouldSelectInputs)
+            {
+                return;
+            }
+
+            inputsView.DeselectRange(new(0, (uint)inputsView.Items.Count));
+            foreach (string child in settings.GetLabelListChildren(settings.selectedList.Name))
+            {
+                if (inputsView.ContainerFromItem(settings.LabelLists[child]) is ListViewItem item)
+                {
+                    item.IsSelected = true;
+                }
+            }
+
+            shouldSelectInputs = false;
         }
     }
 }

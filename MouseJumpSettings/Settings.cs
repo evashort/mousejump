@@ -215,6 +215,59 @@ namespace MouseJumpSettings
             };
         }
 
+        public void SetLabelListChildren(string parent, IEnumerable<string> children)
+        {
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            lock (this) {
+                switch (definition.GetNamedString(FieldOperation))
+                {
+                    case OperationEdit:
+                        definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(children.First()));
+                        break;
+                    case OperationUnion or OperationJoin:
+                        JsonArray inputs = definition.GetNamedArray(FieldInput);
+                        inputs.Clear();
+                        foreach (string child in children)
+                        {
+                            inputs.Add(JsonValue.CreateStringValue(child));
+                        }
+
+                        break;
+                    case OperationInterleave:
+                        JsonObject inputWeights = definition.GetNamedObject(FieldInput);
+                        List<string> toRemove = inputWeights.Keys.Except(children).ToList();
+                        foreach (string child in toRemove)
+                        {
+                            inputWeights.Remove(child);
+                        }
+
+                        JsonValue defaultWeightValue = JsonValue.CreateNumberValue(1);
+                        foreach (string child in children)
+                        {
+                            inputWeights.TryAdd(child, defaultWeightValue);
+                        }
+
+                        break;
+                }
+
+                Save();
+            }
+        }
+
+        public IEnumerable<string> GetLabelListParents(string child)
+        {
+            return from pair in Definitions
+            where pair.Value.GetObject().GetNamedString(FieldOperation) switch
+            {
+                OperationEdit => pair.Value.GetObject().GetNamedString(FieldInput) == child,
+                OperationUnion or OperationJoin
+                    => pair.Value.GetObject().GetNamedArray(FieldInput).Select(input => input.GetString()).Contains(child),
+                OperationInterleave => pair.Value.GetObject().GetNamedObject(FieldInput).ContainsKey(child),
+                _ => false,
+            }
+            select pair.Key;
+        }
+
         public Dictionary<string, int> GetLabelListDepths(string root)
         {
             Dictionary<string, int> depths = new();

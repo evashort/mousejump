@@ -57,8 +57,8 @@ namespace MouseJumpSettings
 
         public virtual LabelListGroup Group => LabelListGroup.FromDepth(Depth);
 
-        public event PropertyChangedEventHandler PropertyChanged;
-
         public override string ToString() => Name;
+
+        public event PropertyChangedEventHandler PropertyChanged;
     }
 }
