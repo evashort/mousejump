@@ -215,19 +215,29 @@ namespace MouseJumpSettings
             };
         }
 
-        public void SetLabelListChildren(string parent, IEnumerable<string> children)
+        public bool AddLabelListChild(string parent, string child)
         {
             JsonObject definition = Definitions.GetNamedObject(parent);
+            bool added = false;
             lock (this) {
                 switch (definition.GetNamedString(FieldOperation))
                 {
                     case OperationEdit:
-                        definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(children.First()));
+                        added = definition.GetNamedString(FieldInput) != child;
+                        if (added)
+                        {
+                            definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(child));
+                        }
+
                         break;
-                    case OperationUnion or OperationJoin:
+                    case OperationJoin:
+                        definition.GetNamedArray(FieldInput).Add(JsonValue.CreateStringValue(child));
+                        added = true;
+                        break;
+                    case OperationUnion:
                         JsonArray inputs = definition.GetNamedArray(FieldInput);
-                        inputs.Clear();
-                        foreach (string child in children)
+                        added = !(from inputValue in inputs select inputValue.GetString()).Contains(child);
+                        if (added)
                         {
                             inputs.Add(JsonValue.CreateStringValue(child));
                         }
@@ -235,16 +245,10 @@ namespace MouseJumpSettings
                         break;
                     case OperationInterleave:
                         JsonObject inputWeights = definition.GetNamedObject(FieldInput);
-                        List<string> toRemove = inputWeights.Keys.Except(children).ToList();
-                        foreach (string child in toRemove)
+                        added = !inputWeights.ContainsKey(child);
+                        if (added)
                         {
-                            inputWeights.Remove(child);
-                        }
-
-                        JsonValue defaultWeightValue = JsonValue.CreateNumberValue(1);
-                        foreach (string child in children)
-                        {
-                            inputWeights.TryAdd(child, defaultWeightValue);
+                            inputWeights.Add(child, JsonValue.CreateNumberValue(1));
                         }
 
                         break;
@@ -252,6 +256,8 @@ namespace MouseJumpSettings
 
                 Save();
             }
+
+            return added;
         }
 
         public IEnumerable<string> GetLabelListParents(string child)

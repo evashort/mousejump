@@ -21,7 +21,6 @@ namespace MouseJumpSettings.Views
                     settings.selectedList = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsInterleave)));
-                    shouldSelectInputs = true;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
                 }
             }
@@ -88,16 +87,21 @@ namespace MouseJumpSettings.Views
             set { }
         }
 
-        public IOrderedEnumerable<LabelList> Inputs
+        public IOrderedEnumerable<IGrouping<string, LabelList>> Inputs
         {
             get
             {
-                HashSet<string> ancestors = new();
-                Queue<string> fringe = new();
-                if (settings.selectedList != null) {
-                    fringe.Enqueue(settings.selectedList.Name);
+                if (settings.selectedList == null)
+                {
+                    return from labelList in Enumerable.Empty<LabelList>()
+                           group labelList by "" into grp
+                           orderby 1
+                           select grp;
                 }
 
+                HashSet<string> ancestors = new();
+                Queue<string> fringe = new();
+                fringe.Enqueue(settings.selectedList.Name);
                 while (fringe.TryPeek(out string child))
                 {
                     fringe.Dequeue();
@@ -110,10 +114,15 @@ namespace MouseJumpSettings.Views
                     }
                 }
 
+                HashSet<string> children = new(settings.GetLabelListChildren(settings.selectedList.Name));
                 return from labelList in settings.LabelLists.Values
                        where !ancestors.Contains(labelList.Name)
                        orderby labelList.Name
-                       select labelList;
+                       group labelList by (
+                       children.Contains(labelList.Name) ? "Selected" : "Unselected"
+                       ) into grp
+                       orderby grp.Key != "Selected"
+                       select grp;
             }
             set { }
         }
@@ -157,7 +166,7 @@ namespace MouseJumpSettings.Views
         }
 
         private LabelList toBringIntoView;
-        private bool shouldSelectInputs;
+        private LabelList inputToFocus;
 
         public event PropertyChangedEventHandler PropertyChanged;
 
@@ -176,38 +185,31 @@ namespace MouseJumpSettings.Views
             toBringIntoView = null;
         }
 
-        private void InputsView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void InputsView_ItemClick(object sender, ItemClickEventArgs e)
         {
-            if (shouldSelectInputs) {
-                return;
+            if (settings.selectedList != null && e.ClickedItem is LabelList labelList)
+            {
+                if (settings.AddLabelListChild(settings.selectedList.Name, labelList.Name))
+                {
+                    inputToFocus = labelList;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
+                }
             }
-
-            settings.SetLabelListChildren(
-                settings.selectedList.Name,
-                inputsView.SelectedItems.Select(item => ((LabelList)item).Name));
-            surpressSelectedChange = true;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelListsGrouped)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
-            surpressSelectedChange = false;
         }
 
         private void InputsView_LayoutUpdated(object sender, object e)
         {
-            if (!shouldSelectInputs)
+            if (inputToFocus == null)
             {
                 return;
             }
 
-            inputsView.DeselectRange(new(0, (uint)inputsView.Items.Count));
-            foreach (string child in settings.GetLabelListChildren(settings.selectedList.Name))
+            if (inputsView.ContainerFromItem(inputToFocus) is ListViewItem item)
             {
-                if (inputsView.ContainerFromItem(settings.LabelLists[child]) is ListViewItem item)
-                {
-                    item.IsSelected = true;
-                }
+                item.Focus(FocusState.Programmatic);
             }
 
-            shouldSelectInputs = false;
+            inputToFocus = null;
         }
     }
 }
