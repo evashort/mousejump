@@ -2,7 +2,7 @@
     x:Class="MouseJumpSettings.Views.Review"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:MouseJumpSettings.Views"
+    xmlns:local="using:MouseJumpSettings"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -16,7 +16,7 @@
             <RowDefinition Height="auto"/>
             <RowDefinition/>
         </Grid.RowDefinitions>
-        <NumberBox x:Name="indexBox" Grid.Row="0" Value="{x:Bind Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Minimum="-5" Maximum="0"/>
+        <NumberBox x:Name="indexBox" Grid.Row="0" Value="{x:Bind Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Minimum="-5" Maximum="0" NumberFormatter="{x:Bind local:NegativeIntFormatter.Instance}"/>
         <ListView Grid.Row="1" IsMultiSelectCheckBoxEnabled="True" SelectionMode="Multiple" ItemsSource="{Binding Source={StaticResource groupInfoCVS}}">
             <ListView.GroupStyle>
                 <GroupStyle>
@@ -28,7 +28,7 @@
                 </GroupStyle>
             </ListView.GroupStyle>
             <ListView.ItemTemplate>
-                <DataTemplate x:DataType="local:TestDataType">
+                <DataTemplate x:DataType="local:Views.TestDataType">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{x:Bind Name}"/>
                         <NumberBox/>

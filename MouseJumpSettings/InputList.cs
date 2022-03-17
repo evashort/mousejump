@@ -1,10 +1,13 @@
 ﻿using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 
 namespace MouseJumpSettings
 {
     public class InputList : NewList
     {
+        public override event PropertyChangedEventHandler PropertyChanged;
+
         public InputList(Settings settings, string name) : base(settings, name)
         { }
 

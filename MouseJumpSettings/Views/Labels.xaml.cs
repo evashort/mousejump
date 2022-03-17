@@ -20,7 +20,7 @@ namespace MouseJumpSettings.Views
                 {
                     settings.selectedList = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsInterleave)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsJoin)));
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
                 }
             }
@@ -47,9 +47,9 @@ namespace MouseJumpSettings.Views
             }
         }
 
-        private bool SelectedIsInterleave
+        private bool SelectedIsJoin
         {
-            get => Selected != null && Selected.Operation == LabelOperation.Interleave;
+            get => Selected != null && Selected.Operation == LabelOperation.Join;
             set { }
         }
 
@@ -87,40 +87,21 @@ namespace MouseJumpSettings.Views
             set { }
         }
 
-        public IOrderedEnumerable<IGrouping<string, LabelList>> Inputs
+        public IOrderedEnumerable<IGrouping<string, ILabelInput>> Inputs
         {
             get
             {
                 if (settings.selectedList == null)
                 {
-                    return from labelList in Enumerable.Empty<LabelList>()
+                    return from labelList in Enumerable.Empty<ILabelInput>()
                            group labelList by "" into grp
                            orderby 1
                            select grp;
                 }
 
-                HashSet<string> ancestors = new();
-                Queue<string> fringe = new();
-                fringe.Enqueue(settings.selectedList.Name);
-                while (fringe.TryPeek(out string child))
-                {
-                    fringe.Dequeue();
-                    if (ancestors.Add(child))
-                    {
-                        foreach (string parent in settings.GetLabelListParents(child))
-                        {
-                            fringe.Enqueue(parent);
-                        }
-                    }
-                }
-
-                HashSet<string> children = new(settings.GetLabelListChildren(settings.selectedList.Name));
-                return from labelList in settings.LabelLists.Values
-                       where !ancestors.Contains(labelList.Name)
-                       orderby labelList.Name
-                       group labelList by (
-                       children.Contains(labelList.Name) ? "Selected" : "Unselected"
-                       ) into grp
+                return from input in settings.selectedList.Inputs
+                       orderby -input.Index, input.AsList.Name
+                       group input by (input.IsInput ? "Selected" : "Unselected") into grp
                        orderby grp.Key != "Selected"
                        select grp;
             }
@@ -157,7 +138,7 @@ namespace MouseJumpSettings.Views
             lastSuffix = lastSuffix < 0 ? 0 : lastSuffix;
             InputList newList = new(settings, prefix + (lastSuffix + 1));
             newLists.Add(newList);
-            toBringIntoView = newList;
+            labelListToFocus = newList;
             surpressSelectedChange = true;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LabelListsGrouped)));
             surpressSelectedChange = false;
@@ -165,33 +146,33 @@ namespace MouseJumpSettings.Views
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Selected)));
         }
 
-        private LabelList toBringIntoView;
-        private LabelList inputToFocus;
+        private LabelList labelListToFocus;
+        private ILabelInput inputToFocus;
 
         public event PropertyChangedEventHandler PropertyChanged;
 
         private void LabelListsView_LayoutUpdated(object sender, object e)
         {
-            if (toBringIntoView == null)
+            if (labelListToFocus == null)
             {
                 return;
             }
 
-            if (labelListsView.ContainerFromItem(toBringIntoView) is ListViewItem item)
+            if (labelListsView.ContainerFromItem(labelListToFocus) is ListViewItem item)
             {
+                item.Focus(FocusState.Programmatic);
                 item.StartBringIntoView();
             }
 
-            toBringIntoView = null;
+            labelListToFocus = null;
         }
 
         private void InputsView_ItemClick(object sender, ItemClickEventArgs e)
         {
             if (settings.selectedList != null && e.ClickedItem is LabelList labelList)
             {
-                if (settings.AddLabelListChild(settings.selectedList.Name, labelList.Name))
-                {
-                    inputToFocus = labelList;
+                inputToFocus = settings.AddLabelListChild(settings.selectedList.Name, labelList.Name);
+                if (inputToFocus != null) {
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
                 }
             }
@@ -207,6 +188,7 @@ namespace MouseJumpSettings.Views
             if (inputsView.ContainerFromItem(inputToFocus) is ListViewItem item)
             {
                 item.Focus(FocusState.Programmatic);
+                item.StartBringIntoView();
             }
 
             inputToFocus = null;

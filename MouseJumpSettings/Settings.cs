@@ -201,6 +201,18 @@ namespace MouseJumpSettings
             return true;
         }
 
+        public int CountLabelListChildren(string parent)
+        {
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            return definition.GetNamedString(FieldOperation) switch
+            {
+                OperationEdit => 1,
+                OperationUnion or OperationJoin => definition.GetNamedArray(FieldInput).Count,
+                OperationInterleave => definition.GetNamedObject(FieldInput).Count,
+                _ => 0,
+            };
+        }
+
         public IEnumerable<string> GetLabelListChildren(string parent)
         {
             JsonObject definition = Definitions.GetNamedObject(parent);
@@ -215,7 +227,7 @@ namespace MouseJumpSettings
             };
         }
 
-        public bool AddLabelListChild(string parent, string child)
+        public ILabelInput AddLabelListChild(string parent, string child)
         {
             JsonObject definition = Definitions.GetNamedObject(parent);
             bool added = false;
@@ -257,7 +269,32 @@ namespace MouseJumpSettings
                 Save();
             }
 
-            return added;
+            if (added)
+            {
+                ILabelInput input = LabelLists[parent].AddInput(child);
+                return input;
+            }
+
+            return null;
+        }
+
+        public void MoveLabelListChild(string parent, int oldIndex, int newIndex)
+        {
+            if (oldIndex == newIndex)
+            {
+                return;
+            }
+
+            JsonArray inputs = Definitions.GetNamedObject(parent).GetNamedArray(FieldInput);
+            IJsonValue inputValue = inputs[oldIndex];
+            lock (this)
+            {
+                inputs.RemoveAt(oldIndex);
+                inputs.Insert(newIndex, inputValue);
+                Save();
+            }
+
+            LabelLists[parent].MoveInput(oldIndex, newIndex);
         }
 
         public IEnumerable<string> GetLabelListParents(string child)
@@ -272,6 +309,26 @@ namespace MouseJumpSettings
                 _ => false,
             }
             select pair.Key;
+        }
+
+        public HashSet<string> GetLableListAncestors(string root)
+        {
+            HashSet<string> ancestors = new();
+            Queue<string> fringe = new();
+            fringe.Enqueue(root);
+            while (fringe.TryPeek(out string child))
+            {
+                fringe.Dequeue();
+                if (ancestors.Add(child))
+                {
+                    foreach (string parent in GetLabelListParents(child))
+                    {
+                        fringe.Enqueue(parent);
+                    }
+                }
+            }
+
+            return ancestors;
         }
 
         public Dictionary<string, int> GetLabelListDepths(string root)

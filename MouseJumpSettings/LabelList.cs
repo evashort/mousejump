@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
+using Windows.Globalization.NumberFormatting;
 
 namespace MouseJumpSettings
 {
-    public abstract class LabelList : INotifyPropertyChanged
+    public abstract class LabelList : ILabelInput
     {
         public static LabelList Create(Settings settings, string name)
             => settings.GetLabelListOperation(name) switch
@@ -20,8 +22,11 @@ namespace MouseJumpSettings
                     typeof(LabelOperation)),
             };
 
-        protected readonly Settings settings;
+        public readonly Settings settings;
         protected string name;
+
+        public abstract event PropertyChangedEventHandler PropertyChanged;
+
         public virtual LabelOperation Operation {
             get => throw new NotImplementedException();
             set => throw new NotImplementedException();
@@ -42,10 +47,6 @@ namespace MouseJumpSettings
                 {
                     name = value;
                 }
-                else
-                {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
-                }
             }
         }
 
@@ -59,6 +60,27 @@ namespace MouseJumpSettings
 
         public override string ToString() => Name;
 
-        public event PropertyChangedEventHandler PropertyChanged;
+        public virtual IEnumerable<ILabelInput> Inputs => Enumerable.Empty<ILabelInput>();
+
+        public virtual ILabelInput AddInput(string child)
+        {
+            throw new NotImplementedException();
+        }
+
+        public virtual void MoveInput(int oldIndex, int newIndex)
+        {
+            throw new NotImplementedException();
+        }
+
+        public virtual LabelList AsList => this;
+
+        public virtual int Index { get => 0; set => throw new NotImplementedException(); }
+        public virtual int MinIndex { get => 0; set => throw new NotImplementedException(); }
+
+        public INumberFormatter2 IndexFormatter => NegativeIntFormatter.Instance;
+
+        public virtual double Weight { get => 1; set => throw new NotImplementedException(); }
+
+        public virtual bool IsInput => false;
     }
 }
