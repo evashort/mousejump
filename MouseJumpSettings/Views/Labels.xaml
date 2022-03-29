@@ -15,7 +15,7 @@
             </StackPanel>
         </DataTemplate>
         <CollectionViewSource x:Name="labelListSource" IsSourceGrouped="True" Source="{x:Bind LabelListsGrouped, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-        <CollectionViewSource x:Name="inputsSource" IsSourceGrouped="True" Source="{x:Bind Inputs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+        <CollectionViewSource x:Name="inputsSource" Source="{x:Bind PossibleInputs}"/>
         <local:VisibilityConverter x:Key="VisibilityConverter"/>
     </Page.Resources>
     <Grid VerticalAlignment="Stretch">

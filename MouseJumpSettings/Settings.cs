@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -20,7 +21,10 @@ namespace MouseJumpSettings
         private Task saveTask;
         private bool savePending;
         private Dictionary<string, LabelList> labelLists;
-        public LabelList selectedList;
+        private LabelList selectedList;
+        private readonly ObservableCollection<LabelList> inputs;
+        private readonly ObservableCollection<LabelList> nonInputs;
+        public readonly CombinedObservableCollection<LabelList> possibleInputs;
 
         public IReadOnlyDictionary<string, LabelList> LabelLists => labelLists;
 
@@ -120,24 +124,21 @@ namespace MouseJumpSettings
         private const string OperationUnion = "union";
         private const string OperationInterleave = "interleave";
         private const string OperationJoin = "join";
-        public LabelOperation GetLabelListOperation(string name)
-            => Definitions.GetNamedObject(name).GetNamedString(FieldOperation) switch
+        private LabelOperation OperationFromField(string field) => field switch
             {
                 OperationSplit => LabelOperation.Split,
                 OperationEdit => LabelOperation.Edit,
                 OperationUnion => LabelOperation.Union,
                 OperationInterleave => LabelOperation.Interleave,
                 OperationJoin => LabelOperation.Join,
-                _ => throw new ArgumentException("unknown operation"),
+                _ => throw new ArgumentException($"unknown operation {field}"),
             };
+
+        public LabelOperation GetLabelListOperation(string name)
+            => OperationFromField(Definitions.GetNamedObject(name).GetNamedString(FieldOperation));
 
         public bool RenameLabelList(string oldName, string newName)
         {
-            if (oldName == newName)
-            {
-                return true;
-            }
-
             JsonObject definitions = Definitions;
             if (definitions.ContainsKey(newName))
             {
@@ -164,12 +165,12 @@ namespace MouseJumpSettings
                             break;
                         case OperationUnion:
                         case OperationJoin:
-                            JsonArray inputs = definition.GetNamedArray(FieldInput);
-                            for (int i = 0; i < inputs.Count; i++)
+                            JsonArray inputArray = definition.GetNamedArray(FieldInput);
+                            for (int i = 0; i < inputArray.Count; i++)
                             {
-                                if (inputs.GetStringAt((uint)i) == oldName)
+                                if (inputArray.GetStringAt((uint)i) == oldName)
                                 {
-                                    inputs[i] = newNameValue;
+                                    inputArray[i] = newNameValue;
                                 }
                             }
 
@@ -222,79 +223,240 @@ namespace MouseJumpSettings
                 OperationUnion or OperationJoin => from inputValue
                                                    in definition.GetNamedArray(FieldInput)
                                                    select inputValue.GetString(),
-                OperationInterleave => definition.GetNamedObject(FieldInput).Keys,
+                OperationInterleave => from pair in definition.GetNamedObject(FieldInput)
+                                       orderby pair.Value.GetNumber() descending, pair.Key
+                                       select pair.Key,
                 _ => Enumerable.Empty<string>(),
             };
         }
 
-        public ILabelInput AddLabelListChild(string parent, string child)
+        public void AddLabelListInput(LabelList input)
+        {
+            int oldIndex = NonInputs.IndexOf(input);
+            if (oldIndex < 0)
+            {
+                throw new InvalidOperationException($"could not add input {input.Name} to {SelectedList.Name}");
+            }
+
+            LabelOperation operation = AddLabelListChild(SelectedList.Name, input.Name);
+
+            int newIndex = Inputs.Count;
+            if (operation == LabelOperation.Interleave)
+            {
+                newIndex = GetLabelListChildren(SelectedList.Name).TakeWhile(sibling => sibling != input.Name).Count();
+            }
+
+            possibleInputs.MoveBetweenSections(nonInputs, oldIndex, inputs, newIndex);
+            if (operation == LabelOperation.Edit)
+            {
+                LabelList oldInput = Inputs[0];
+                int outIndex = 0;
+                foreach (LabelList nonInput in NonInputs)
+                {
+                    if (nonInput.Name >= input.Name) { break; }
+                    outIndex++;
+                }
+
+                // subtract 1 because the whole array shifts when we remove
+                // the old input from index zero
+                possibleInputs.MoveBetweenSections(inputs, 0, nonInputs, outIndex);
+                oldInput.IsInputChanged();
+            }
+            else
+            {
+                for (int i = 0; i < Inputs.Count; i++)
+                {
+                    if (i != newIndex)
+                    {
+                        Inputs[i].MinIndexChanged();
+                    }
+                }
+
+                for (int i = newIndex + 1; i < InputCount; i++)
+                {
+                    Inputs[i].IndexChanged();
+                }
+
+                if (operation == LabelOperation.Join)
+                {
+                    nonInputs.Insert(oldIndex, new LabelList(this, input.Name));
+                }
+            }
+        }
+
+        private LabelOperation AddLabelListChild(string parent, string name)
         {
             JsonObject definition = Definitions.GetNamedObject(parent);
-            bool added = false;
-            lock (this) {
-                switch (definition.GetNamedString(FieldOperation))
+            LabelOperation operation = OperationFromField(definition.GetNamedString(FieldOperation));
+            lock (this)
+            {
+                switch (operation)
                 {
-                    case OperationEdit:
-                        added = definition.GetNamedString(FieldInput) != child;
-                        if (added)
-                        {
-                            definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(child));
-                        }
-
+                    case LabelOperation.Edit:
+                        definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(child));
                         break;
-                    case OperationJoin:
+                    case LabelOperation.Join:
+                    case LabelOperation.Union:
                         definition.GetNamedArray(FieldInput).Add(JsonValue.CreateStringValue(child));
-                        added = true;
                         break;
-                    case OperationUnion:
-                        JsonArray inputs = definition.GetNamedArray(FieldInput);
-                        added = !(from inputValue in inputs select inputValue.GetString()).Contains(child);
-                        if (added)
-                        {
-                            inputs.Add(JsonValue.CreateStringValue(child));
-                        }
-
-                        break;
-                    case OperationInterleave:
-                        JsonObject inputWeights = definition.GetNamedObject(FieldInput);
-                        added = !inputWeights.ContainsKey(child);
-                        if (added)
-                        {
-                            inputWeights.Add(child, JsonValue.CreateNumberValue(1));
-                        }
-
+                    case LabelOperation.Interleave:
+                        definition.GetNamedObject(FieldInput).Add(child, JsonValue.CreateNumberValue(1));
                         break;
                 }
 
                 Save();
             }
 
-            if (added)
-            {
-                ILabelInput input = LabelLists[parent].AddInput(child);
-                return input;
-            }
-
-            return null;
+            return operation;
         }
 
-        public void MoveLabelListChild(string parent, int oldIndex, int newIndex)
+        public void MoveLabelListInput(LabelList input, int newIndex)
         {
+            int oldIndex = Inputs.IndexOf(input);
+            if (oldIndex < 0)
+            {
+                throw new InvalidOperationException($"{input.Name} is not an input to {SelectedList.Name}");
+            }
+
             if (oldIndex == newIndex)
             {
                 return;
             }
 
-            JsonArray inputs = Definitions.GetNamedObject(parent).GetNamedArray(FieldInput);
-            IJsonValue inputValue = inputs[oldIndex];
+            MoveLabelListChild(SelectedList.Name, oldIndex, newIndex);
+
+            inputs.Move(oldIndex, newIndex);
+            // don't include newIndex because that LabelList initiated the
+            // change. it already knows its new index.
+            int minIndex = oldIndex < newIndex ? oldIndex : newIndex + 1;
+            int maxIndex = oldIndex > newIndex ? oldIndex : newIndex - 1;
+            for (int i = minIndex; i <= maxIndex; i++)
+            {
+                Inputs[i].IndexChanged();
+            }
+        }
+
+        private void MoveLabelListChild(string parent, int oldIndex, int newIndex)
+        {
+            JsonArray inputArray = Definitions.GetNamedObject(parent).GetNamedArray(FieldInput);
+            IJsonValue inputValue = inputArray[oldIndex];
             lock (this)
             {
-                inputs.RemoveAt(oldIndex);
-                inputs.Insert(newIndex, inputValue);
+                inputArray.RemoveAt(oldIndex);
+                inputArray.Insert(newIndex, inputValue);
+                Save();
+            }
+        }
+
+        public async void RemoveLabelListInput(LabelList input)
+        {
+            int oldIndex = Inputs.IndexOf(input);
+            if (oldIndex < 0)
+            {
+                throw new InvalidOperationException($"{input.Name} is not an input to {SelectedList.Name}");
+            }
+
+            RemoveLabelListChild(SelectedList.Name, input.Name, oldIndex);
+
+            int newIndex = 0;
+            foreach (LabelList nonInput in NonInputs)
+            {
+                if (nonInput.Name >= input.Name) { break; }
+                newIndex++;
+            }
+
+            possibleInputs.MoveBetweenSections(inputs, oldIndex, nonInputs, newIndex);
+            for (int i = oldIndex; i < Inputs.Count; i++)
+            {
+                Inputs[i].IndexChanged();
+            }
+
+            foreach (LabelList sibling in Inputs)
+            {
+                sibling.MinIndexChanged();
+            }
+
+            if (operation == LabelOperation.Join)
+            {
+                nonInputs.RemoveAt(newIndex + 1);
+            }
+        }
+
+        private void RemoveLabelListChild(string parent, string name, int index)
+        {
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            LabelOperation operation = OperationFromField(definition.GetNamedString(FieldOperation));
+            lock (this)
+            {
+                switch (operation)
+                {
+                    case LabelOperation.Join:
+                    case LabelOperation.Union:
+                        definition.GetNamedArray(FieldInput).RemoveAt(index);
+                        break;
+                    case LabelOperation.Interleave:
+                        definition.GetNamedObject(FieldInput).Remove(name);
+                        break;
+                }
+
+                Save();
+            }
+        }
+
+        public double GetLabelListInputWeight(LabelList input)
+        {
+            return GetLabelListChildWeight(SelectedList.Name, input.Name);
+        }
+
+        private double GetLabelListChildWeight(string parent, string name)
+        {
+            JsonObject definition = Definitions.GetNamedObject(parent);
+            LabelOperation operation = OperationFromField(definition.GetNamedString(FieldOperation));
+            if (operation != LabelOperation.Interleave)
+            {
+                return 1;
+            }
+
+            return definition.GetNamedObject(FieldInput).GetNamedNumber(name);
+        }
+
+        public void SetLabelListInputWeight(LabelList input, double weight)
+        {
+            if (!SetLabelListChildWeight(SelectedList.Name, input.Name, weight))
+            {
+                return;
+            }
+
+            int oldIndex = Inputs.IndexOf(input);
+            int newIndex = GetLabelListChildren(SelectedList.Name).TakeWhile(sibling => sibling != input.Name).Count();
+            if (newIndex == oldIndex)
+            {
+                return;
+            }
+
+            int minIndex = Math.Min(oldIndex, newIndex);
+            int maxIndex = Math.Max(oldIndex, newIndex);
+            for (int i = minIndex; i <= maxIndex; i++)
+            {
+                Inputs[i].IndexChanged();
+            }
+        }
+
+        private bool SetLabelListChildWeight(string parent, string name, double weight)
+        {
+            JsonObject inputWeights = Definitions.GetNamedObject(parent).GetNamedObject(FieldInput);
+            if (inputWeights.GetNamedNumber(name) == weight)
+            {
+                return false;
+            }
+
+            lock (this)
+            {
+                inputWeights[name] = JsonValue.CreateNumberValue(weight);
                 Save();
             }
 
-            LabelLists[parent].MoveInput(oldIndex, newIndex);
+            return true;
         }
 
         public IEnumerable<string> GetLabelListParents(string child)
@@ -350,6 +512,56 @@ namespace MouseJumpSettings
             return depths;
         }
 
+        public ReadOnlyObservableCollection<LabelList> Inputs => inputs;
+        public ReadOnlyObservableCollection<LabelList> NonInputs => nonInputs;
+
+        public LabelList SelectedList {
+            get => selectedList;
+            set {
+                if (value == null)
+                {
+                    inputs.Clear();
+                    nonInputs.Clear();
+                    selectedList = value;
+                    return;
+                }
+
+                if (value.Name == selectedList.Name)
+                {
+                    return;
+                }
+
+                inputs.Clear();
+                nonInputs.Clear();
+                selectedList = value;
+                HashSet<string> inputNames = new();
+                foreach (string name in GetLabelListChildren(value.Name))
+                {
+                    if (inputNames.Add(name))
+                    {
+                        inputs.Add(LabelLists[name]);
+                    }
+                    else
+                    {
+                        inputs.Add(LabelList.Create(this, name));
+                    }
+                }
+
+                bool addAnyway = GetLabelListOperation(name) == LabelOperation.Join;
+                foreach (LabelList input in LabelLists.Values.OrderBy(labelList => labelList.Name))
+                {
+                    if (!inputNames.Contains(input.Name))
+                    {
+                        nonInputs.Add(input);
+                    }
+                    else if (addAnyway)
+                    {
+                        nonInputs.Add(new LabelList(this, name));
+                    }
+                }
+            }
+        }
+
         public string LabelSource
         {
             get
@@ -400,7 +612,11 @@ namespace MouseJumpSettings
         {
             string text = File.ReadAllText(path, encoding);
             json = JsonObject.Parse(text);
-            labelLists = Definitions.Keys.ToDictionary(name => name, name => LabelList.Create(this, name));
+            labelLists = Definitions.Keys.ToDictionary(name => name, name => new LabelList(this, name));
+            inputs = new();
+            nonInputs = new();
+            possibleInputs = new(
+                new ObservableCollection<LabelList>[]{ Inputs, NonInputs });
         }
 
         private static Color ParseColor(string text)

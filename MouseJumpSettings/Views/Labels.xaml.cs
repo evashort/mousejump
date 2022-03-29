@@ -13,15 +13,14 @@ namespace MouseJumpSettings.Views
 
         private bool surpressSelectedChange = false;
         private LabelList Selected {
-            get => settings.selectedList;
+            get => settings.SelectedList;
             set
             {
                 if (!surpressSelectedChange)
                 {
-                    settings.selectedList = value;
+                    settings.SelectedList = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsJoin)));
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
                 }
             }
         }
@@ -87,26 +86,7 @@ namespace MouseJumpSettings.Views
             set { }
         }
 
-        public IOrderedEnumerable<IGrouping<string, ILabelInput>> Inputs
-        {
-            get
-            {
-                if (settings.selectedList == null)
-                {
-                    return from labelList in Enumerable.Empty<ILabelInput>()
-                           group labelList by "" into grp
-                           orderby 1
-                           select grp;
-                }
-
-                return from input in settings.selectedList.Inputs
-                       orderby -input.Index, input.AsList.Name
-                       group input by (input.IsInput ? "Selected" : "Unselected") into grp
-                       orderby grp.Key != "Selected"
-                       select grp;
-            }
-            set { }
-        }
+        public CombinedObservableCollection PossibleInputs => settings.possibleInputs;
 
         public Labels()
         {
@@ -169,12 +149,10 @@ namespace MouseJumpSettings.Views
 
         private void InputsView_ItemClick(object sender, ItemClickEventArgs e)
         {
-            if (settings.selectedList != null && e.ClickedItem is LabelList labelList)
+            if (settings.SelectedList != null && e.ClickedItem is LabelList labelList)
             {
-                inputToFocus = settings.AddLabelListChild(settings.selectedList.Name, labelList.Name);
-                if (inputToFocus != null) {
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Inputs)));
-                }
+                inputToFocus = labelList;
+                labelList.IsInput = !labelList.IsInput;
             }
         }
 
@@ -187,7 +165,6 @@ namespace MouseJumpSettings.Views
 
             if (inputsView.ContainerFromItem(inputToFocus) is ListViewItem item)
             {
-                item.Focus(FocusState.Programmatic);
                 item.StartBringIntoView();
             }
 

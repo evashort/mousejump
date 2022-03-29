@@ -2,34 +2,19 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using Windows.Globalization.NumberFormatting;
 
 namespace MouseJumpSettings
 {
-    public abstract class LabelList : ILabelInput
+    public class LabelList : INotifyPropertyChanged
     {
-        public static LabelList Create(Settings settings, string name)
-            => settings.GetLabelListOperation(name) switch
-            {
-                LabelOperation.Split => new BasicList(settings, name),
-                LabelOperation.Edit => new EditList(settings, name),
-                LabelOperation.Union => new UnionList(settings, name),
-                LabelOperation.Interleave => new InterleaveList(settings, name),
-                LabelOperation.Join => new JoinList(settings, name),
-                _ => throw new InvalidEnumArgumentException(
-                    "operation",
-                    (int)settings.GetLabelListOperation(name),
-                    typeof(LabelOperation)),
-            };
-
         public readonly Settings settings;
         protected string name;
 
-        public abstract event PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler PropertyChanged;
 
         public virtual LabelOperation Operation {
-            get => throw new NotImplementedException();
-            set => throw new NotImplementedException();
+            get => settings.GetLabelListOperation(name);
+            set => throw new NotSupportedException();
         }
 
         public LabelList(Settings settings, string name)
@@ -46,6 +31,8 @@ namespace MouseJumpSettings
                 if (settings.RenameLabelList(name, value))
                 {
                     name = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Title)));
                 }
             }
         }
@@ -60,27 +47,72 @@ namespace MouseJumpSettings
 
         public override string ToString() => Name;
 
-        public virtual IEnumerable<ILabelInput> Inputs => Enumerable.Empty<ILabelInput>();
-
-        public virtual ILabelInput AddInput(string child)
-        {
-            throw new NotImplementedException();
+        public virtual int Index {
+            get {
+                int index = settings.Inputs.IndexOf(this);
+                return index >= 0 ? -index : 0;
+            }
+            set => settings.MoveLabelListInput(this, -value);
         }
 
-        public virtual void MoveInput(int oldIndex, int newIndex)
-        {
-            throw new NotImplementedException();
+        public virtual int MinIndex {
+            get => 1 - settings.Inputs.Count;
+            set => throw new NotSupportedException();
         }
 
-        public virtual LabelList AsList => this;
+        public virtual double Weight {
+            get => settings.GetLabelListInputWeight(this);
+            set => settings.SetLabelListInputWeight(this, value);
+        }
 
-        public virtual int Index { get => 0; set => throw new NotImplementedException(); }
-        public virtual int MinIndex { get => 0; set => throw new NotImplementedException(); }
+        public virtual bool IsInput {
+            get => settings.Inputs.Contains(this);
+            set {
+                if (IsInput == value)
+                {
+                    return;
+                }
 
-        public INumberFormatter2 IndexFormatter => NegativeIntFormatter.Instance;
+                if (value)
+                {
+                    settings.AddLabelListInput(this);
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinIndex)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Index)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInput)));
+                }
+                else
+                {
+                    settings.RemoveLabelListInput(this);
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInput)));
+                    // ensure index number box gets set to zero so that the
+                    // number box doesn't try to set the index to the new
+                    // MinIndex next time this label list is added as an input
+                    // if the number of inputs is smaller than it was before
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Index)));
+                }
+            }
+        }
 
-        public virtual double Weight { get => 1; set => throw new NotImplementedException(); }
+        public virtual void IndexChanged()
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Index)));
+        }
 
-        public virtual bool IsInput => false;
+        public virtual void MinIndexChanged()
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MinIndex)));
+        }
+
+        public virtual void IsInputChanged()
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsInput)));
+        }
+
+        public virtual void DepthChanged()
+        {
+            // TODO: call this!
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Depth)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Group)));
+        }
     }
 }
