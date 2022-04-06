@@ -313,12 +313,7 @@ namespace MouseJumpSettings
         public void MoveLabelListInput(LabelList input, int newIndex)
         {
             int oldIndex = Inputs.IndexOf(input);
-            if (oldIndex < 0)
-            {
-                throw new InvalidOperationException($"{input.Name} is not an input to {SelectedList.Name}");
-            }
-
-            if (oldIndex == newIndex)
+            if (oldIndex < 0 || oldIndex == newIndex)
             {
                 return;
             }
@@ -328,8 +323,8 @@ namespace MouseJumpSettings
             inputs.Move(oldIndex, newIndex);
             // don't include newIndex because that LabelList initiated the
             // change. it already knows its new index.
-            int minIndex = oldIndex < newIndex ? oldIndex : newIndex + 1;
-            int maxIndex = oldIndex > newIndex ? oldIndex : newIndex - 1;
+            int minIndex = newIndex < oldIndex ? newIndex + 1 : oldIndex;
+            int maxIndex = newIndex > oldIndex ? newIndex - 1 : oldIndex;
             for (int i = minIndex; i <= maxIndex; i++)
             {
                 Inputs[i].IndexChanged();

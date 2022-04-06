@@ -45,7 +45,7 @@ namespace MouseJumpSettings
 
         public virtual LabelListGroup Group => LabelListGroup.FromDepth(Depth);
 
-        public override string ToString() => Name;
+        public override string ToString() => Title;
 
         public virtual int Index {
             get {
@@ -92,6 +92,12 @@ namespace MouseJumpSettings
                 }
             }
         }
+
+        public virtual bool IndexVisible => IsInput && settings.SelectedList.Operation switch
+        {
+            LabelOperation.Union or LabelOperation.Join => true,
+            _ => false,
+        };
 
         public virtual void IndexChanged()
         {

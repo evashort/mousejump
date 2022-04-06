@@ -20,7 +20,7 @@ namespace MouseJumpSettings.Views
                 {
                     settings.SelectedList = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedName)));
-                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedIsJoin)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(InputsVisible)));
                 }
             }
         }
@@ -46,9 +46,13 @@ namespace MouseJumpSettings.Views
             }
         }
 
-        private bool SelectedIsJoin
+        private bool InputsVisible
         {
-            get => Selected != null && Selected.Operation == LabelOperation.Join;
+            get => Selected != null && Selected.Operation switch
+            {
+                LabelOperation.Union or LabelOperation.Join or LabelOperation.Interleave => true,
+                _ => false,
+            };
             set { }
         }
 

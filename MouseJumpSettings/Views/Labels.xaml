@@ -71,7 +71,7 @@
                         <TextBlock Text="Input:" Margin="0,0,12,0"/>
                         <TextBlock Text="main" IsTextSelectionEnabled="True"/>
                     </StackPanel>
-                    <ListView x:Name="inputsView" Header="Inputs" SelectionMode="None" IsItemClickEnabled="True" ItemsSource="{Binding Source={StaticResource inputsSource}}" Visibility="{x:Bind SelectedIsJoin, Converter={StaticResource VisibilityConverter}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemClick="InputsView_ItemClick" LayoutUpdated="InputsView_LayoutUpdated" Margin="12">
+                    <ListView x:Name="inputsView" Header="Inputs" SelectionMode="None" IsItemClickEnabled="True" ItemsSource="{Binding Source={StaticResource inputsSource}}" Visibility="{x:Bind InputsVisible, Converter={StaticResource VisibilityConverter}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemClick="InputsView_ItemClick" LayoutUpdated="InputsView_LayoutUpdated" Margin="12">
                         <ListView.GroupStyle>
                             <GroupStyle>
                                 <GroupStyle.HeaderTemplate>
@@ -86,7 +86,7 @@
                                 <StackPanel Orientation="Horizontal">
                                     <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
                                     <TextBlock Text="{Binding Title}"/>
-                                    <NumberBox Header="Index" Minimum="{Binding MinIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="0" Value="{Binding Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SpinButtonPlacementMode="Inline" Visibility="{Binding IsInput, Converter={StaticResource VisibilityConverter}}"/>
+                                    <NumberBox Header="Index" Minimum="{Binding MinIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="0" Value="{Binding Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SpinButtonPlacementMode="Inline" Visibility="{Binding IndexVisible, Converter={StaticResource VisibilityConverter}}"/>
                                     <!--NumberFormatter="{Binding IndexFormatter}"-->
                                 </StackPanel>
                             </DataTemplate>
