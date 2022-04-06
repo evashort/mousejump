@@ -253,7 +253,7 @@ namespace MouseJumpSettings
                 int outIndex = 0;
                 foreach (LabelList nonInput in NonInputs)
                 {
-                    if (nonInput.Name >= input.Name) { break; }
+                    if (string.Compare(nonInput.Name, input.Name) >= 0) { break; }
                     outIndex++;
                 }
 
@@ -272,7 +272,7 @@ namespace MouseJumpSettings
                     }
                 }
 
-                for (int i = newIndex + 1; i < InputCount; i++)
+                for (int i = newIndex + 1; i < inputs.Count; i++)
                 {
                     Inputs[i].IndexChanged();
                 }
@@ -293,14 +293,14 @@ namespace MouseJumpSettings
                 switch (operation)
                 {
                     case LabelOperation.Edit:
-                        definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(child));
+                        definition.SetNamedValue(FieldInput, JsonValue.CreateStringValue(name));
                         break;
                     case LabelOperation.Join:
                     case LabelOperation.Union:
-                        definition.GetNamedArray(FieldInput).Add(JsonValue.CreateStringValue(child));
+                        definition.GetNamedArray(FieldInput).Add(JsonValue.CreateStringValue(name));
                         break;
                     case LabelOperation.Interleave:
-                        definition.GetNamedObject(FieldInput).Add(child, JsonValue.CreateNumberValue(1));
+                        definition.GetNamedObject(FieldInput).Add(name, JsonValue.CreateNumberValue(1));
                         break;
                 }
 
@@ -348,7 +348,7 @@ namespace MouseJumpSettings
             }
         }
 
-        public async void RemoveLabelListInput(LabelList input)
+        public void RemoveLabelListInput(LabelList input)
         {
             int oldIndex = Inputs.IndexOf(input);
             if (oldIndex < 0)
@@ -356,12 +356,12 @@ namespace MouseJumpSettings
                 throw new InvalidOperationException($"{input.Name} is not an input to {SelectedList.Name}");
             }
 
-            RemoveLabelListChild(SelectedList.Name, input.Name, oldIndex);
+            LabelOperation operation = RemoveLabelListChild(SelectedList.Name, input.Name, oldIndex);
 
             int newIndex = 0;
             foreach (LabelList nonInput in NonInputs)
             {
-                if (nonInput.Name >= input.Name) { break; }
+                if (string.Compare(nonInput.Name, input.Name) >= 0) { break; }
                 newIndex++;
             }
 
@@ -382,7 +382,7 @@ namespace MouseJumpSettings
             }
         }
 
-        private void RemoveLabelListChild(string parent, string name, int index)
+        private LabelOperation RemoveLabelListChild(string parent, string name, int index)
         {
             JsonObject definition = Definitions.GetNamedObject(parent);
             LabelOperation operation = OperationFromField(definition.GetNamedString(FieldOperation));
@@ -401,6 +401,8 @@ namespace MouseJumpSettings
 
                 Save();
             }
+
+            return operation;
         }
 
         public double GetLabelListInputWeight(LabelList input)
@@ -512,26 +514,26 @@ namespace MouseJumpSettings
             return depths;
         }
 
-        public ReadOnlyObservableCollection<LabelList> Inputs => inputs;
-        public ReadOnlyObservableCollection<LabelList> NonInputs => nonInputs;
+        public ObservableCollection<LabelList> Inputs => inputs;
+        public ObservableCollection<LabelList> NonInputs => nonInputs;
 
         public LabelList SelectedList {
             get => selectedList;
             set {
                 if (value == null)
                 {
-                    inputs.Clear();
+                    ClearInputs();
                     nonInputs.Clear();
                     selectedList = value;
                     return;
                 }
 
-                if (value.Name == selectedList.Name)
+                if (selectedList != null && value.Name == selectedList.Name)
                 {
                     return;
                 }
 
-                inputs.Clear();
+                ClearInputs();
                 nonInputs.Clear();
                 selectedList = value;
                 HashSet<string> inputNames = new();
@@ -540,14 +542,15 @@ namespace MouseJumpSettings
                     if (inputNames.Add(name))
                     {
                         inputs.Add(LabelLists[name]);
+                        LabelLists[name].IsInputChanged();
                     }
                     else
                     {
-                        inputs.Add(LabelList.Create(this, name));
+                        inputs.Add(new(this, name));
                     }
                 }
 
-                bool addAnyway = GetLabelListOperation(name) == LabelOperation.Join;
+                bool addAnyway = GetLabelListOperation(value.Name) == LabelOperation.Join;
                 foreach (LabelList input in LabelLists.Values.OrderBy(labelList => labelList.Name))
                 {
                     if (!inputNames.Contains(input.Name))
@@ -556,9 +559,19 @@ namespace MouseJumpSettings
                     }
                     else if (addAnyway)
                     {
-                        nonInputs.Add(new LabelList(this, name));
+                        nonInputs.Add(new(this, input.Name));
                     }
                 }
+            }
+        }
+
+        private void ClearInputs()
+        {
+            IEnumerable<LabelList> oldInputs = inputs.ToArray();
+            inputs.Clear();
+            foreach (LabelList input in oldInputs)
+            {
+                input.IsInputChanged();
             }
         }
 
@@ -606,6 +619,10 @@ namespace MouseJumpSettings
                 defaultFontSize = -0.75 * metrics.lfMessageFont.lfHeight;
                 defaultFont = metrics.lfMessageFont.lfFaceName;
             }
+
+            inputs = new();
+            nonInputs = new();
+            possibleInputs = new(new ObservableCollection<LabelList>[] { Inputs, NonInputs });
         }
 
         public void Load()
@@ -613,10 +630,6 @@ namespace MouseJumpSettings
             string text = File.ReadAllText(path, encoding);
             json = JsonObject.Parse(text);
             labelLists = Definitions.Keys.ToDictionary(name => name, name => new LabelList(this, name));
-            inputs = new();
-            nonInputs = new();
-            possibleInputs = new(
-                new ObservableCollection<LabelList>[]{ Inputs, NonInputs });
         }
 
         private static Color ParseColor(string text)

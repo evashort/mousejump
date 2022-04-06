@@ -10,13 +10,14 @@ namespace MouseJumpSettings
 {
     public class CombinedObservableCollection<T> : INotifyCollectionChanged, INotifyPropertyChanged, ICollection<T>, IEnumerable<T>, IList<T>, IReadOnlyCollection<T>, IReadOnlyList<T>, IList
     {
-        public ReadOnlyCollection<ReadOnlyObservableCollection<T>> Sections { get; private set; }
-        public CombinedObservableCollection(IEnumerable<ReadOnlyObservableCollection<T>> sections) {
-            Sections = sections.ToList();
-            foreach (ReadOnlyObservableCollection<T> section in Sections)
+        public ReadOnlyCollection<ObservableCollection<T>> Sections { get; private set; }
+        public CombinedObservableCollection(IEnumerable<ObservableCollection<T>> sections)
+        {
+            Sections = sections.ToList().AsReadOnly();
+            foreach (ObservableCollection<T> section in Sections)
             {
                 section.CollectionChanged += Section_CollectionChanged;
-                section.PropertyChanged += Section_PropertyChanged;
+                ((INotifyPropertyChanged)section).PropertyChanged += Section_PropertyChanged;
             }
         }
 
@@ -26,7 +27,7 @@ namespace MouseJumpSettings
             get
             {
                 int innerIndex = index;
-                foreach (ReadOnlyObservableCollection<T> section in Sections)
+                foreach (ObservableCollection<T> section in Sections)
                 {
                     if (innerIndex < section.Count)
                     {
@@ -38,25 +39,26 @@ namespace MouseJumpSettings
 
                 throw new ArgumentOutOfRangeException(nameof(index), index, "greater than Count");
             }
+            set => throw new NotSupportedException();
         }
 
-        public IList<T> Items => this;
-        bool Contains(T value) => Sections.Select(section => section.Contains(value)).Any();
-        void CopyTo(T[] array, int index)
+        public bool Contains(T value) => Sections.Select(section => section.Contains(value)).Any();
+        public void CopyTo(T[] array, int arrayIndex)
         {
             foreach (ICollection<T> section in Sections)
             {
-                section.CopyTo(array, index);
-                index += section.Count;
+                section.CopyTo(array, arrayIndex);
+                arrayIndex += section.Count;
             }
         }
 
         public IEnumerator<T> GetEnumerator() => Sections.SelectMany(section => section).GetEnumerator();
-        public IndexOf(T value)
+        public int IndexOf(T item)
         {
             int index = 0;
-            foreach (IList<T> section in Sections) {
-                int innerIndex = section.IndexOf(value);
+            foreach (IList<T> section in Sections)
+            {
+                int innerIndex = section.IndexOf(item);
                 if (innerIndex >= 0)
                 {
                     return index + innerIndex;
@@ -68,11 +70,9 @@ namespace MouseJumpSettings
             return -1;
         }
 
-        protected virtual void OnCollectionChanged(NotifyCollectionChangedEventArgs args) => CollectionChanged?.Invoke(this, args);
-        protected virtual void OnPropertyChanged(PropertyChangedEventArgs args) => PropertyChanged?.Invoke(this, args);
-        protected virtual event NotifyCollectionChangedEventHandler? CollectionChanged;
-        protected virtual event PropertyChangedEventHandler? PropertyChanged;
-        public void ICollection.CopyTo(Array array, int index)
+        public event NotifyCollectionChangedEventHandler CollectionChanged;
+        public event PropertyChangedEventHandler PropertyChanged;
+        public void CopyTo(Array array, int index)
         {
             foreach (ICollection section in Sections)
             {
@@ -81,20 +81,20 @@ namespace MouseJumpSettings
             }
         }
 
-        public bool ICollection.IsSynchronized => false;
-        public object ICollection.SyncRoot => this;
-        public void ICollection<T>.Add(T value) => throw new NotSupportedException();
-        public void ICollection<T>.Clear() => throw new NotSupportedException();
-        public bool ICollection<T>.IsReadOnly => true;
-        public bool ICollection<T>.Remove(T value) => throw new NotSupportedException();
-        public IEnumerator IEnumerable.GetEnumerator() => (IEnumerator)GetEnumerator();
-        public int IList.Add(object value) => throw new NotSupportedException();
-        public void IList.Clear() => throw new NotSupportedException();
-        public bool IList.Contains(object value) => Sections.Select(section => section.Contains(value)).Any();
-        public int IList.IndexOf(object value)
+        public bool IsSynchronized => false;
+        public object SyncRoot => this;
+        public void Add(T item) => throw new NotSupportedException();
+        public void Clear() => throw new NotSupportedException();
+        public bool IsReadOnly => true;
+        public bool Remove(T value) => throw new NotSupportedException();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+        public int Add(object value) => throw new NotSupportedException();
+        public bool Contains(object value) => Sections.Select(section => ((IList)section).Contains(value)).Any();
+        public int IndexOf(object value)
         {
             int index = 0;
-            foreach (IList section in Sections) {
+            foreach (IList section in Sections)
+            {
                 int innerIndex = section.IndexOf(value);
                 if (innerIndex >= 0)
                 {
@@ -107,26 +107,17 @@ namespace MouseJumpSettings
             return -1;
         }
 
-        public int IList.Insert(int index, object value) => throw new NotSupportedException();
-
-        public bool IList.IsFixedSize => false;
-        public bool IList.IsReadOnly => true;
-        public object? IList.this[int index]
+        public void Insert(int index, object value) => throw new NotSupportedException();
+        public bool IsFixedSize => false;
+        object IList.this[int index]
         {
             get => this[index];
             set => throw new NotSupportedException();
         }
 
-        public void IList.Remove(object value) => throw new NotSupportedException();
-        public void IList.RemoveAt(int index) => throw new NotSupportedException();
-        public void IList<T>.Insert(int index, object value) => throw new NotSupportedException();
-        public T IList<T>.this[int index]
-        {
-            get => this[index];
-            set => throw new NotSupportedException();
-        }
-
-        public void IList<T>.RemoveAt(int index) => throw new NotSupportedException();
+        public void Remove(object value) => throw new NotSupportedException();
+        public void RemoveAt(int index) => throw new NotSupportedException();
+        public void Insert(int index, T item) => throw new NotSupportedException();
 
         public void MoveBetweenSections(ObservableCollection<T> oldSection, int oldInnerIndex, ObservableCollection<T> newSection, int newInnerIndex)
         {
@@ -146,30 +137,30 @@ namespace MouseJumpSettings
             T value = oldSection[oldInnerIndex];
 
             oldSection.CollectionChanged -= Section_CollectionChanged;
-            oldSection.PropertyChanged -= Section_PropertyChanged;
+            ((INotifyPropertyChanged)oldSection).PropertyChanged -= Section_PropertyChanged;
             oldSection.RemoveAt(oldInnerIndex);
             oldSection.CollectionChanged += Section_CollectionChanged;
-            oldSection.PropertyChanged += Section_PropertyChanged;
+            ((INotifyPropertyChanged)oldSection).PropertyChanged += Section_PropertyChanged;
 
             newSection.CollectionChanged -= Section_CollectionChanged;
-            newSection.PropertyChanged -= Section_PropertyChanged;
+            ((INotifyPropertyChanged)newSection).PropertyChanged -= Section_PropertyChanged;
             newSection.Insert(newInnerIndex, value);
             newSection.CollectionChanged += Section_CollectionChanged;
-            newSection.PropertyChanged += Section_PropertyChanged;
+            ((INotifyPropertyChanged)newSection).PropertyChanged += Section_PropertyChanged;
 
             int newIndex = FlattenIndex(newOuterIndex, newInnerIndex);
-            OnCollectionChanged(
+            CollectionChanged?.Invoke(
+                this,
                 new NotifyCollectionChangedEventArgs(
                     NotifyCollectionChangedAction.Move,
                     value,
                     newIndex,
                     oldIndex));
-            OnPropertyChanged(new PropertyChangedEventArgs(this, nameof(Items)));
         }
 
         private void Section_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
-            if (!(sender is ReadOnlyObservableCollection<T> section))
+            if (!(sender is ObservableCollection<T> section))
             {
                 return;
             }
@@ -184,7 +175,9 @@ namespace MouseJumpSettings
             int newStartingIndex = e.NewStartingIndex + (e.NewStartingIndex < 0 ? 0 : offset);
             int oldStartingIndex = e.OldStartingIndex + (e.OldStartingIndex < 0 ? 0 : offset);
             NotifyCollectionChangedEventArgs newArgs;
-            if (e.NewItems?.Count ?? 0 > 1 || e.NewItems?.Count ?? 0 > 1) {
+            int newCount = e.NewItems?.Count ?? 0;
+            int oldCount = e.OldItems?.Count ?? 0;
+            if (newCount > 1 || oldCount > 1) {
                 newArgs = e.Action switch
                 {
                     NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset
@@ -195,34 +188,38 @@ namespace MouseJumpSettings
                         => new(e.Action, e.OldItems, oldStartingIndex),
                     NotifyCollectionChangedAction.Replace
                         => new(e.Action, e.NewItems, e.OldItems, oldStartingIndex),
+                    _ => throw new ArgumentException($"unknown collection changed action {e.Action}", nameof(e.Action)),
                 };
             }
             else
             {
+                object newItem = newCount == 1 ? e.NewItems[0] : null;
+                object oldItem = oldCount == 1 ? e.OldItems[0] : null;
                 newArgs = e.Action switch
                 {
                     NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset
-                        => new(e.Action, e.NewItems?.FirstOrDefault(), newStartingIndex),
+                        => new(e.Action, newItem, newStartingIndex),
                     NotifyCollectionChangedAction.Move
-                        => new(e.Action, e.OldItems?.FirstOrDefault(), newStartingIndex, oldStartingIndex),
+                        => new(e.Action, oldItem, newStartingIndex, oldStartingIndex),
                     NotifyCollectionChangedAction.Remove
-                        => new(e.Action, e.OldItems?.FirstOrDefault(), oldStartingIndex),
+                        => new(e.Action, oldItem, oldStartingIndex),
                     NotifyCollectionChangedAction.Replace
-                        => new(e.Action, e.NewItems?.FirstOrDefault(), e.OldItems?.FirstOrDefault(), oldStartingIndex),
+                        => new(e.Action, newItem, oldItem, oldStartingIndex),
+                    _ => throw new ArgumentException($"unknown collection changed action {e.Action}", nameof(e.Action)),
                 };
             }
 
             if (newArgs != null)
             {
-                OnCollectionChanged(newArgs);
+                CollectionChanged?.Invoke(this, newArgs);
             }
         }
 
         private void Section_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == nameof(Count) || e.PropertyName == nameof(Items))
+            if (e.PropertyName == nameof(Count))
             {
-                OnPropertyChanged(new PropertyChangedEventArgs(e.PropertyName));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(e.PropertyName));
             }
         }
 

@@ -86,13 +86,15 @@ namespace MouseJumpSettings.Views
             set { }
         }
 
-        public CombinedObservableCollection PossibleInputs => settings.possibleInputs;
-
         public Labels()
         {
             settings = (Application.Current as App).Settings;
             newLists = new();
             this.InitializeComponent();
+            // set Source programmatically because setting it in XAML causes this issue:
+            // https://github.com/mikegoatly/GroupedObservableCollection/issues/1
+            inputsSource.Source = settings.possibleInputs;
+
             outputBox.IsReadOnly = false;
             outputBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, "1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n1\n2\n3\n4\n5\n6\n7\n8\n9\n");
             outputBox.IsReadOnly = true;
@@ -127,7 +129,7 @@ namespace MouseJumpSettings.Views
         }
 
         private LabelList labelListToFocus;
-        private ILabelInput inputToFocus;
+        private LabelList inputToFocus;
 
         public event PropertyChangedEventHandler PropertyChanged;
 

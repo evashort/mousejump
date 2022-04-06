@@ -15,7 +15,7 @@
             </StackPanel>
         </DataTemplate>
         <CollectionViewSource x:Name="labelListSource" IsSourceGrouped="True" Source="{x:Bind LabelListsGrouped, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-        <CollectionViewSource x:Name="inputsSource" Source="{x:Bind PossibleInputs}"/>
+        <CollectionViewSource x:Name="inputsSource"/>
         <local:VisibilityConverter x:Key="VisibilityConverter"/>
     </Page.Resources>
     <Grid VerticalAlignment="Stretch">
@@ -84,8 +84,8 @@
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
-                                    <PathIcon Data="{Binding AsList.IconPath}" Margin="0,0,12,0"/>
-                                    <TextBlock Text="{Binding AsList.Title}"/>
+                                    <PathIcon Data="{Binding IconPath}" Margin="0,0,12,0"/>
+                                    <TextBlock Text="{Binding Title}"/>
                                     <NumberBox Header="Index" Minimum="{Binding MinIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Maximum="0" Value="{Binding Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SpinButtonPlacementMode="Inline" Visibility="{Binding IsInput, Converter={StaticResource VisibilityConverter}}"/>
                                     <!--NumberFormatter="{Binding IndexFormatter}"-->
                                 </StackPanel>

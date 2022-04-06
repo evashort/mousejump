@@ -6,8 +6,6 @@ namespace MouseJumpSettings
 {
     internal class WrapList : NewList
     {
-        public override event PropertyChangedEventHandler PropertyChanged;
-
         public WrapList(Settings settings, string name, LabelOperation operation)
             : base(settings, name, operation)
         { }
